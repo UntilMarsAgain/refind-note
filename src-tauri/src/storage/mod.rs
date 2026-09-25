@@ -1030,7 +1030,7 @@ impl Vault {
         if state.eq_ignore_ascii_case("no-command") {
             let is_command = self
                 .current_markdown(&display)?
-                .map(|markdown| command_of(&markdown).is_some())
+                .map(|markdown| crate::command::command_of(&markdown).is_some())
                 .unwrap_or(false);
 
             // 一般页面：这个状态没有意义 —— 回显时裁掉，当作没写
@@ -1168,10 +1168,10 @@ impl Vault {
         let Some(markdown) = self.current_markdown(title)? else {
             return Ok(None);
         };
-        match command_of(&markdown) {
+        match crate::command::command_of(&markdown) {
             // 不是指令页面：照常阅读
             None => Ok(None),
-            Some(Command::Redirect(target)) if !target.is_empty() => {
+            Some(crate::command::Command::Redirect(target)) if !target.is_empty() => {
                 if hops >= MAX_REDIRECT_HOPS {
                     return Err(VaultError::BadAddress(format!(
                         "重定向超过 {MAX_REDIRECT_HOPS} 跳，可能成环（停在《{title}》）"
@@ -1181,10 +1181,10 @@ impl Vault {
             }
             // 是指令页面，但指令本身有问题 —— **不能当普通页面读**：
             // 那样一条写坏的指令会静静显示成正文，谁也不知道它没生效。
-            Some(Command::Redirect(_)) => Err(VaultError::BadAddress(format!(
+            Some(crate::command::Command::Redirect(_)) => Err(VaultError::BadAddress(format!(
                 "《{title}》的 REDIRECT 没有写目标地址（第二行应写成 REDIRECT: 地址）"
             ))),
-            Some(Command::Unrecognized(line)) => Err(VaultError::BadAddress(match line {
+            Some(crate::command::Command::Unrecognized(line)) => Err(VaultError::BadAddress(match line {
                 Some(line) => format!(
                     "《{title}》的指令认不出来：「{}」；目前只支持 REDIRECT: 地址",
                     line.trim()
@@ -1204,7 +1204,8 @@ impl Vault {
         let mut outcome = self.load_outcome(title)?;
         if let Some(note) = outcome.note.take() {
             let resolver = self.resolver(None);
-            let html = markdown::render_with(&fence_code(&note.markdown), Some(&resolver));
+            let html =
+                markdown::render_with(&markdown::fence_code(&note.markdown), Some(&resolver));
             outcome.note = Some(Note { html, ..note });
         }
         Ok(outcome)
@@ -1761,70 +1762,10 @@ fn strip_prefix_ci<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
 /// 现有的特殊页面。不在这里面的 `special:` 地址直接报「不存在」。
 pub(crate) const SPECIAL_PAGES: [&str; 3] = ["newtab", "settings", "all"];
 
-/// 指令页面的标记：正文**第一行**（忽略末尾空白）等于它，就认为这是一页指令。
-const COMMAND_MARKER: &str = "$$COMMAND$$";
-
-/// 指令页面里唯一实现的指令：`REDIRECT: 内部地址`（写在第 2 行）
-const REDIRECT_PREFIX: &str = "REDIRECT:";
-
 /// 重定向最多跟几跳。超过就报错，而不是让 A→B→A 这类环无限递归。
-const MAX_REDIRECT_HOPS: usize = 8;
-
-/// 一页指令的内容（只有第一行是标记时才算）
-#[derive(Debug, Clone, PartialEq)]
-enum Command {
-    /// `REDIRECT: <内部地址>`
-    Redirect(String),
-    /// 是指令页面，但没认出指令。`None` 表示压根没有第二行。
-    ///
-    /// 带上原文是为了报错时能把"写错的那一行"显示出来 —— 只说"认不出来"没用。
-    Unrecognized(Option<String>),
-}
-
-/// 识别「指令页面」。
 ///
-/// 规则只有一条：**第一行忽略末尾空白后等于 `$$COMMAND$$`**。其余内容都是指令本身。
-/// 返回 `None` 表示这不是指令页面。
-fn command_of(markdown: &str) -> Option<Command> {
-    let mut lines = markdown.lines();
-    if lines.next()?.trim_end() != COMMAND_MARKER {
-        return None;
-    }
-
-    let Some(second) = lines.next() else {
-        return Some(Command::Unrecognized(None));
-    };
-    let second = second.trim_end();
-
-    // 取前 REDIRECT_PREFIX.len() 个**字符**（不是字节）再比较：按字节切中文会 panic，
-    // 而这里恰恰是"用户随便写点什么"的地方。
-    let head_end = second
-        .char_indices()
-        .nth(REDIRECT_PREFIX.len())
-        .map(|(index, _)| index)
-        .unwrap_or(second.len());
-    if !second[..head_end].eq_ignore_ascii_case(REDIRECT_PREFIX) {
-        return Some(Command::Unrecognized(Some(second.to_string())));
-    }
-
-    Some(Command::Redirect(second[head_end..].trim().to_string()))
-}
-
-/// 把一段文本包进代码块。围栏要比正文里最长的一串反引号更长，否则会被提前闭合。
-fn fence_code(text: &str) -> String {
-    let mut longest = 0usize;
-    let mut run = 0usize;
-    for ch in text.chars() {
-        if ch == '`' {
-            run += 1;
-            longest = longest.max(run);
-        } else {
-            run = 0;
-        }
-    }
-    let fence = "`".repeat((longest + 1).max(3));
-    format!("{fence}\n{}\n{fence}\n", text.trim_end())
-}
+/// 这是**仓库的跟跳策略**，不是指令语法 —— 语法在 [`crate::command`]。
+const MAX_REDIRECT_HOPS: usize = 8;
 
 /// 规范地址拼装：`NAME[@STATE][#章节]`。
 ///

@@ -97,8 +97,30 @@ pub fn render_with(markdown: &str, resolver: Option<&LinkResolver>) -> String {
     html
 }
 
+/// 把一段文本包进代码块。围栏要比正文里最长的一串反引号更长，否则会被提前闭合。
+pub fn fence_code(text: &str) -> String {
+    let mut longest = 0usize;
+    let mut run = 0usize;
+    for ch in text.chars() {
+        if ch == '`' {
+            run += 1;
+            longest = longest.max(run);
+        } else {
+            run = 0;
+        }
+    }
+    let fence = "`".repeat((longest + 1).max(3));
+    format!("{fence}\n{}\n{fence}\n", text.trim_end())
+}
+
 #[cfg(test)]
 mod tests {
+    /// 围栏要比正文里最长的一串反引号更长，否则会被提前闭合
+    #[test]
+    fn fence_is_longer_than_the_longest_run() {
+        assert!(super::fence_code("普通正文").starts_with("```\n"));
+        assert!(super::fence_code("里面有 ``` 三个").starts_with("````\n"));
+    }
     use super::*;
 
     #[test]

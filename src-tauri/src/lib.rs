@@ -3,6 +3,7 @@
 //! 命令只是 [`storage`] 的薄包装：存储、版本链、草稿的语义都在那边，前端不接触文件。
 //! Markdown 的一切在 [`markdown`] 模块里，自定义语法在 [`markdown::syntax`]。
 
+mod command;
 mod markdown;
 mod storage;
 mod title;
