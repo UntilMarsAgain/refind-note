@@ -9,6 +9,8 @@ import { basicSetup } from "codemirror";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { markdown } from "@codemirror/lang-markdown";
+import type { DecorationSet, ViewUpdate } from "@codemirror/view";
+import { Decoration, MatchDecorator, ViewPlugin } from "@codemirror/view";
 
 /**
  * 顶用的编辑器：一个纯文本框 + 一排真按钮。
@@ -30,6 +32,35 @@ const props = defineProps<{
   /** 状态行：已保存草稿 / 提交冲突 / 失败原因 */
   status: string;
 }>();
+
+/**
+ * `[[内部链接]]` 的高亮。
+ *
+ * CM6 的 markdown 语法并不认识它（那是本项目的扩展语法），所以在**视图层**加装饰：
+ * 只加样式、不改文档，保存下来的仍然是原文，渲染依旧由后端负责 —— 编辑器不做第二套解析。
+ *
+ * 匹配的是整个 `[[…]]`，所以里面无论写标题、`名称#章节` 还是 `名称@view-xxx`，
+ * 都会被一起标出来（地址的识别本就在这一对方括号里）。
+ */
+const wikilinkMatcher = new MatchDecorator({
+  regexp: /\[\[[^\]\n]+\]\]/g,
+  decoration: Decoration.mark({ class: "cm-wikilink" }),
+});
+
+const wikilinkHighlight = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+
+    constructor(view: EditorView) {
+      this.decorations = wikilinkMatcher.createDeco(view);
+    }
+
+    update(update: ViewUpdate) {
+      this.decorations = wikilinkMatcher.updateDeco(update, this.decorations);
+    }
+  },
+  { decorations: (plugin) => plugin.decorations },
+);
 
 /** CodeMirror 挂载点 */
 const hostEl = ref<HTMLElement | null>(null);
@@ -53,10 +84,23 @@ async function refreshPreview(text: string) {
   }
 }
 
-/** 输入频繁，预览节流一下（180ms）：不必每敲一个字都往返一次后端 */
+/**
+ * 预览**不追着输入跑**：连续 5 秒没有输入才渲染一次。
+ *
+ * 渲染要往返后端（而且是完整 markdown 渲染），逐字触发既费也可能打断思路；
+ * 想看当前内容时按「刷新预览」立刻渲染。
+ */
+const PREVIEW_IDLE_MS = 5000;
+
 function schedulePreview(text: string) {
   window.clearTimeout(previewTimer);
-  previewTimer = window.setTimeout(() => void refreshPreview(text), 180);
+  previewTimer = window.setTimeout(() => void refreshPreview(text), PREVIEW_IDLE_MS);
+}
+
+/** 手动刷新预览（不等静默） */
+function refreshPreviewNow() {
+  window.clearTimeout(previewTimer);
+  void refreshPreview(props.modelValue);
 }
 
 const previewProblem = ref("");
@@ -93,6 +137,7 @@ onMounted(() => {
       extensions: [
         basicSetup,
         markdown(),
+        wikilinkHighlight,
         EditorView.lineWrapping,
         EditorView.updateListener.of((update) => {
           if (!update.docChanged) {
@@ -198,6 +243,15 @@ function submit() {
     </div>
 
     <div class="editor__bar">
+      <button
+        class="editor__preview-btn"
+        type="button"
+        title="不等静默，立刻渲染当前内容"
+        @click="refreshPreviewNow"
+      >
+        刷新预览
+      </button>
+
       <input
         v-model="summary"
         class="editor__summary"
@@ -445,6 +499,36 @@ function submit() {
 /* 预览里不出复制符号与行内代码的手型（它是预览，不是正文） */
 .editor__preview .note-body a[href]::after {
   display: none;
+}
+
+/* 左源码 / 右预览：两栏并排。重申一次，避免被其它规则覆盖成上下排列 */
+.editor__panes {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: stretch;
+  gap: 12px;
+}
+
+/* [[内部链接]] 的高亮（视图层装饰，不改文档） */
+.cm-wikilink {
+  color: var(--accent);
+  border-bottom: 1px dotted var(--accent);
+}
+
+.editor__preview-btn {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.editor__preview-btn:hover {
+  background: var(--hover);
+  color: var(--text);
 }
 
 /* 状态为空时也占住这一行，避免布局上下跳 */
