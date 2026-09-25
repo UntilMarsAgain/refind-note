@@ -18,6 +18,9 @@ use crate::title::{LinkResolver, NamespaceTable, ParsedTitle};
 mod atomic;
 mod api;
 mod config;
+// 增量编解码已就绪并有测试；接线进读写路径是下一步，所以先允许「暂未使用」
+#[allow(dead_code)]
+mod delta;
 mod diff;
 mod error;
 mod event;
