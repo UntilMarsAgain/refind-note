@@ -12,14 +12,22 @@
 /// 指令页面的标记：正文**第一行**（忽略末尾空白）等于它，就认为这是一页指令。
 const COMMAND_MARKER: &str = "$$COMMAND$$";
 
-/// 目前唯一实现的指令前缀：`REDIRECT: 内部地址`（写在第 2 行）
+/// 指令 `REDIRECT: 内部地址`（写在第 2 行）
 const REDIRECT_PREFIX: &str = "REDIRECT:";
+
+/// 指令 `RANDOM_REDIRECT[: 命名空间ID]`；不写参数就是在主命名空间里随机
+const RANDOM_REDIRECT_PREFIX: &str = "RANDOM_REDIRECT";
 
 /// 一页指令的内容（只有第一行是标记时才算）
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     /// `REDIRECT: <内部地址>`
     Redirect(String),
+    /// `RANDOM_REDIRECT[: 命名空间ID]`。`None` = 主命名空间。
+    ///
+    /// 命名空间参数保留成字符串：**合法性由上层判定**（它才知道命名空间表长什么样），
+    /// 解析层只负责把它切出来。
+    RandomRedirect(Option<String>),
     /// 是指令页面，但没认出指令。`None` 表示压根没有第二行。
     ///
     /// 带上原文是为了报错时能把"写错的那一行"显示出来 —— 只说"认不出来"没用。
@@ -38,18 +46,41 @@ pub fn command_of(markdown: &str) -> Option<Command> {
     };
     let second = second.trim_end();
 
-    // 取前 REDIRECT_PREFIX.len() 个**字符**（不是字节）再比较：按字节切中文会 panic，
-    // 而这里恰恰是"用户随便写点什么"的地方（本项目已经因此 abort 过一次）。
-    let head_end = second
-        .char_indices()
-        .nth(REDIRECT_PREFIX.len())
-        .map(|(index, _)| index)
-        .unwrap_or(second.len());
-    if !second[..head_end].eq_ignore_ascii_case(REDIRECT_PREFIX) {
+    if let Some(rest) = strip_prefix_ci(second, REDIRECT_PREFIX) {
+        return Some(Command::Redirect(rest.trim().to_string()));
+    }
+
+    if let Some(rest) = strip_prefix_ci(second, RANDOM_REDIRECT_PREFIX) {
+        let rest = rest.trim_start();
+        if rest.is_empty() {
+            return Some(Command::RandomRedirect(None));
+        }
+        // 前缀后面必须结束或跟冒号：否则 `RANDOM_REDIRECTX` 也会被当成这条指令
+        if let Some(namespace) = rest.strip_prefix(':') {
+            let namespace = namespace.trim();
+            return Some(Command::RandomRedirect(if namespace.is_empty() {
+                None
+            } else {
+                Some(namespace.to_string())
+            }));
+        }
         return Some(Command::Unrecognized(Some(second.to_string())));
     }
 
-    Some(Command::Redirect(second[head_end..].trim().to_string()))
+    Some(Command::Unrecognized(Some(second.to_string())))
+}
+
+/// 大小写不敏感的前缀剥离。
+///
+/// 按**字符**数（不是字节数）取前缀再比较：这里的内容来自用户的正文，按字节切中文
+/// 会 panic（本项目已经因此 abort 过一次）。
+fn strip_prefix_ci<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+    let end = text
+        .char_indices()
+        .nth(prefix.len())
+        .map(|(index, _)| index)
+        .unwrap_or(text.len());
+    text[..end].eq_ignore_ascii_case(prefix).then(|| &text[end..])
 }
 
 #[cfg(test)]
@@ -95,6 +126,32 @@ mod tests {
         assert_eq!(
             command_of("$$COMMAND$$\n重定向到某处\n"),
             Some(Command::Unrecognized(Some("重定向到某处".to_string())))
+        );
+    }
+
+    /// RANDOM_REDIRECT：可带参数、可不带；冒号后空着 = 主命名空间
+    #[test]
+    fn random_redirect_forms() {
+        assert_eq!(
+            command_of("$$COMMAND$$\nRANDOM_REDIRECT\n"),
+            Some(Command::RandomRedirect(None))
+        );
+        assert_eq!(
+            command_of("$$COMMAND$$\nRANDOM_REDIRECT: 3\n"),
+            Some(Command::RandomRedirect(Some("3".to_string())))
+        );
+        assert_eq!(
+            command_of("$$COMMAND$$\nRANDOM_REDIRECT:\n"),
+            Some(Command::RandomRedirect(None))
+        );
+    }
+
+    /// 前缀后面必须结束或跟冒号：`RANDOM_REDIRECTX` 不是这条指令
+    #[test]
+    fn random_redirect_needs_a_boundary() {
+        assert_eq!(
+            command_of("$$COMMAND$$\nRANDOM_REDIRECTX\n"),
+            Some(Command::Unrecognized(Some("RANDOM_REDIRECTX".to_string())))
         );
     }
 

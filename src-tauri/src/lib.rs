@@ -231,7 +231,7 @@ fn note_history(title: String) -> Result<Vec<RevisionSummary>, String> {
 #[tauri::command]
 fn note_revision(title: String, rev: u64) -> Result<RevisionContent, String> {
     open()?
-        .revision(&title, rev)
+        .revision_code_blocked(&title, rev)
         .map_err(|error| error.to_string())
 }
 

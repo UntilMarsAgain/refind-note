@@ -1060,7 +1060,7 @@ impl Vault {
             ("", _) | ("view", None) => {
                 // 指令页面：**只有这一路跟重定向**。@edit / @history / @delete 操作的是
                 // 这一页本身，跟着跳走会让人删错页面。跳数上限在 redirect_target 里把关。
-                if let Some(target) = self.redirect_target(&display, hops)? {
+                if let Some(target) = self.command_target(&display, hops)? {
                     return self.parse_address_at(&target, hops + 1);
                 }
 
@@ -1098,7 +1098,7 @@ impl Vault {
                 // （只裁 view —— rollback 不是默认状态，不能省）。
                 if head == "view" && rev == fold(&events).rev {
                     // 看最新提交等价于"直接看这篇"，所以同样要跟重定向
-                    if let Some(target) = self.redirect_target(&display, hops)? {
+                    if let Some(target) = self.command_target(&display, hops)? {
                         return self.parse_address_at(&target, hops + 1);
                     }
                     return Ok(Address::Note {
@@ -1141,6 +1141,54 @@ impl Vault {
         }
     }
 
+    /// 跳数上限统一把关：会"跟下去"的指令都先过这一关，免得新增指令时漏掉。
+    fn guard_hops(&self, title: &str, hops: usize) -> Result<(), VaultError> {
+        if hops >= MAX_REDIRECT_HOPS {
+            return Err(VaultError::BadAddress(format!(
+                "重定向超过 {MAX_REDIRECT_HOPS} 跳，可能成环（停在《{title}》）"
+            )));
+        }
+        Ok(())
+    }
+
+    /// 在某个命名空间里随机挑一篇笔记的标题。
+    ///
+    /// 会**排除发起随机的那一页自己** —— 否则小仓库里很容易随机到自己，
+    /// 然后一路跟到跳数上限，变成一次莫名其妙的失败。
+    fn random_title(&self, namespace: Option<&str>, from: &str) -> Result<String, VaultError> {
+        let ns: i32 = match namespace.map(str::trim) {
+            None | Some("") => 0,
+            Some(text) => text.parse::<i32>().map_err(|_| {
+                VaultError::BadAddress(format!(
+                    "《{from}》的 RANDOM_REDIRECT 命名空间要写数字 ID，收到「{text}」"
+                ))
+            })?,
+        };
+
+        let mut candidates: Vec<String> = self
+            .walk(&self.notes_dir())?
+            .iter()
+            .filter(|parsed| {
+                parsed.ns == ns && parsed.display(&self.table) != from
+            })
+            .map(|parsed| parsed.display(&self.table))
+            .collect();
+
+        if candidates.is_empty() {
+            return Err(VaultError::BadAddress(format!(
+                "《{from}》随机不到页面：命名空间 {ns} 里没有别的笔记"
+            )));
+        }
+
+        // 随机源用当前时间的纳秒：这里只要"每次不一样"，不需要密码学随机，
+        // 也就不为此引依赖。
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.subsec_nanos() as usize)
+            .unwrap_or(0);
+        Ok(candidates.swap_remove(nanos % candidates.len()))
+    }
+
     /// 读一篇笔记的**当前正文**（不渲染）。不存在或已删除时返回 None。
     fn current_markdown(&self, title: &str) -> Result<Option<String>, VaultError> {
         let (_, path) = self.locate(title)?;
@@ -1160,11 +1208,12 @@ impl Vault {
         Ok(Some(self.content_of(&events, state.rev, 0)?))
     }
 
-    /// 如果这篇笔记是指令页面且写了 `REDIRECT:`，返回目标地址字符串。
+    /// 从一篇笔记的指令里算出**下一个地址**。
     ///
+    /// 返回 `Ok(None)` 表示它根本不是指令页面，照常阅读。
     /// `hops` 是已经跟过的跳数：到上限就报错 —— 成环时给一句能看懂的提示，
     /// 总好过递归到栈溢出。
-    fn redirect_target(&self, title: &str, hops: usize) -> Result<Option<String>, VaultError> {
+    fn command_target(&self, title: &str, hops: usize) -> Result<Option<String>, VaultError> {
         let Some(markdown) = self.current_markdown(title)? else {
             return Ok(None);
         };
@@ -1172,12 +1221,13 @@ impl Vault {
             // 不是指令页面：照常阅读
             None => Ok(None),
             Some(crate::command::Command::Redirect(target)) if !target.is_empty() => {
-                if hops >= MAX_REDIRECT_HOPS {
-                    return Err(VaultError::BadAddress(format!(
-                        "重定向超过 {MAX_REDIRECT_HOPS} 跳，可能成环（停在《{title}》）"
-                    )));
-                }
+                self.guard_hops(title, hops)?;
                 Ok(Some(target))
+            }
+            // 随机跳转：每次解析都重掷 —— 这正是它存在的意义
+            Some(crate::command::Command::RandomRedirect(namespace)) => {
+                self.guard_hops(title, hops)?;
+                Ok(Some(self.random_title(namespace.as_deref(), title)?))
             }
             // 是指令页面，但指令本身有问题 —— **不能当普通页面读**：
             // 那样一条写坏的指令会静静显示成正文，谁也不知道它没生效。
@@ -1186,7 +1236,7 @@ impl Vault {
             ))),
             Some(crate::command::Command::Unrecognized(line)) => Err(VaultError::BadAddress(match line {
                 Some(line) => format!(
-                    "《{title}》的指令认不出来：「{}」；目前只支持 REDIRECT: 地址",
+                    "《{title}》的指令认不出来：「{}」；目前支持 REDIRECT: 地址 与 RANDOM_REDIRECT",
                     line.trim()
                 ),
                 None => format!(
@@ -1209,6 +1259,27 @@ impl Vault {
             outcome.note = Some(Note { html, ..note });
         }
         Ok(outcome)
+    }
+
+    /// 读**某一版**，并按 `@no-command` 的规则处理：
+    ///
+    /// 那一版的正文若是指令页面，就包成代码块再渲染 —— 看旧版等于启用 `@no-command`
+    /// （不执行指令，只让你看当时的原文）。**注意不要在 `revision()` 里做这件事**：
+    /// 差异视图与它共用 `revision()`，包了代码块会把 diff 弄脏。
+    pub fn revision_code_blocked(
+        &self,
+        title: &str,
+        rev: u64,
+    ) -> Result<RevisionContent, VaultError> {
+        let mut content = self.revision(title, rev)?;
+        if crate::command::command_of(&content.markdown).is_some() {
+            let resolver = self.resolver(None);
+            content.html = markdown::render_with(
+                &markdown::fence_code(&content.markdown),
+                Some(&resolver),
+            );
+        }
+        Ok(content)
     }
 
     /// 把「版本引用」解析成版本号。
@@ -2877,6 +2948,120 @@ mod tests {
             Address::Note { address, .. } => assert_eq!(address, "伪装"),
             other => panic!("{other:?}"),
         }
+    }
+
+    /// `@view-<旧版>` 等同于启用 `@no-command`：看旧版时**不执行指令**，只把当时的原文
+    /// 包成代码块显示。一般页面的版本视图不受影响。
+    #[test]
+    fn version_view_of_a_command_page_shows_code() {
+        let temp = TempVault::new();
+        temp.vault.create("目标").unwrap();
+        temp.vault.commit("目标", "正文", None, 0).unwrap();
+        temp.vault.create("指令").unwrap();
+        temp.vault
+            .commit("指令", "$$COMMAND$$\nREDIRECT: 目标\n", None, 0)
+            .unwrap();
+
+        // 直接看：跟重定向
+        match temp.vault.parse_address("指令").unwrap() {
+            Address::Note { title, .. } => assert_eq!(title, "目标"),
+            other => panic!("{other:?}"),
+        }
+
+        // 看这一版：不跟，包成代码块；markdown 保持原文
+        let content = temp.vault.revision_code_blocked("指令", 1).unwrap();
+        assert!(content.html.contains("<pre"), "{}", content.html);
+        assert_eq!(content.markdown, "$$COMMAND$$\nREDIRECT: 目标\n");
+
+        // 一般页面的版本视图不该被包成代码块
+        let plain = temp.vault.revision_code_blocked("目标", 1).unwrap();
+        assert!(!plain.html.contains("<pre"), "{}", plain.html);
+    }
+
+    /// RANDOM_REDIRECT：在命名空间里随机挑一篇，并**排除自己**
+    #[test]
+    fn random_redirect_picks_another_page() {
+        let temp = TempVault::new();
+        temp.vault.create("唯一候选").unwrap();
+        temp.vault.commit("唯一候选", "正文", None, 0).unwrap();
+        temp.vault.create("掷骰子").unwrap();
+        temp.vault
+            .commit("掷骰子", "$$COMMAND$$\nRANDOM_REDIRECT\n", None, 0)
+            .unwrap();
+
+        // 候选只有一篇，所以结果必然确定（顺带证明"排除自己"生效：
+        // 否则可能随机到自己，一路跟到跳数上限）
+        match temp.vault.parse_address("掷骰子").unwrap() {
+            Address::Note { title, .. } => assert_eq!(title, "唯一候选"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// 命名空间参数：写 ID 与"冒号后空着"都合法（空 = 主命名空间）
+    #[test]
+    fn random_redirect_accepts_namespace_argument() {
+        let with_id = TempVault::new();
+        with_id.vault.create("候选").unwrap();
+        with_id.vault.commit("候选", "正文", None, 0).unwrap();
+        with_id.vault.create("带ID").unwrap();
+        with_id
+            .vault
+            .commit("带ID", "$$COMMAND$$\nRANDOM_REDIRECT: 0\n", None, 0)
+            .unwrap();
+        match with_id.vault.parse_address("带ID").unwrap() {
+            Address::Note { title, .. } => assert_eq!(title, "候选"),
+            other => panic!("{other:?}"),
+        }
+
+        let empty_arg = TempVault::new();
+        empty_arg.vault.create("候选").unwrap();
+        empty_arg.vault.commit("候选", "正文", None, 0).unwrap();
+        empty_arg.vault.create("空参数").unwrap();
+        empty_arg
+            .vault
+            .commit("空参数", "$$COMMAND$$\nRANDOM_REDIRECT: \n", None, 0)
+            .unwrap();
+        match empty_arg.vault.parse_address("空参数").unwrap() {
+            Address::Note { title, .. } => assert_eq!(title, "候选"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// RANDOM_REDIRECT 的三种失败都要说清楚
+    #[test]
+    fn random_redirect_errors_are_clear() {
+        // 唯一一页就是它自己 → 排除自己后没有候选
+        let lonely = TempVault::new();
+        lonely.vault.create("孤零零").unwrap();
+        lonely
+            .vault
+            .commit("孤零零", "$$COMMAND$$\nRANDOM_REDIRECT\n", None, 0)
+            .unwrap();
+        let error = lonely.vault.parse_address("孤零零").unwrap_err();
+        assert!(error.to_string().contains("随机不到"), "{error}");
+
+        // 命名空间 ID 不是数字
+        let bad = TempVault::new();
+        bad.vault.create("候选").unwrap();
+        bad.vault.commit("候选", "正文", None, 0).unwrap();
+        bad.vault.create("写错参数").unwrap();
+        bad.vault
+            .commit("写错参数", "$$COMMAND$$\nRANDOM_REDIRECT: 主\n", None, 0)
+            .unwrap();
+        let error = bad.vault.parse_address("写错参数").unwrap_err();
+        assert!(error.to_string().contains("数字"), "{error}");
+
+        // 命名空间里没有笔记
+        let empty_ns = TempVault::new();
+        empty_ns.vault.create("候选").unwrap();
+        empty_ns.vault.commit("候选", "正文", None, 0).unwrap();
+        empty_ns.vault.create("别的空间").unwrap();
+        empty_ns
+            .vault
+            .commit("别的空间", "$$COMMAND$$\nRANDOM_REDIRECT: 7\n", None, 0)
+            .unwrap();
+        let error = empty_ns.vault.parse_address("别的空间").unwrap_err();
+        assert!(error.to_string().contains("随机不到"), "{error}");
     }
 
     #[test]
