@@ -15,6 +15,14 @@ interface Settings {
   capital_links: boolean;
   max_title_bytes: number;
   delta_chain_limit: number;
+  /** 回收站保留天数（自动清理用） */
+  trash_keep_days: number;
+  /** 自动回收的间隔天数 */
+  gc_interval_days: number;
+  /** 上次清理回收站的时间（只读） */
+  last_trash_purge: string;
+  /** 上次回收的时间（只读） */
+  last_gc: string;
   theme: string;
   accent: string;
   reading_width: number;
@@ -42,6 +50,8 @@ const SECTION_IDS = [
   "reading-width",
   "zoom",
   "delta-chain-limit",
+  "trash-keep-days",
+  "gc-interval-days",
 ];
 
 /** 地址里带了哪个 id，就把哪一项高亮出来 */
@@ -249,6 +259,50 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
     <p class="settings__hint">
       改动链长于这个值时，下一版改存整份快照，避免读取时逐条回放增量。
       调大更省空间、读取更慢；调小读取更快、更占空间。默认 32。
+    </p>
+
+    <div
+      id="trash-keep-days"
+      class="row"
+      :class="{ 'row--target': isFocused('trash-keep-days') }"
+    >
+      <span class="row__label">回收站保留</span>
+      <code class="row__id">#trash-keep-days</code>
+      <input
+        class="num"
+        type="number"
+        min="1"
+        max="3650"
+        :value="settings.trash_keep_days"
+        @change="submitNumber('trashKeepDays', $event, 1, 3650)"
+      />
+      <span class="row__unit">天</span>
+    </div>
+
+    <div
+      id="gc-interval-days"
+      class="row"
+      :class="{ 'row--target': isFocused('gc-interval-days') }"
+    >
+      <span class="row__label">自动回收间隔</span>
+      <code class="row__id">#gc-interval-days</code>
+      <input
+        class="num"
+        type="number"
+        min="1"
+        max="3650"
+        :value="settings.gc_interval_days"
+        @change="submitNumber('gcIntervalDays', $event, 1, 3650)"
+      />
+      <span class="row__unit">天</span>
+    </div>
+    <p class="settings__hint">
+      回收站里超过保留期的条目会在启动时自动清理；自动回收按同样的方式判定：
+      只看距上次执行过去了多少天，间隔之内什么都不做。下限都是 1 天。
+    </p>
+    <p class="settings__hint">
+      上次清理回收站：{{ settings.last_trash_purge || "从未" }}<br />
+      上次回收：{{ settings.last_gc || "从未" }}
     </p>
   </section>
 </template>

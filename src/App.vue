@@ -70,6 +70,14 @@ interface VaultSettings {
   reading_width: number;
   /** 界面缩放（1.0 = 100%），Ctrl + 滚轮调整 */
   zoom: number;
+  /** 回收站保留天数（自动清理用） */
+  trash_keep_days: number;
+  /** 自动回收的间隔天数 */
+  gc_interval_days: number;
+  /** 上次清理回收站的时间（只读） */
+  last_trash_purge: string;
+  /** 上次回收的时间（只读） */
+  last_gc: string;
 }
 
 /** 站点名：顶栏菜单顶上那一行（纯显示，不参与地址） */
@@ -597,6 +605,8 @@ onMounted(async () => {
     const settings = await invoke<VaultSettings>("get_settings");
     vaultSettings.value = settings;
     applyAppearance();
+    // 到点了就清回收站 / 回收内容块；判定由后端按"上次执行时间"做
+    void runMaintenanceOnce();
     vaultRoot.value = settings.root;
   } catch (error) {
     console.debug("读取仓库设置失败:", error);
@@ -717,6 +727,32 @@ async function onMenu() {
     specialPages.value = await invoke<string[]>("special_pages");
   } catch {
     specialPages.value = [];
+  }
+}
+
+/**
+ * 自动维护只跑一次（应用启动后）。
+ *
+ * 间隔判定在后端（用上次执行时间比），这里只负责"启动时问一次"。
+ * 跑过什么不弹提示，但**不是静默的**：回收站页面会显示保留期与上次清理时间，
+ * 设置页也显示两个上次执行时间 —— 自动删数据这件事必须能被查到。
+ */
+let maintenanceRequested = false;
+
+async function runMaintenanceOnce() {
+  if (maintenanceRequested) {
+    return;
+  }
+  maintenanceRequested = true;
+  try {
+    const report = await invoke<{
+      purged: { removed: number } | null;
+      gc: { removed_blobs: number } | null;
+    }>("run_maintenance");
+    console.debug("自动维护完成:", report);
+  } catch (error) {
+    // 维护失败不该拦住用户用应用：记下来即可
+    console.debug("自动维护失败:", error);
   }
 }
 
@@ -1358,7 +1394,12 @@ function onAction(name: string) {
         @update="updateSettings"
       />
       <GcPage v-else-if="mode === 'special' && specialPage === 'gc'" />
-      <TrashPage v-else-if="mode === 'special' && specialPage === 'trash'" />
+      <TrashPage
+        v-else-if="mode === 'special' && specialPage === 'trash'"
+        :keep-days="vaultSettings?.trash_keep_days ?? 30"
+        :last-purge="vaultSettings?.last_trash_purge ?? ''"
+        @open="openFromList"
+      />
 
           <!-- 编辑中：不显示页头，操作都在编辑器自己那一行里 -->
           <NoteEditor

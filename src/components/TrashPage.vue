@@ -2,59 +2,50 @@
 /**
  * 回收站（`special:trash`）。
  *
- * 列出删过的笔记，并提供"清理 30 天前的"。
+ * 列出删过的笔记，每条可以**还原**或**立即清除**。
+ * 超过保留期的条目由启动时的自动维护清掉（天数在设置里改），这一页只显示策略与上次清理时间。
  *
- * 两点刻意如此：
- * - **不做自动清理**：删数据是破坏性操作，应该有明确的触发者（写清策略、给按钮，而不是
- *   悄悄在后台删）；
- * - **如实说明还不能恢复**：这一页只做"看 + 清"，把"能做什么、不能做什么"讲明白，
- *   避免用户以为点了就有救。
+ * 三点刻意如此：
+ * - **不做自动清理之外的后台删除**：自动那部分有明确的策略与可查的执行时间；
+ * - **立即清除不顺手回收内容块**：那件事交给「数据库回收」页（下面链过去），由用户决定；
+ * - 如实说明能做什么、不能做什么。
  */
-import { computed, onMounted, ref } from "vue";
+import { onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 
 interface TrashEntry {
   title: string;
   deleted_at: string;
   bytes: number;
-  /** `null` = 删除时间读不出来（会列出，但不参与清理） */
+  /** `null` = 删除时间读不出来（会列出，但不参与自动清理） */
   days_old: number | null;
 }
 
-interface GcReport {
-  removed_blobs: number;
-  freed_bytes: number;
-  removed_drafts: number;
-}
+const props = defineProps<{
+  /** 保留天数（来自设置，用于说明策略与标记"可清理"） */
+  keepDays: number;
+  /** 上次自动清理的时间（空 = 从未） */
+  lastPurge: string;
+}>();
 
-interface PurgeReport {
-  removed: number;
-  freed_bytes: number;
-  blobs: GcReport;
-}
-
-/** 保留天数：超过它的条目才允许被清理 */
-const KEEP_DAYS = 30;
+const emit = defineEmits<{
+  (e: "open", address: string): void;
+}>();
 
 const entries = ref<TrashEntry[]>([]);
 const loading = ref(true);
-const busy = ref(false);
 const error = ref("");
-const report = ref<PurgeReport | null>(null);
+/** 正在处理哪一条（阻止连点，也让用户看到在处理谁） */
+const busyTitle = ref("");
 
 /**
- * 有多少条已经到可清理的年纪。
+ * 是否已到可清理的年纪。
  *
- * 删除时间读不出来的条目不参与 —— 后端也不会删它们，两边的判断必须一致，
- * 否则按钮上写着 3 条、结果只清了 2 条。
+ * 删除时间读不出来的条目不参与 —— 后端也不会清它们，两边的判断必须一致，
+ * 否则会出现"标记了可清理、自动清理却没动它"。
  */
-const expired = computed(
-  () => entries.value.filter((item) => item.days_old !== null && item.days_old >= KEEP_DAYS),
-);
-
-/** 能否清理这一条（与后端同一套判断） */
 function isExpired(item: TrashEntry): boolean {
-  return item.days_old !== null && item.days_old >= KEEP_DAYS;
+  return item.days_old !== null && item.days_old >= props.keepDays;
 }
 
 function formatBytes(bytes: number): string {
@@ -69,7 +60,7 @@ function formatBytes(bytes: number): string {
 
 function formatTime(value: string): string {
   if (!value) {
-    return "（时间未知）";
+    return "从未";
   }
   const at = new Date(value);
   return Number.isNaN(at.getTime()) ? value : at.toLocaleString();
@@ -87,20 +78,25 @@ async function refresh() {
   }
 }
 
-async function purge() {
-  busy.value = true;
+async function run(title: string, action: () => Promise<unknown>) {
+  busyTitle.value = title;
   error.value = "";
-  report.value = null;
   try {
-    report.value = await invoke<PurgeReport>("purge_trash", {
-      olderThanDays: KEEP_DAYS,
-    });
+    await action();
     await refresh();
   } catch (reason) {
     error.value = String(reason);
   } finally {
-    busy.value = false;
+    busyTitle.value = "";
   }
+}
+
+function restore(item: TrashEntry) {
+  return run(item.title, () => invoke("restore_note", { title: item.title }));
+}
+
+function purgeOne(item: TrashEntry) {
+  return run(item.title, () => invoke("purge_trash_entry", { title: item.title }));
 }
 
 onMounted(refresh);
@@ -110,8 +106,8 @@ onMounted(refresh);
   <section class="trash">
     <h1 class="trash__title">回收站</h1>
     <p class="trash__lead">
-      删过的笔记都在这里，历史一条没丢。<strong>这里还没有恢复功能</strong>，
-      只能查看与清理；要取回内容可以直接去 <code>~/.refind-note/trash/</code> 里找那个文件。
+      删过的笔记都在这里，<strong>历史一条没丢</strong>，可以随时还原。
+      超过 {{ keepDays }} 天的条目会在启动时自动清理（天数可在设置里改）。
     </p>
 
     <p v-if="error" class="trash__error">{{ error }}</p>
@@ -122,47 +118,56 @@ onMounted(refresh);
 
       <ul v-else class="trash__list">
         <li v-for="item in entries" :key="item.title" class="trash__item">
-          <span class="trash__name">{{ item.title }}</span>
-          <span class="trash__meta">
-            {{ formatTime(item.deleted_at) }}
-            <template v-if="item.days_old !== null"> · 已 {{ item.days_old }} 天</template>
-            · {{ formatBytes(item.bytes) }}
-          </span>
+          <div class="trash__info">
+            <span class="trash__name">{{ item.title }}</span>
+            <span class="trash__meta">
+              {{ formatTime(item.deleted_at) }}
+              <template v-if="item.days_old !== null"> · 已 {{ item.days_old }} 天</template>
+              · {{ formatBytes(item.bytes) }}
+            </span>
+          </div>
+
           <span v-if="isExpired(item)" class="trash__badge">可清理</span>
           <span v-else-if="item.days_old === null" class="trash__badge trash__badge--dim">
-            时间未知，不清理
+            时间未知，不自动清
           </span>
+
+          <div class="trash__item-actions">
+            <button
+              class="trash__btn"
+              type="button"
+              :disabled="busyTitle === item.title"
+              @click="restore(item)"
+            >
+              还原
+            </button>
+            <button
+              class="trash__btn trash__btn--danger"
+              type="button"
+              :disabled="busyTitle === item.title"
+              @click="purgeOne(item)"
+            >
+              立即清除
+            </button>
+          </div>
         </li>
       </ul>
 
-      <div v-if="entries.length > 0" class="trash__actions">
-        <button
-          class="trash__purge"
-          type="button"
-          :disabled="busy || expired.length === 0"
-          @click="purge"
-        >
-          {{ busy ? "正在清理…" : `清理 ${KEEP_DAYS} 天前的（${expired.length} 条）` }}
+      <p class="trash__footer">
+        上次自动清理：{{ formatTime(lastPurge) }}
+        <span class="trash__sep">|</span>
+        立即清除只删这一条，空间要在这里回收：
+        <button class="trash__link" type="button" @click="emit('open', 'special:gc')">
+          去数据库回收 →
         </button>
-        <span class="trash__warn">清理会删除这些文件，无法撤销。</span>
-      </div>
-
-      <div v-if="report" class="trash__report">
-        <p class="trash__report-row">
-          清掉 {{ report.removed }} 条，释放 {{ formatBytes(report.freed_bytes) }}
-        </p>
-        <p class="trash__report-row">
-          顺带回收内容块 {{ report.blobs.removed_blobs }} 个，释放
-          {{ formatBytes(report.blobs.freed_bytes) }}
-        </p>
-      </div>
+      </p>
     </template>
   </section>
 </template>
 
 <style scoped>
 .trash {
-  max-width: 720px;
+  max-width: 760px;
   margin: 0 auto;
   padding: 28px 20px 64px;
 }
@@ -179,13 +184,6 @@ onMounted(refresh);
   line-height: 1.7;
 }
 
-.trash__lead code {
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: var(--code-bg);
-  font-size: 12px;
-}
-
 .trash__list {
   margin: 0;
   padding: 0;
@@ -194,15 +192,26 @@ onMounted(refresh);
 
 .trash__item {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 9px 0;
+  gap: 10px;
+  padding: 10px 0;
   border-bottom: 1px solid var(--border);
+}
+
+.trash__info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .trash__name {
   font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .trash__meta {
@@ -210,11 +219,8 @@ onMounted(refresh);
   font-size: 12px;
 }
 
-.trash__badge--dim {
-  color: var(--text-dim);
-}
-
 .trash__badge {
+  flex-shrink: 0;
   padding: 0 6px;
   border-radius: 9px;
   background: var(--code-bg);
@@ -222,36 +228,61 @@ onMounted(refresh);
   font-size: 11px;
 }
 
-.trash__actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 18px;
+.trash__badge--dim {
+  color: var(--text-dim);
 }
 
-.trash__purge {
-  padding: 6px 14px;
+.trash__item-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+
+.trash__btn {
+  padding: 4px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background-color: transparent;
   color: var(--text);
-  font-size: 13px;
+  font-size: 12px;
   cursor: pointer;
 }
 
-.trash__purge:hover:not(:disabled) {
+.trash__btn:hover:not(:disabled) {
   background-color: var(--hover);
 }
 
-.trash__purge:disabled {
+.trash__btn--danger {
+  color: var(--link-missing);
+}
+
+.trash__btn:disabled {
   opacity: 0.45;
   cursor: default;
 }
 
-.trash__warn {
+.trash__footer {
+  margin: 18px 0 0;
   color: var(--text-dim);
   font-size: 12px;
+  line-height: 1.9;
+}
+
+.trash__sep {
+  margin: 0 8px;
+}
+
+.trash__link {
+  padding: 0;
+  border: 0;
+  background-color: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.trash__link:hover {
+  text-decoration: underline;
 }
 
 .trash__hint {
@@ -261,19 +292,6 @@ onMounted(refresh);
 
 .trash__error {
   color: var(--link-missing);
-  font-size: 13px;
-}
-
-.trash__report {
-  margin-top: 16px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
-}
-
-.trash__report-row {
-  margin: 2px 0;
   font-size: 13px;
 }
 </style>
