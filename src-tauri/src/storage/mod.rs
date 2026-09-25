@@ -1168,21 +1168,32 @@ impl Vault {
         let Some(markdown) = self.current_markdown(title)? else {
             return Ok(None);
         };
-        let Some(Command::Redirect(target)) = command_of(&markdown) else {
-            return Ok(None);
-        };
-
-        if target.is_empty() {
-            return Err(VaultError::BadAddress(format!(
-                "《{title}》的 REDIRECT 没有写目标地址"
-            )));
+        match command_of(&markdown) {
+            // 不是指令页面：照常阅读
+            None => Ok(None),
+            Some(Command::Redirect(target)) if !target.is_empty() => {
+                if hops >= MAX_REDIRECT_HOPS {
+                    return Err(VaultError::BadAddress(format!(
+                        "重定向超过 {MAX_REDIRECT_HOPS} 跳，可能成环（停在《{title}》）"
+                    )));
+                }
+                Ok(Some(target))
+            }
+            // 是指令页面，但指令本身有问题 —— **不能当普通页面读**：
+            // 那样一条写坏的指令会静静显示成正文，谁也不知道它没生效。
+            Some(Command::Redirect(_)) => Err(VaultError::BadAddress(format!(
+                "《{title}》的 REDIRECT 没有写目标地址（第二行应写成 REDIRECT: 地址）"
+            ))),
+            Some(Command::Unrecognized(line)) => Err(VaultError::BadAddress(match line {
+                Some(line) => format!(
+                    "《{title}》的指令认不出来：「{}」；目前只支持 REDIRECT: 地址",
+                    line.trim()
+                ),
+                None => format!(
+                    "《{title}》是指令页面，但没写指令（第二行应写成 REDIRECT: 地址）"
+                ),
+            })),
         }
-        if hops >= MAX_REDIRECT_HOPS {
-            return Err(VaultError::BadAddress(format!(
-                "重定向超过 {MAX_REDIRECT_HOPS} 跳，可能成环（停在《{title}》）"
-            )));
-        }
-        Ok(Some(target))
     }
 
     /// 按 `@no-command` 读一篇指令页面：正文**包成一个代码块**再渲染。
@@ -1764,8 +1775,10 @@ const MAX_REDIRECT_HOPS: usize = 8;
 enum Command {
     /// `REDIRECT: <内部地址>`
     Redirect(String),
-    /// 是指令页面，但没有认出指令（或第 2 行不是 REDIRECT）
-    Other,
+    /// 是指令页面，但没认出指令。`None` 表示压根没有第二行。
+    ///
+    /// 带上原文是为了报错时能把"写错的那一行"显示出来 —— 只说"认不出来"没用。
+    Unrecognized(Option<String>),
 }
 
 /// 识别「指令页面」。
@@ -1779,7 +1792,7 @@ fn command_of(markdown: &str) -> Option<Command> {
     }
 
     let Some(second) = lines.next() else {
-        return Some(Command::Other);
+        return Some(Command::Unrecognized(None));
     };
     let second = second.trim_end();
 
@@ -1791,7 +1804,7 @@ fn command_of(markdown: &str) -> Option<Command> {
         .map(|(index, _)| index)
         .unwrap_or(second.len());
     if !second[..head_end].eq_ignore_ascii_case(REDIRECT_PREFIX) {
-        return Some(Command::Other);
+        return Some(Command::Unrecognized(Some(second.to_string())));
     }
 
     Some(Command::Redirect(second[head_end..].trim().to_string()))
@@ -2840,22 +2853,37 @@ mod tests {
         assert_eq!(note.markdown, "$$COMMAND$$   \nREDIRECT: 目标\n");
     }
 
-    /// 指令页面没有重定向（或指令认不出来）时：当普通页面读，不报错
+    /// 指令页面认不出指令时**必须报错**，不能当普通页面读 ——
+    /// 否则一条写坏的指令会静静显示成正文，谁也不知道它没生效。
     #[test]
-    fn command_page_without_redirect_is_read_normally() {
+    fn unrecognized_command_is_an_error() {
         let temp = TempVault::new();
+
+        // 只有标记、没有第二行
         temp.vault.create("空指令").unwrap();
         temp.vault
             .commit("空指令", "$$COMMAND$$\n", None, 0)
             .unwrap();
+        let error = temp.vault.parse_address("空指令").unwrap_err();
+        assert!(error.to_string().contains("没写指令"), "{error}");
 
-        match temp.vault.parse_address("空指令").unwrap() {
-            Address::Note {
-                address, code_block, ..
-            } => {
-                assert_eq!(address, "空指令");
-                assert!(!code_block);
-            }
+        // 有第二行，但不是 REDIRECT
+        temp.vault.create("写错了").unwrap();
+        temp.vault
+            .commit("写错了", "$$COMMAND$$\nREDIRECTX: 目标\n", None, 0)
+            .unwrap();
+        let error = temp.vault.parse_address("写错了").unwrap_err();
+        let text = error.to_string();
+        assert!(text.contains("认不出来"), "{text}");
+        assert!(text.contains("REDIRECTX"), "报错要带出写坏的那一行：{text}");
+
+        // 逃生口：两者都能用 @no-command 进去看和改
+        match temp.vault.parse_address("空指令@no-command").unwrap() {
+            Address::Note { code_block, .. } => assert!(code_block),
+            other => panic!("{other:?}"),
+        }
+        match temp.vault.parse_address("写错了@no-command").unwrap() {
+            Address::Note { code_block, .. } => assert!(code_block),
             other => panic!("{other:?}"),
         }
     }
