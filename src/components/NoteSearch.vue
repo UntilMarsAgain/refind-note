@@ -13,8 +13,6 @@ import { Search } from "@lucide/vue";
 interface NoteSummary {
   key: string;
   title: string;
-  rev: number;
-  modified: string;
 }
 
 const props = defineProps<{

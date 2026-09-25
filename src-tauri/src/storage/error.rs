@@ -17,6 +17,8 @@ pub enum VaultError {
     Deleted(String),
     /// 要看的版本号在历史里不存在
     RevisionNotFound { title: String, rev: u64 },
+    /// 改名时目标标题已经被别的笔记占用
+    NameTaken(String),
 }
 
 impl std::fmt::Display for VaultError {
@@ -33,6 +35,7 @@ impl std::fmt::Display for VaultError {
             ),
             Self::Deleted(t) => write!(f, "《{t}》已被删除"),
             Self::RevisionNotFound { title, rev } => write!(f, "《{title}》没有版本 {rev}"),
+            Self::NameTaken(t) => write!(f, "《{t}》已经存在，换一个名字"),
         }
     }
 }

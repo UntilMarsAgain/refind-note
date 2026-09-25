@@ -8,10 +8,10 @@ use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct NoteSummary {
+    /// 规范键，形如 `0:平陆运河`
     pub key: String,
+    /// 显示标题
     pub title: String,
-    pub rev: u64,
-    pub modified: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

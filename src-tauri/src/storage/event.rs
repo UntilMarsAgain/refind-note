@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 use super::DEFAULT_MIME;
-use crate::title::{NamespaceTable, ParsedTitle};
 
 // ---------------------------------------------------------------- 事件
 
@@ -72,6 +71,7 @@ pub struct NoteState {
     /// 当前提交版本；0 表示还没提交过
     pub rev: u64,
     pub blob: Option<String>,
+    pub bytes: u64,
     pub mime: String,
     pub at: String,
     pub deleted: bool,
@@ -86,20 +86,6 @@ pub struct DraftState {
     pub blob: String,
     pub at: String,
     pub on: u64,
-}
-
-impl NoteState {
-    pub fn key(&self) -> String {
-        format!("{}:{}", self.ns, self.title)
-    }
-
-    pub fn display(&self, table: &NamespaceTable) -> String {
-        ParsedTitle {
-            ns: self.ns,
-            title: self.title.clone(),
-        }
-        .display(table)
-    }
 }
 
 /// 把日志折叠成当前状态。**重放**就是走一遍这个函数。
@@ -121,6 +107,7 @@ pub fn fold(events: &[Event]) -> NoteState {
                 at,
                 rev,
                 blob,
+                bytes,
                 mime,
                 supersedes,
                 ns,
@@ -129,6 +116,7 @@ pub fn fold(events: &[Event]) -> NoteState {
             } => {
                 state.rev = *rev;
                 state.blob = Some(blob.clone());
+                state.bytes = *bytes;
                 state.mime = mime.clone();
                 state.at = at.clone();
                 state.deleted = false;
@@ -142,7 +130,10 @@ pub fn fold(events: &[Event]) -> NoteState {
                 // 一次提交就结束了此前那一串草稿
                 pending_draft = None;
             }
-            Event::Auto { at, blob, on, .. } => {
+            Event::Auto {
+                at, bytes, blob, on, ..
+            } => {
+                state.bytes = *bytes;
                 pending_draft = Some(DraftState {
                     blob: blob.clone(),
                     at: at.clone(),
@@ -159,6 +150,17 @@ pub fn fold(events: &[Event]) -> NoteState {
 
     state.draft = pending_draft;
     state
+}
+
+/// 挂在某个提交上的全部草稿版本号（一次提交/改名会取代它们）
+pub fn drafts_of(events: &[Event], on_rev: u64) -> Vec<u64> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            Event::Auto { rev, on, .. } if *on == on_rev => Some(*rev),
+            _ => None,
+        })
+        .collect()
 }
 
 pub fn next_rev(events: &[Event]) -> u64 {

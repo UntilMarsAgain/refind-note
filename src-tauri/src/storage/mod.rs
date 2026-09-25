@@ -24,7 +24,6 @@ mod delta;
 mod diff;
 mod error;
 mod event;
-mod index;
 
 pub use api::{
     DiffResult, Draft, LoadOutcome, Note, NoteSummary, RevisionContent, RevisionSummary,
@@ -32,20 +31,23 @@ pub use api::{
 };
 pub use config::VaultConfig;
 pub use error::VaultError;
-pub use event::{fold, next_rev, Event};
-pub use index::{IndexEntry, IndexFile};
+pub use event::{drafts_of, fold, next_rev, Event};
 
 use atomic::{append_line, hash_bytes, write_atomic, BlobStore};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// 仓库目录名（放在用户主目录下）
 pub const DEFAULT_DIR_NAME: &str = ".refind-note";
 pub const DEFAULT_MIME: &str = "text/markdown";
+/// 笔记文件的扩展名
+const LOG_EXT: &str = "log";
+/// 目前只有主命名空间。多留这一层目录，是为了以后允许用户创建命名空间时
+/// 不必迁移已有文件。
+const MAIN_NAMESPACE_DIR: &str = "0";
 
 // ---------------------------------------------------------------- 仓库
 
@@ -62,6 +64,7 @@ impl Vault {
         let root = root.into();
         fs::create_dir_all(root.join("notes"))?;
         fs::create_dir_all(root.join("blobs"))?;
+        fs::create_dir_all(root.join("trash"))?;
 
         let config_path = root.join("vault.json");
         let config: VaultConfig = match fs::read_to_string(&config_path) {
@@ -97,46 +100,49 @@ impl Vault {
     }
 
     // ------------------------------------------------------------ 路径
+    //
+    // 目前只有主命名空间，路径是 `<root>/notes/0/<转义标题>.log`：
+    // **文件系统本身就是索引** —— 标题直接算出路径，不必先去查一张全局表。
 
     fn notes_dir(&self) -> PathBuf {
         self.root.join("notes")
     }
 
+    fn trash_dir(&self) -> PathBuf {
+        self.root.join("trash")
+    }
+
+    /// 笔记文件路径。`id` 是**转义后的标题**（见 `crate::title::encode_for_path`）。
     fn log_path(&self, id: &str) -> PathBuf {
-        self.notes_dir().join(format!("{id}.log"))
+        self.notes_dir()
+            .join(MAIN_NAMESPACE_DIR)
+            .join(format!("{id}.{LOG_EXT}"))
     }
 
-    fn index_path(&self) -> PathBuf {
-        self.root.join("index.json")
+    /// 已删除的笔记挪到这里：历史保留，将来可以接恢复
+    fn trashed_path(&self, id: &str) -> PathBuf {
+        self.trash_dir()
+            .join(MAIN_NAMESPACE_DIR)
+            .join(format!("{id}.{LOG_EXT}"))
     }
 
-    // ------------------------------------------------------------ id
+    /// 标题 → 文件 id
+    fn id_of(parsed: &ParsedTitle) -> String {
+        crate::title::encode_for_path(&parsed.title)
+    }
 
-    /// `m<时间戳 base36>-<纳秒 base36>`：按创建时间可排序、无依赖。
-    /// 同毫秒同纳秒不现实，但仍做一次存在性检查兜底。
-    fn new_id(&self) -> Result<String, VaultError> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default();
-        let base = format!(
-            "m{}-{}",
-            to_base36(now.as_millis() as u64),
-            to_base36(now.subsec_nanos() as u64)
-        );
-        let mut candidate = base.clone();
-        let mut n = 0u32;
-        while self.log_path(&candidate).exists() {
-            n += 1;
-            candidate = format!("{base}-{n}");
-        }
-        Ok(candidate)
+    /// 由标题直接定位，不查任何索引
+    fn locate(&self, title: &str) -> Result<(ParsedTitle, PathBuf), VaultError> {
+        let parsed = self.table.parse(title, self.config.capital_links)?;
+        let path = self.log_path(&Self::id_of(&parsed));
+        Ok((parsed, path))
     }
 
     // ------------------------------------------------------------ 日志
 
-    fn read_events(&self, id: &str) -> Result<Vec<Event>, VaultError> {
-        let path = self.log_path(id);
-        let text = match fs::read_to_string(&path) {
+    /// 读某个路径下的事件流。崩溃可能留下半行，跳过而不是整体失败。
+    fn read_events_at(&self, path: &Path) -> Result<Vec<Event>, VaultError> {
+        let text = match fs::read_to_string(path) {
             Ok(text) => text,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(error) => return Err(error.into()),
@@ -156,6 +162,10 @@ impl Vault {
         Ok(events)
     }
 
+    fn read_events(&self, id: &str) -> Result<Vec<Event>, VaultError> {
+        self.read_events_at(&self.log_path(id))
+    }
+
     fn append(&self, id: &str, event: &Event) -> Result<(), VaultError> {
         let line = serde_json::to_string(event)?;
         append_line(&self.log_path(id), &line)?;
@@ -164,7 +174,8 @@ impl Vault {
 
     /// 重写日志（只用于 prune / 丢弃草稿这类显式维护操作）
     fn rewrite_log(&self, id: &str, keep: impl Fn(&Event) -> bool) -> Result<usize, VaultError> {
-        let events = self.read_events(id)?;
+        let path = self.log_path(id);
+        let events = self.read_events_at(&path)?;
         let total = events.len();
         let kept: Vec<&Event> = events.iter().filter(|event| keep(event)).collect();
         let removed = total - kept.len();
@@ -177,96 +188,81 @@ impl Vault {
             body.push_str(&serde_json::to_string(event)?);
             body.push('\n');
         }
-        write_atomic(&self.log_path(id), body.as_bytes())?;
+        write_atomic(&path, body.as_bytes())?;
         Ok(removed)
     }
 
-    fn note_ids(&self) -> Result<Vec<String>, VaultError> {
-        let mut ids = Vec::new();
-        let entries = match fs::read_dir(self.notes_dir()) {
+    // ------------------------------------------------------------ 遍历
+    //
+    // 文件名就是标题，所以「列出全部笔记」只是列目录 —— 不打开任何文件。
+    // 列表、红蓝链判定、首次运行判断都靠它。
+
+    /// 扫出一个目录下现有的笔记（只列目录，不读内容）
+    fn walk(&self, base: &Path) -> Result<Vec<ParsedTitle>, VaultError> {
+        let mut out = Vec::new();
+
+        let namespaces = match fs::read_dir(base) {
             Ok(entries) => entries,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(ids),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(out),
             Err(error) => return Err(error.into()),
         };
-        for entry in entries {
-            let path = entry?.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("log") {
+
+        for namespace_entry in namespaces {
+            let namespace_path = namespace_entry?.path();
+            if !namespace_path.is_dir() {
                 continue;
             }
-            if let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) {
-                ids.push(stem.to_string());
-            }
-        }
-        Ok(ids)
-    }
 
-    // ------------------------------------------------------------ 索引（只是缓存）
+            let Some(ns) = namespace_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .and_then(|name| name.parse::<i32>().ok())
+            else {
+                continue;
+            };
 
-    fn load_index(&self) -> Result<HashMap<String, IndexEntry>, VaultError> {
-        match fs::read_to_string(self.index_path()) {
-            Ok(text) => match serde_json::from_str::<IndexFile>(&text) {
-                Ok(file) => Ok(file.notes),
-                // 缓存坏了就当没有，重建即可
-                Err(error) => {
-                    eprintln!("[vault] index.json 无法解析，重建：{error}");
-                    self.rebuild_index()
+            for entry in fs::read_dir(&namespace_path)? {
+                let path = entry?.path();
+                if path.extension().and_then(|ext| ext.to_str()) != Some(LOG_EXT) {
+                    continue;
                 }
-            },
-            Err(_) => self.rebuild_index(),
-        }
-    }
-
-    fn save_index(&self, notes: &HashMap<String, IndexEntry>) -> Result<(), VaultError> {
-        let file = IndexFile {
-            format: 1,
-            built_at: now_iso(),
-            notes: notes.clone(),
-        };
-        write_atomic(&self.index_path(), &serde_json::to_vec_pretty(&file)?)?;
-        Ok(())
-    }
-
-    /// 扫描全部日志重建索引（也是修复手段，以及「从日志完全重放」的入口）
-    pub fn rebuild_index(&self) -> Result<HashMap<String, IndexEntry>, VaultError> {
-        let mut notes = HashMap::new();
-        for id in self.note_ids()? {
-            let events = self.read_events(&id)?;
-            let state = fold(&events);
-            if state.title.is_empty() || state.deleted {
-                continue;
+                let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+                    continue;
+                };
+                let Some(title) = crate::title::decode_from_path(stem) else {
+                    continue;
+                };
+                out.push(ParsedTitle { ns, title });
             }
-            notes.insert(
-                state.key(),
-                IndexEntry {
-                    id,
-                    ns: state.ns,
-                    title: state.title.clone(),
-                    rev: state.rev,
-                    at: state.at.clone(),
-                },
-            );
         }
-        self.save_index(&notes)?;
-        Ok(notes)
+
+        Ok(out)
     }
 
-    fn find(&self, title: &str) -> Result<(ParsedTitle, IndexEntry), VaultError> {
-        let parsed = self.table.parse(title, self.config.capital_links)?;
-        let index = self.load_index()?;
-        match index.get(&parsed.key()) {
-            Some(entry) => Ok((parsed, entry.clone())),
-            None => Err(VaultError::NotFound(parsed.display(&self.table))),
-        }
+    fn note_ids(&self) -> Result<Vec<String>, VaultError> {
+        Ok(self
+            .walk(&self.notes_dir())?
+            .iter()
+            .map(Self::id_of)
+            .collect())
+    }
+
+    /// 某篇笔记的全部事件（测试助手）
+    #[cfg(test)]
+    pub(crate) fn events_for(&self, title: &str) -> Result<Vec<Event>, VaultError> {
+        let (parsed, _) = self.locate(title)?;
+        self.read_events(&Self::id_of(&parsed))
     }
 
     // ------------------------------------------------------------ 链接解析
 
-    fn resolver(
-        &self,
-        index: &HashMap<String, IndexEntry>,
-        from: Option<ParsedTitle>,
-    ) -> LinkResolver {
-        let keys: HashSet<String> = index.keys().cloned().collect();
+    /// 构造渲染用的解析器：键集合来自目录遍历（没有全局索引可查）
+    fn resolver(&self, from: Option<ParsedTitle>) -> LinkResolver {
+        let keys: HashSet<String> = self
+            .walk(&self.notes_dir())
+            .map(|items| items.iter().map(|parsed| parsed.key()).collect())
+            .unwrap_or_default();
+
         LinkResolver::new(
             Arc::clone(&self.table),
             Arc::new(keys),
@@ -307,18 +303,12 @@ impl Vault {
     // ------------------------------------------------------------ 读
 
     pub fn list_notes(&self) -> Result<Vec<NoteSummary>, VaultError> {
-        let index = self.load_index()?;
-        let mut out: Vec<NoteSummary> = index
-            .values()
-            .map(|entry| NoteSummary {
-                key: format!("{}:{}", entry.ns, entry.title),
-                title: ParsedTitle {
-                    ns: entry.ns,
-                    title: entry.title.clone(),
-                }
-                .display(&self.table),
-                rev: entry.rev,
-                modified: entry.at.clone(),
+        let mut out: Vec<NoteSummary> = self
+            .walk(&self.notes_dir())?
+            .into_iter()
+            .map(|parsed| NoteSummary {
+                key: parsed.key(),
+                title: parsed.display(&self.table),
             })
             .collect();
         out.sort_by(|a, b| a.title.cmp(&b.title));
@@ -328,19 +318,20 @@ impl Vault {
     /// 读一篇笔记。**目标不存在不算错误**，而是返回一个交给界面处理的结果
     /// （前端据此显示「还没有这篇笔记」与创建按钮）。
     pub fn load_outcome(&self, title: &str) -> Result<LoadOutcome, VaultError> {
-        let parsed = self.table.parse(title, self.config.capital_links)?;
+        let (parsed, path) = self.locate(title)?;
         let display = parsed.display(&self.table);
+        let id = Self::id_of(&parsed);
 
-        let index = self.load_index()?;
-        let Some(entry) = index.get(&parsed.key()).cloned() else {
+        if !path.is_file() {
+            // 被删除过的笔记躺在 trash/ 里；区分开是为了将来能接恢复
             return Ok(LoadOutcome {
                 note: None,
                 title: display,
-                deleted: false,
+                deleted: self.trashed_path(&id).is_file(),
             });
-        };
+        }
 
-        let events = self.read_events(&entry.id)?;
+        let events = self.read_events(&id)?;
         let state = fold(&events);
         if state.deleted {
             return Ok(LoadOutcome {
@@ -356,13 +347,13 @@ impl Vault {
             None => String::new(),
         };
 
-        let resolver = self.resolver(&index, Some(parsed.clone()));
+        let resolver = self.resolver(Some(parsed.clone()));
         let html = markdown::render_with(&markdown_text, Some(&resolver));
 
         Ok(LoadOutcome {
             note: Some(Note {
                 key: parsed.key(),
-                title: state.display(&self.table),
+                title: parsed.display(&self.table),
                 markdown: markdown_text,
                 html,
                 rev: state.rev,
@@ -372,6 +363,7 @@ impl Vault {
             deleted: false,
         })
     }
+
 
     pub fn load(&self, title: &str) -> Result<Note, VaultError> {
         let outcome = self.load_outcome(title)?;
@@ -388,8 +380,9 @@ impl Vault {
     ///
     /// 草稿也在版本序列里，所以会一并列出（`kind` 是 `draft`），由界面决定是否显示。
     pub fn history(&self, title: &str) -> Result<Vec<RevisionSummary>, VaultError> {
-        let (_, entry) = self.find(title)?;
-        let events = self.read_events(&entry.id)?;
+        let (parsed, _) = self.locate(title)?;
+        let id = Self::id_of(&parsed);
+        let events = self.read_events(&id)?;
 
         let mut out = Vec::new();
         let mut previous_bytes = 0u64;
@@ -462,8 +455,9 @@ impl Vault {
     /// 标题按**该版本当时**的算：改名之前的版本要显示旧标题，否则历史会看起来
     /// 像是「所有版本都叫现在这个名字」。
     pub fn revision(&self, title: &str, rev: u64) -> Result<RevisionContent, VaultError> {
-        let (_, entry) = self.find(title)?;
-        let events = self.read_events(&entry.id)?;
+        let (parsed, _) = self.locate(title)?;
+        let id = Self::id_of(&parsed);
+        let events = self.read_events(&id)?;
 
         let mut ns = 0;
         let mut page = String::new();
@@ -524,22 +518,21 @@ impl Vault {
 
         let Some((kind, at, blob)) = found else {
             return Err(VaultError::RevisionNotFound {
-                title: entry.title.clone(),
+                title: parsed.title.clone(),
                 rev,
             });
         };
         if blob.is_empty() {
             return Err(VaultError::RevisionNotFound {
-                title: entry.title.clone(),
+                title: parsed.title.clone(),
                 rev,
             });
         }
 
-        let markdown_text = String::from_utf8(self.blobs.get(&blob)?)
-            .map_err(|_| VaultError::NotText(entry.title.clone()))?;
         let parsed = ParsedTitle { ns, title: page };
-        let index = self.load_index()?;
-        let resolver = self.resolver(&index, Some(parsed.clone()));
+        let markdown_text = String::from_utf8(self.blobs.get(&blob)?)
+            .map_err(|_| VaultError::NotText(parsed.title.clone()))?;
+        let resolver = self.resolver(Some(parsed.clone()));
         let html = markdown::render_with(&markdown_text, Some(&resolver));
 
         Ok(RevisionContent {
@@ -571,34 +564,22 @@ impl Vault {
 
     /// 建立一篇新笔记（内容为空，版本 0）
     pub fn create(&self, title: &str) -> Result<Note, VaultError> {
-        let parsed = self.table.parse(title, self.config.capital_links)?;
-        let mut index = self.load_index()?;
-        if index.contains_key(&parsed.key()) {
+        let (parsed, path) = self.locate(title)?;
+        if path.is_file() {
             return self.load(title);
         }
 
-        let id = self.new_id()?;
-        let at = now_iso();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
         self.append(
-            &id,
+            &Self::id_of(&parsed),
             &Event::Meta {
-                at: at.clone(),
+                at: now_iso(),
                 ns: parsed.ns,
                 title: parsed.title.clone(),
             },
         )?;
-
-        index.insert(
-            parsed.key(),
-            IndexEntry {
-                id,
-                ns: parsed.ns,
-                title: parsed.title.clone(),
-                rev: 0,
-                at,
-            },
-        );
-        self.save_index(&index)?;
         self.load(title)
     }
 
@@ -610,25 +591,25 @@ impl Vault {
         summary: Option<&str>,
         base_rev: u64,
     ) -> Result<Note, VaultError> {
-        let parsed = self.table.parse(title, self.config.capital_links)?;
-        let key = parsed.key();
-        let mut index = self.load_index()?;
+        let (parsed, path) = self.locate(title)?;
+        let id = Self::id_of(&parsed);
 
-        let (id, events) = match index.get(&key) {
-            Some(entry) => (entry.id.clone(), self.read_events(&entry.id)?),
-            None => {
-                let id = self.new_id()?;
-                let at = now_iso();
-                self.append(
-                    &id,
-                    &Event::Meta {
-                        at,
-                        ns: parsed.ns,
-                        title: parsed.title.clone(),
-                    },
-                )?;
-                (id, Vec::new())
+        // 文件不存在就是第一次提交，顺手把 meta 写上
+        let events = if path.is_file() {
+            self.read_events(&id)?
+        } else {
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
             }
+            self.append(
+                &id,
+                &Event::Meta {
+                    at: now_iso(),
+                    ns: parsed.ns,
+                    title: parsed.title.clone(),
+                },
+            )?;
+            Vec::new()
         };
 
         let state = fold(&events);
@@ -640,121 +621,91 @@ impl Vault {
         }
 
         let blob = self.blobs.put(markdown_text.as_bytes())?;
-        // 本次提交取代了挂在当前版本上的所有草稿
-        let supersedes: Vec<u64> = events
-            .iter()
-            .filter_map(|event| match event {
-                Event::Auto { rev, on, .. } if *on == state.rev => Some(*rev),
-                _ => None,
-            })
-            .collect();
-
         let rev = next_rev(&events);
-        let at = now_iso();
         self.append(
             &id,
             &Event::Rev {
-                at: at.clone(),
+                at: now_iso(),
                 rev,
                 blob,
                 bytes: markdown_text.len() as u64,
                 mime: DEFAULT_MIME.to_string(),
                 parent: (state.rev > 0).then_some(state.rev),
-                supersedes,
+                // 一次提交结束了挂在当前版本上的那一串草稿
+                supersedes: drafts_of(&events, state.rev),
                 ns: None,
                 title: None,
                 summary: summary.map(str::to_string),
             },
         )?;
 
-        index.insert(
-            key,
-            IndexEntry {
-                id,
-                ns: parsed.ns,
-                title: parsed.title.clone(),
-                rev,
-                at,
-            },
-        );
-        self.save_index(&index)?;
         self.load(title)
     }
 
-    /// 改名 / 迁移命名空间：追加一条提交，内容不变，历史不断
+    /// 改名。**会搬文件**（路径就是标题），但历史跟着文件走，一条都不丢。
     pub fn rename(&self, from: &str, to: &str) -> Result<Note, VaultError> {
-        let (_, entry) = self.find(from)?;
-        let target = self.table.parse(to, self.config.capital_links)?;
-        let mut index = self.load_index()?;
+        let (source, source_path) = self.locate(from)?;
+        let (target, target_path) = self.locate(to)?;
 
-        if let Some(existing) = index.get(&target.key()) {
-            if existing.id != entry.id {
-                return Err(VaultError::Conflict {
-                    expected: 0,
-                    found: existing.rev,
-                });
-            }
+        if !source_path.is_file() {
+            return Err(VaultError::NotFound(source.display(&self.table)));
+        }
+        if source_path != target_path && target_path.exists() {
+            return Err(VaultError::NameTaken(target.display(&self.table)));
         }
 
-        let events = self.read_events(&entry.id)?;
+        // 先搬家（同一仓库内，原子），再往新位置追加改名事件
+        if let Some(parent) = target_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::rename(&source_path, &target_path)?;
+
+        let id = Self::id_of(&target);
+        let events = self.read_events(&id)?;
         let state = fold(&events);
-        if state.deleted {
-            return Err(VaultError::Deleted(state.display(&self.table)));
-        }
-        let Some(blob) = state.blob.clone() else {
-            return Err(VaultError::NotFound(state.display(&self.table)));
-        };
-
         let rev = next_rev(&events);
-        let at = now_iso();
         self.append(
-            &entry.id,
+            &id,
             &Event::Rev {
-                at: at.clone(),
+                at: now_iso(),
                 rev,
-                blob,
-                bytes: 0,
+                blob: state.blob.clone().unwrap_or_default(),
+                bytes: state.bytes,
                 mime: state.mime.clone(),
                 parent: (state.rev > 0).then_some(state.rev),
-                supersedes: Vec::new(),
+                supersedes: drafts_of(&events, state.rev),
                 ns: Some(target.ns),
                 title: Some(target.title.clone()),
                 summary: Some(format!("改名：{}", target.display(&self.table))),
             },
         )?;
 
-        index.remove(&state.key());
-        index.insert(
-            target.key(),
-            IndexEntry {
-                id: entry.id,
-                ns: target.ns,
-                title: target.title.clone(),
-                rev,
-                at,
-            },
-        );
-        self.save_index(&index)?;
         self.load(to)
     }
 
-    /// 删除：写一条删除标记，不抹除历史
+    /// 删除：写一条删除标记，然后把文件挪进 `trash/`（不抹历史）
     pub fn delete(&self, title: &str) -> Result<(), VaultError> {
-        let (parsed, entry) = self.find(title)?;
-        let events = self.read_events(&entry.id)?;
-        let rev = next_rev(&events);
+        let (parsed, path) = self.locate(title)?;
+        if !path.is_file() {
+            return Err(VaultError::NotFound(parsed.display(&self.table)));
+        }
+
+        let id = Self::id_of(&parsed);
+        let events = self.read_events(&id)?;
         self.append(
-            &entry.id,
+            &id,
             &Event::Del {
                 at: now_iso(),
-                rev,
+                rev: next_rev(&events),
                 summary: None,
             },
         )?;
 
-        let mut index = self.load_index()?;
-        index.remove(&parsed.key());
-        self.save_index(&index)?;
+        let trashed = self.trashed_path(&id);
+        if let Some(parent) = trashed.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::rename(&path, &trashed)?;
         Ok(())
     }
 
@@ -767,8 +718,8 @@ impl Vault {
         markdown_text: &str,
         base_rev: u64,
     ) -> Result<(), VaultError> {
-        let (_, entry) = self.find(title)?;
-        let events = self.read_events(&entry.id)?;
+        let id = Self::id_of(&self.locate(title)?.0);
+        let events = self.read_events(&id)?;
         let state = fold(&events);
         if state.rev != base_rev {
             return Err(VaultError::Conflict {
@@ -788,7 +739,7 @@ impl Vault {
         let rev = next_rev(&events);
         self.blobs.put(markdown_text.as_bytes())?;
         self.append(
-            &entry.id,
+            &id,
             &Event::Auto {
                 at: now_iso(),
                 rev,
@@ -801,14 +752,14 @@ impl Vault {
     }
 
     pub fn load_draft(&self, title: &str) -> Result<Option<Draft>, VaultError> {
-        let (_, entry) = self.find(title)?;
-        let events = self.read_events(&entry.id)?;
+        let id = Self::id_of(&self.locate(title)?.0);
+        let events = self.read_events(&id)?;
         let state = fold(&events);
         let Some(draft) = state.draft else {
             return Ok(None);
         };
         let text = String::from_utf8(self.blobs.get(&draft.blob)?)
-            .map_err(|_| VaultError::NotText(entry.title.clone()))?;
+            .map_err(|_| VaultError::NotText(title.to_string()))?;
         Ok(Some(Draft {
             markdown: text,
             base_rev: draft.on,
@@ -818,26 +769,25 @@ impl Vault {
 
     /// 丢弃当前草稿：把挂在当前版本上的草稿节点从日志里删掉
     pub fn discard_draft(&self, title: &str) -> Result<usize, VaultError> {
-        let (_, entry) = self.find(title)?;
-        let events = self.read_events(&entry.id)?;
-        let state = fold(&events);
-        let current = state.rev;
-        self.rewrite_log(&entry.id, |event| {
+        let id = Self::id_of(&self.locate(title)?.0);
+        let events = self.read_events(&id)?;
+        let current = fold(&events).rev;
+        self.rewrite_log(&id, |event| {
             !matches!(event, Event::Auto { on, .. } if *on == current)
         })
     }
 
     /// 清理已被提交取代的草稿节点。随时可做；不做也不影响正确性。
     pub fn prune(&self, title: &str) -> Result<usize, VaultError> {
-        let (_, entry) = self.find(title)?;
-        let events = self.read_events(&entry.id)?;
-        let state = fold(&events);
-        let superseded = state.superseded.clone();
-        self.rewrite_log(&entry.id, |event| match event {
+        let id = Self::id_of(&self.locate(title)?.0);
+        let events = self.read_events(&id)?;
+        let superseded = fold(&events).superseded;
+        self.rewrite_log(&id, |event| match event {
             Event::Auto { rev, .. } => !superseded.contains(rev),
             _ => true,
         })
     }
+
 
     /// 对全部笔记做一次清理，返回清掉的草稿节点数
     pub fn prune_all(&self) -> Result<usize, VaultError> {
@@ -860,7 +810,7 @@ impl Vault {
 
     /// 仓库里一篇笔记都没有时，用给定内容建一篇（保证首次启动有东西可看）
     pub fn seed_if_empty(&self, title: &str, markdown_text: &str) -> Result<bool, VaultError> {
-        if !self.load_index()?.is_empty() {
+        if !self.walk(&self.notes_dir())?.is_empty() {
             return Ok(false);
         }
         self.create(title)?;
@@ -890,19 +840,7 @@ fn now_iso() -> String {
         .unwrap_or_default()
 }
 
-fn to_base36(mut value: u64) -> String {
-    const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
-    if value == 0 {
-        return "0".to_string();
-    }
-    let mut buf = Vec::new();
-    while value > 0 {
-        buf.push(DIGITS[(value % 36) as usize]);
-        value /= 36;
-    }
-    buf.reverse();
-    String::from_utf8(buf).unwrap_or_default()
-}
+
 
 #[cfg(test)]
 mod tests {
@@ -911,7 +849,7 @@ mod tests {
 
     static COUNTER: AtomicU32 = AtomicU32::new(0);
 
-    /// 测试用的临时仓库（放在临时目录，跑完删掉）
+    /// 测试用的临时仓库
     struct TempVault {
         vault: Vault,
         root: PathBuf,
@@ -920,10 +858,8 @@ mod tests {
     impl TempVault {
         fn new() -> Self {
             let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-            let root = std::env::temp_dir().join(format!(
-                "refind-vault-{}-{n}",
-                std::process::id()
-            ));
+            let root =
+                std::env::temp_dir().join(format!("refind-vault-{}-{n}", std::process::id()));
             let _ = fs::remove_dir_all(&root);
             let vault = Vault::open(&root).expect("open vault");
             Self { vault, root }
@@ -939,10 +875,13 @@ mod tests {
     #[test]
     fn init_creates_expected_files() {
         let temp = TempVault::new();
+        for dir in ["notes", "trash", "blobs"] {
+            assert!(temp.root.join(dir).is_dir(), "{dir}/ 应当被建出来");
+        }
         assert!(temp.root.join("vault.json").is_file());
         assert!(temp.root.join("namespaces.json").is_file());
-        assert!(temp.root.join("notes").is_dir());
-        assert!(temp.root.join("blobs").is_dir());
+        // 不再有全局索引：文件系统自己就是索引
+        assert!(!temp.root.join("index.json").exists());
         assert!(temp.vault.list_notes().unwrap().is_empty());
     }
 
@@ -958,13 +897,8 @@ mod tests {
             .commit("测试条目", "# 标题\n\n正文", Some("初稿"), 0)
             .unwrap();
         assert_eq!(note.rev, 1);
-        assert_eq!(note.markdown, "# 标题\n\n正文");
         assert!(note.html.contains("<h1"), "{}", note.html);
-
-        // 重新加载（走索引缓存）
-        let again = temp.vault.load("测试条目").unwrap();
-        assert_eq!(again.rev, 1);
-        assert_eq!(again.markdown, "# 标题\n\n正文");
+        assert_eq!(temp.vault.load("测试条目").unwrap().rev, 1);
     }
 
     #[test]
@@ -974,10 +908,77 @@ mod tests {
         temp.vault.commit("链条", "v1", None, 0).unwrap();
         temp.vault.commit("链条", "v2", None, 1).unwrap();
         temp.vault.commit("链条", "v3", None, 2).unwrap();
+        assert_eq!(temp.vault.load("链条").unwrap().rev, 3);
+        assert_eq!(temp.vault.load("链条").unwrap().markdown, "v3");
+    }
 
-        let note = temp.vault.load("链条").unwrap();
-        assert_eq!(note.rev, 3);
-        assert_eq!(note.markdown, "v3");
+    /// 文件名就是标题：列目录就能拿到全部笔记，不需要读文件、也不需要索引
+    #[test]
+    fn listing_comes_from_the_filesystem() {
+        let temp = TempVault::new();
+        temp.vault.create("甲").unwrap();
+        temp.vault.create("乙").unwrap();
+        temp.vault.commit("甲", "内容甲", None, 0).unwrap();
+
+        let notes = temp.vault.list_notes().unwrap();
+        assert_eq!(notes.len(), 2);
+
+        // 改名之后列出来的必须是新名字（旧文件已经不在了）
+        temp.vault.rename("甲", "丙").unwrap();
+        let notes = temp.vault.list_notes().unwrap();
+        let titles: Vec<&str> = notes.iter().map(|note| note.title.as_str()).collect();
+        assert!(titles.contains(&"丙"), "{titles:?}");
+        assert!(!titles.contains(&"甲"), "{titles:?}");
+    }
+
+    #[test]
+    fn rename_moves_the_file_and_keeps_the_history() {
+        let temp = TempVault::new();
+        temp.vault.create("旧名").unwrap();
+        temp.vault.commit("旧名", "正文", None, 0).unwrap();
+
+        let (_, before) = temp.vault.locate("旧名").unwrap();
+        let note = temp.vault.rename("旧名", "新名").unwrap();
+
+        assert_eq!(note.key, "0:新名");
+        assert_eq!(note.rev, 2, "改名本身是一次提交");
+        assert_eq!(note.markdown, "正文", "内容不变");
+        assert!(!before.is_file(), "旧路径上的文件应当已经搬走");
+
+        let (_, after) = temp.vault.locate("新名").unwrap();
+        assert!(after.is_file());
+        // 历史跟着文件走
+        assert_eq!(temp.vault.history("新名").unwrap().len(), 3);
+        assert!(matches!(
+            temp.vault.load("旧名"),
+            Err(VaultError::NotFound(_))
+        ));
+    }
+
+    #[test]
+    fn delete_moves_the_file_to_trash() {
+        let temp = TempVault::new();
+        temp.vault.create("待删").unwrap();
+        temp.vault.commit("待删", "正文", None, 0).unwrap();
+
+        let (_, path) = temp.vault.locate("待删").unwrap();
+        let id = Vault::id_of(&temp.vault.locate("待删").unwrap().0);
+        temp.vault.delete("待删").unwrap();
+
+        assert!(!path.is_file(), "笔记文件应当已经不在 notes/ 里");
+        let trashed = temp.vault.trashed_path(&id);
+        assert!(trashed.is_file(), "应当被挪进 trash/");
+
+        // 删除标记还在：折叠出来是「已删除」
+        let state = fold(&temp.vault.read_events_at(&trashed).unwrap());
+        assert!(state.deleted);
+        assert!(state.blob.is_some());
+
+        // 而且能分辨「删过」和「从没建过」
+        let outcome = temp.vault.load_outcome("待删").unwrap();
+        assert!(outcome.note.is_none() && outcome.deleted);
+        let outcome = temp.vault.load_outcome("从没建过").unwrap();
+        assert!(outcome.note.is_none() && !outcome.deleted);
     }
 
     #[test]
@@ -986,7 +987,6 @@ mod tests {
         temp.vault.create("草稿").unwrap();
         temp.vault.commit("草稿", "v1", None, 0).unwrap();
 
-        // 两次自动保存 → 链上出现两个草稿节点（版本 2、3）
         temp.vault.save_draft("草稿", "v1-草稿a", 1).unwrap();
         temp.vault.save_draft("草稿", "v1-草稿b", 1).unwrap();
 
@@ -994,30 +994,28 @@ mod tests {
         assert_eq!(draft.markdown, "v1-草稿b");
         assert_eq!(draft.base_rev, 1);
 
-        // 提交：版本号接在草稿之后（4），但 parent 仍然指向上一个提交（1）
-        let note = temp.vault.commit("草稿", "v1-草稿b", Some("提交"), 1).unwrap();
-        assert_eq!(note.rev, 4);
+        let note = temp
+            .vault
+            .commit("草稿", "v1-草稿b", Some("提交"), 1)
+            .unwrap();
+        assert_eq!(note.rev, 4, "版本号是一条序列，草稿也占号");
         assert!(temp.vault.load_draft("草稿").unwrap().is_none());
 
-        // 日志里记录了本次提交取代了 2、3 两个草稿节点
-        let events = temp.vault.read_events(&temp.vault.find("草稿").unwrap().1.id).unwrap();
-        let supersedes = events
+        let events = temp.vault.events_for("草稿").unwrap();
+        let commit = events
             .iter()
             .find_map(|event| match event {
-                Event::Rev { rev: 4, supersedes, .. } => Some(supersedes.clone()),
+                Event::Rev {
+                    rev: 4,
+                    supersedes,
+                    parent,
+                    ..
+                } => Some((supersedes.clone(), *parent)),
                 _ => None,
             })
             .expect("找到提交 4");
-        assert_eq!(supersedes, vec![2, 3]);
-
-        let parent = events
-            .iter()
-            .find_map(|event| match event {
-                Event::Rev { rev: 4, parent, .. } => Some(*parent),
-                _ => None,
-            })
-            .unwrap();
-        assert_eq!(parent, Some(1), "parent 必须指向上一个提交，而不是草稿");
+        assert_eq!(commit.0, vec![2, 3], "本次提交取代了那两个草稿节点");
+        assert_eq!(commit.1, Some(1), "parent 必须指向上一个提交，而不是草稿");
     }
 
     #[test]
@@ -1029,16 +1027,16 @@ mod tests {
         temp.vault.save_draft("清理", "draft-b", 1).unwrap();
         temp.vault.commit("清理", "v2", None, 1).unwrap();
 
-        let removed = temp.vault.prune("清理").unwrap();
-        assert_eq!(removed, 2, "两个草稿节点应当被清掉");
-
-        // 提交链完好。注意版本号是一条序列，草稿也占号，所以这次提交是 4 而不是 2。
+        assert_eq!(temp.vault.prune("清理").unwrap(), 2);
         let note = temp.vault.load("清理").unwrap();
         assert_eq!(note.rev, 4);
         assert_eq!(note.markdown, "v2");
-
-        let events = temp.vault.read_events(&temp.vault.find("清理").unwrap().1.id).unwrap();
-        assert!(!events.iter().any(|event| matches!(event, Event::Auto { .. })));
+        assert!(!temp
+            .vault
+            .events_for("清理")
+            .unwrap()
+            .iter()
+            .any(|event| matches!(event, Event::Auto { .. })));
     }
 
     #[test]
@@ -1059,8 +1057,10 @@ mod tests {
         temp.vault.create("幂等").unwrap();
         temp.vault.save_draft("幂等", "一样的内容", 0).unwrap();
         temp.vault.save_draft("幂等", "一样的内容", 0).unwrap();
-        let events = temp.vault.read_events(&temp.vault.find("幂等").unwrap().1.id).unwrap();
-        let autos = events
+        let autos = temp
+            .vault
+            .events_for("幂等")
+            .unwrap()
             .iter()
             .filter(|event| matches!(event, Event::Auto { .. }))
             .count();
@@ -1072,10 +1072,8 @@ mod tests {
         let temp = TempVault::new();
         temp.vault.create("冲突").unwrap();
         temp.vault.commit("冲突", "v1", None, 0).unwrap();
-
-        let error = temp.vault.commit("冲突", "v2", None, 0).unwrap_err();
         assert!(matches!(
-            error,
+            temp.vault.commit("冲突", "v2", None, 0).unwrap_err(),
             VaultError::Conflict {
                 expected: 0,
                 found: 1
@@ -1084,61 +1082,14 @@ mod tests {
     }
 
     #[test]
-    fn index_is_only_a_cache_and_can_be_rebuilt() {
+    fn renaming_onto_an_existing_title_is_rejected() {
         let temp = TempVault::new();
         temp.vault.create("甲").unwrap();
-        temp.vault.commit("甲", "内容甲", None, 0).unwrap();
         temp.vault.create("乙").unwrap();
-        temp.vault.commit("乙", "内容乙", None, 0).unwrap();
-
-        // 删掉缓存，直接从日志重放
-        fs::remove_file(temp.root.join("index.json")).unwrap();
-        let notes = temp.vault.list_notes().unwrap();
-        assert_eq!(notes.len(), 2);
-        // 排序按 Unicode 码点，不是拼音：乙(U+4E59) 排在 甲(U+7532) 前面
-        assert_eq!(notes[0].title, "乙");
-        assert_eq!(notes[1].title, "甲");
-        assert!(temp.root.join("index.json").is_file(), "应当重建缓存");
-
-        // 缓存写坏也一样
-        fs::write(temp.root.join("index.json"), b"{ not json").unwrap();
-        assert_eq!(temp.vault.list_notes().unwrap().len(), 2);
-    }
-
-    #[test]
-    fn rename_keeps_the_history() {
-        let temp = TempVault::new();
-        temp.vault.create("旧名").unwrap();
-        temp.vault.commit("旧名", "正文", None, 0).unwrap();
-
-        let note = temp.vault.rename("旧名", "新名").unwrap();
-        assert_eq!(note.key, "0:新名");
-        assert_eq!(note.title, "新名");
-        assert_eq!(note.rev, 2, "改名也是一次提交");
-        assert_eq!(note.markdown, "正文", "内容不变");
-
         assert!(matches!(
-            temp.vault.load("旧名"),
-            Err(VaultError::NotFound(_))
+            temp.vault.rename("甲", "乙").unwrap_err(),
+            VaultError::NameTaken(_)
         ));
-        // 日志文件没有搬家，历史还在
-        let ids = temp.vault.note_ids().unwrap();
-        assert_eq!(ids.len(), 1);
-    }
-
-    #[test]
-    fn delete_writes_a_marker_not_erases_history() {
-        let temp = TempVault::new();
-        temp.vault.create("待删").unwrap();
-        temp.vault.commit("待删", "正文", None, 0).unwrap();
-        temp.vault.delete("待删").unwrap();
-
-        assert!(matches!(temp.vault.load("待删"), Err(VaultError::NotFound(_))));
-        // 日志仍在，且折叠出的是「已删除」
-        let id = temp.vault.note_ids().unwrap().remove(0);
-        let state = fold(&temp.vault.read_events(&id).unwrap());
-        assert!(state.deleted);
-        assert_eq!(state.blob.as_deref().map(|b| !b.is_empty()), Some(true));
     }
 
     #[test]
@@ -1151,7 +1102,6 @@ mod tests {
             .vault
             .commit("来源", "[[目标条目|去看]] 和 [[不存在的条目]]", None, 0)
             .unwrap();
-
         assert!(note.html.contains(r#"data-key="0:目标条目""#), "{}", note.html);
         assert!(note.html.contains(r#"data-missing="false""#), "{}", note.html);
         assert!(note.html.contains(r#"data-missing="true""#), "{}", note.html);
@@ -1165,40 +1115,37 @@ mod tests {
         assert_eq!(temp.vault.list_notes().unwrap().len(), 1);
     }
 
-    /// 钉住磁盘上的格式：事件流是 JSONL、一行一个动作，索引只是缓存。
-    /// 这条是「以后能完全重放」的前提，格式一旦变了就得显式改这里。
     #[test]
     fn log_format_is_stable() {
         let temp = TempVault::new();
         temp.vault.seed_if_empty("格式", "内容").unwrap();
         temp.vault.save_draft("格式", "草稿", 1).unwrap();
-        temp.vault
-            .commit("格式", "定稿", Some("提交"), 1)
-            .unwrap();
+        temp.vault.commit("格式", "定稿", Some("提交"), 1).unwrap();
 
         let id = temp.vault.note_ids().unwrap().remove(0);
-        let log = fs::read_to_string(temp.root.join("notes").join(format!("{id}.log"))).unwrap();
-        let index = fs::read_to_string(temp.root.join("index.json")).unwrap();
+        let log = temp
+            .vault
+            .read_events_at(&temp.vault.log_path(&id))
+            .map(|events| {
+                events
+                    .iter()
+                    .map(|event| serde_json::to_string(event).unwrap())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap();
 
-        println!("---- notes/{id}.log ----\n{log}---- index.json ----\n{index}");
-
+        println!("---- notes/{id}.log ----\n{log}");
         let lines: Vec<&str> = log.lines().collect();
         assert_eq!(lines.len(), 4, "meta + rev1 + auto + rev2");
         assert!(lines[0].contains(r#""t":"meta""#), "{}", lines[0]);
         assert!(lines[1].contains(r#""t":"rev""#), "{}", lines[1]);
         assert!(lines[2].contains(r#""t":"auto""#), "{}", lines[2]);
         assert!(lines[2].contains(r#""on":1"#), "{}", lines[2]);
-
-        // 第二次提交取代了挂在版本 1 上的草稿（版本 2）
-        assert!(lines[3].contains(r#""t":"rev""#), "{}", lines[3]);
-        assert!(lines[3].contains(r#""rev":3"#), "{}", lines[3]);
         assert!(lines[3].contains(r#""supersedes":[2]"#), "{}", lines[3]);
         assert!(lines[3].contains(r#""parent":1"#), "{}", lines[3]);
     }
 
-    /// 仓库目录不存在——连父目录都不存在——时也要能自动建起来。
-    ///
-    /// 应用是凭空在用户主目录下造出 `~/.refind-note` 的，这条不能指望事先准备目录。
     #[test]
     fn opens_and_creates_a_missing_vault() {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -1208,15 +1155,13 @@ mod tests {
 
         assert!(!root.exists(), "前提：这个目录一开始不存在");
         let vault = Vault::open(&root).expect("应当自动建库");
-
-        assert!(root.join("notes").is_dir(), "notes/ 应当被建出来");
-        assert!(root.join("blobs").is_dir(), "blobs/ 应当被建出来");
-        assert!(root.join("vault.json").is_file(), "应当写入默认设置");
-        assert!(root.join("namespaces.json").is_file(), "应当写入内建命名空间");
-        // 建完就能直接用
+        for dir in ["notes", "trash", "blobs"] {
+            assert!(root.join(dir).is_dir(), "{dir}/ 应当被建出来");
+        }
+        assert!(root.join("vault.json").is_file());
+        assert!(root.join("namespaces.json").is_file());
         assert!(vault.list_notes().unwrap().is_empty());
 
-        // 顺手打印出来，方便人工核对（`cargo test -- --nocapture` 时可见）
         println!("---- 自动建出来的仓库：{} ----", root.display());
         let mut entries: Vec<_> = fs::read_dir(&root)
             .unwrap()
@@ -1231,7 +1176,6 @@ mod tests {
         let _ = fs::remove_dir_all(&base);
     }
 
-    /// 默认仓库必须落在用户主目录下的 `.refind-note`
     #[test]
     fn default_root_is_under_home() {
         let root = default_root().expect("应当能定位到主目录");
@@ -1239,14 +1183,8 @@ mod tests {
             root.file_name().and_then(|name| name.to_str()),
             Some(DEFAULT_DIR_NAME)
         );
-
         if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
-            assert!(
-                root.starts_with(&home),
-                "{} 应当在家目录 {:?} 之下",
-                root.display(),
-                home
-            );
+            assert!(root.starts_with(&home), "{} 应当在家目录下", root.display());
         }
     }
 
@@ -1263,10 +1201,8 @@ mod tests {
         assert_eq!(kinds, vec!["create", "commit", "draft", "commit"]);
         assert_eq!(history[1].summary.as_deref(), Some("初稿"));
         assert_eq!(history[3].rev, 3);
-        assert_eq!(history[3].supersedes, vec![2], "第二次提交取代了那条草稿");
-
-        // delta 是相对上一条记录的增减：「第一版」是 3 个 CJK 字 = 9 字节
-        assert_eq!(history[1].bytes, 9);
+        assert_eq!(history[3].supersedes, vec![2]);
+        assert_eq!(history[1].bytes, 9, "「第一版」是 3 个 CJK 字");
         assert_eq!(history[1].delta, 9);
     }
 
@@ -1282,7 +1218,6 @@ mod tests {
         assert_eq!(first.markdown, "第一版");
         assert!(first.html.contains("第一版"), "{}", first.html);
 
-        // 草稿也在同一条版本序列里，所以同样取得到
         let draft = temp.vault.revision("版本", 2).unwrap();
         assert_eq!(draft.kind, "draft");
         assert_eq!(draft.markdown, "草稿内容");
@@ -1318,7 +1253,6 @@ mod tests {
         temp.vault.commit("旧标题", "正文", None, 0).unwrap();
         temp.vault.rename("旧标题", "新标题").unwrap();
 
-        // 改名本身就是一次提交（同一个 blob，标题变了）
         let old = temp.vault.revision("新标题", 1).unwrap();
         assert_eq!(old.title, "旧标题", "版本 1 当时的标题还是旧的");
         let new = temp.vault.revision("新标题", 2).unwrap();

@@ -17,8 +17,6 @@ import { PREFERENCE_KEYS, readFlag, writeFlag } from "./settings";
 interface NoteSummary {
   key: string;
   title: string;
-  rev: number;
-  modified: string;
 }
 
 /** 与 Rust 端 `Note` 对应 */
