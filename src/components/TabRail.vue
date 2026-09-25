@@ -95,7 +95,7 @@ function initialOf(tab: { address: string; title: string }) {
       </button>
     </div>
 
-    <ol class="rail__list">
+    <TransitionGroup name="tab" tag="ol" class="rail__list">
       <li
         v-for="(tab, index) in tabs"
         :key="`${index}-${tab.address}`"
@@ -133,7 +133,7 @@ function initialOf(tab: { address: string; title: string }) {
           </button>
         </div>
       </li>
-    </ol>
+    </TransitionGroup>
   </aside>
 </template>
 
@@ -154,6 +154,11 @@ function initialOf(tab: { address: string; title: string }) {
 
 .rail--collapsed {
   width: 46px;
+}
+
+/* 收起 / 展开时宽度平滑变化 */
+.rail {
+  transition: width 160ms ease;
 }
 
 .rail__head {
@@ -186,9 +191,31 @@ function initialOf(tab: { address: string; title: string }) {
 }
 
 .rail__list {
+  position: relative;
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+/* 标签页的出现、消失、重排（重排也走 transform，所以拖动换序是滑过去的） */
+.tab-move,
+.tab-enter-active,
+.tab-leave-active {
+  transition:
+    transform 160ms ease,
+    opacity 160ms ease;
+}
+
+.tab-enter-from,
+.tab-leave-to {
+  opacity: 0;
+  transform: translateX(-8px);
+}
+
+/* 正在离开的项要脱离文档流，否则剩下的项会先跳一下再滑 */
+.tab-leave-active {
+  position: absolute;
+  width: 100%;
 }
 
 /* 拖放时提示插入位置 */
@@ -200,6 +227,9 @@ function initialOf(tab: { address: string; title: string }) {
   display: flex;
   align-items: center;
   border-radius: 6px;
+  transition:
+    background-color 120ms ease,
+    box-shadow 120ms ease;
 }
 
 .rail__item:hover,
@@ -282,5 +312,16 @@ function initialOf(tab: { address: string; title: string }) {
 .rail__close:hover {
   background: var(--press);
   color: var(--text);
+}
+
+/* 尊重系统的「减少动态效果」 */
+@media (prefers-reduced-motion: reduce) {
+  .rail,
+  .rail__item,
+  .tab-move,
+  .tab-enter-active,
+  .tab-leave-active {
+    transition: none;
+  }
 }
 </style>
