@@ -755,7 +755,11 @@ async function runMaintenanceOnce() {
   }
   maintenanceRequested = true;
   try {
-    await invoke<number>("submit_maintenance");
+    // 没到点后端会返回 null，并且**不建任务** —— 任务栏因此不会每次启动都弹一条空任务
+    const task = await invoke<number | null>("submit_maintenance");
+    if (task === null) {
+      console.debug("数据库维护：还没到时间，跳过");
+    }
   } catch (error) {
     // 提交失败不该拦住用户用应用
     console.debug("自动维护提交失败:", error);

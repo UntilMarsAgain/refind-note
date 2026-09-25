@@ -1270,6 +1270,17 @@ impl Vault {
         }
     }
 
+    /// 有没有到点该做的维护。
+    ///
+    /// 单独一个判断，是因为**建一个什么都不做的任务本身就是误导**：任务栏弹出
+    /// 「数据库维护」，用户会以为它在干活，反而看不出真实状态 —— 这一次就是这么被发现的。
+    pub fn maintenance_pending(&self) -> bool {
+        self.maintenance_due(
+            &self.config.last_trash_purge.clone(),
+            self.config.trash_keep_days,
+        ) || self.maintenance_due(&self.config.last_gc.clone(), self.config.gc_interval_days)
+    }
+
     /// 自动维护：到点了就清回收站、回收内容块，并记下这次的时间。
     ///
     /// 判定只看**上次执行时间**（不是"每次启动都跑"）：间隔之内什么都不做。
@@ -3447,6 +3458,20 @@ mod tests {
         assert!(
             purged.blobs.removed_blobs >= 1,
             "回收站清掉后，草稿独有的内容块才成为孤块"
+        );
+    }
+
+    /// "到点了吗"：刚跑过就不是，间隔过去或从没跑过就是
+    #[test]
+    fn maintenance_pending_follows_the_last_run() {
+        let fresh = TempVault::new();
+        assert!(fresh.vault.maintenance_pending(), "从没跑过就该跑");
+
+        let mut ran = TempVault::new();
+        ran.vault.run_maintenance().unwrap();
+        assert!(
+            !ran.vault.maintenance_pending(),
+            "刚跑过、间隔没到，就不该再建任务"
         );
     }
 

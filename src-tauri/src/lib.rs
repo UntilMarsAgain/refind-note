@@ -142,10 +142,19 @@ fn submit_gc(orphan_blobs: bool, superseded_drafts: bool) -> u64 {
     })
 }
 
-/// 提交一次数据库维护（到点了才有实际工作）
+/// 提交一次数据库维护。
+///
+/// **没到点就返回 `None`、不建任务**：空转的任务会让任务栏每次都弹一条"数据库维护"，
+/// 让人以为它在干活。判断在前台做一次（只读一次配置，很便宜）。
 #[tauri::command]
-fn submit_maintenance() -> u64 {
-    tasks::submit("数据库维护", move || {
+fn submit_maintenance() -> Result<Option<u64>, String> {
+    if !open()?
+        .maintenance_pending()
+    {
+        return Ok(None);
+    }
+
+    Ok(Some(tasks::submit("数据库维护", move || {
         let _guard = write_guard();
         let mut vault = open()?;
         let report = vault
@@ -159,7 +168,7 @@ fn submit_maintenance() -> u64 {
         } else {
             format!("清理回收站 {purged} 条，回收内容块 {blobs} 个")
         })
-    })
+    })))
 }
 
 /// 任务表快照（底部任务栏用）
