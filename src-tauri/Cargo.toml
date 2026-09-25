@@ -36,7 +36,7 @@ markdown-it = { version = "0.6", default-features = false, features = ["linkify"
 # 迁早就早，省得以后为了修漏洞再改一次 API。
 sha2 = "0.11"
 # 日志里的时间戳用人可读的 ISO-8601，省得自己写日期换算。
-time = { version = "0.3", features = ["formatting"] }
+time = { version = "0.3", features = ["formatting", "parsing"] }
 # 「对比版本」用的行级差异。放在后端做：前端保持薄，而且差异算法能被单元测试钉住。
 similar = "3"
 

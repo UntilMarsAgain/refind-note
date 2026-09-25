@@ -159,6 +159,29 @@ pub enum Address {
     Missing { title: String, address: String },
 }
 
+/// 回收站里的一个条目
+#[derive(Debug, Clone, Serialize)]
+pub struct TrashEntry {
+    pub title: String,
+    /// 删除时间（RFC3339，原样给出，界面自己决定怎么显示）
+    pub deleted_at: String,
+    /// 这份日志占用的字节数
+    pub bytes: u64,
+    /// 删了多少天（0 = 今天删的）
+    pub days_old: i64,
+}
+
+/// 一次回收站清理的结果
+#[derive(Debug, Clone, Serialize)]
+pub struct PurgeReport {
+    /// 清掉了几条回收站记录
+    pub removed: usize,
+    /// 这些日志本身释放的字节
+    pub freed_bytes: u64,
+    /// 顺手做的那次内容块回收（这些笔记的内容块此时才真正无人引用）
+    pub blobs: GcReport,
+}
+
 /// 一次回收的结果
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct GcReport {

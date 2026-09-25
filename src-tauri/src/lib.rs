@@ -10,8 +10,8 @@ mod title;
 
 use std::sync::{Mutex, MutexGuard};
 use storage::{
-    Address, DiffResult, Draft, GcReport, LoadOutcome, Note, NoteSummary, RevisionContent, RevisionSummary,
-    Vault, VaultSettings,
+    Address, DiffResult, Draft, GcReport, LoadOutcome, Note, NoteSummary, PurgeReport,
+    RevisionContent, RevisionSummary, TrashEntry, Vault, VaultSettings,
 };
 use tauri::Manager;
 
@@ -92,6 +92,22 @@ fn special_pages() -> Vec<String> {
 fn load_note_no_command(title: String) -> Result<LoadOutcome, String> {
     open()?
         .load_code_blocked(&title)
+        .map_err(|error| error.to_string())
+}
+
+/// 回收站清单（`special:trash` 用它）
+#[tauri::command]
+fn list_trash() -> Result<Vec<TrashEntry>, String> {
+    open()?.list_trash().map_err(|error| error.to_string())
+}
+
+/// 清理回收站：删掉超过 `olderThanDays` 天的条目，并顺手回收内容块
+#[tauri::command]
+fn purge_trash(older_than_days: i64) -> Result<PurgeReport, String> {
+    let _guard = write_guard();
+    let vault = open()?;
+    vault
+        .purge_trash(older_than_days)
         .map_err(|error| error.to_string())
 }
 
@@ -310,6 +326,8 @@ pub fn run() {
             render_markdown,
             load_note_no_command,
             command_kind,
+            list_trash,
+            purge_trash,
             list_notes,
             load_note,
             create_note,

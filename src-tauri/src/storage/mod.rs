@@ -26,8 +26,8 @@ mod error;
 mod event;
 
 pub use api::{
-    Address, DiffResult, Draft, GcReport, LoadOutcome, Note, NoteSummary, RevisionContent, RevisionSummary,
-    VaultSettings,
+    Address, DiffResult, Draft, GcReport, LoadOutcome, Note, NoteSummary, PurgeReport,
+    RevisionContent, RevisionSummary, TrashEntry, VaultSettings,
 };
 pub use config::VaultConfig;
 pub use error::VaultError;
@@ -1160,6 +1160,88 @@ impl Vault {
         }
     }
 
+    /// 回收站清单：删过的笔记，连同"删了多久"。
+    ///
+    /// 清单的**存在性**来自 `trash/` 目录，名字与删除时间来自名字表和删除标记 ——
+    /// 与别处一致：目录说有没有，表说叫什么。
+    pub fn list_trash(&self) -> Result<Vec<TrashEntry>, VaultError> {
+        let mut out = Vec::new();
+
+        for (id, title) in self.titles()?.trashed {
+            let path = self.trashed_path(&id);
+            if !path.is_file() {
+                // 文件没了却还留在表里：忽略它（以目录为准），不要因此让整页打不开
+                continue;
+            }
+            let bytes = fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0);
+            let events = self.read_events_at(&path)?;
+            let at = deletion_time(&events);
+            out.push(TrashEntry {
+                title,
+                deleted_at: at
+                    .map(|value| {
+                        value
+                            .format(&time::format_description::well_known::Rfc3339)
+                            .unwrap_or_default()
+                    })
+                    .unwrap_or_default(),
+                bytes,
+                days_old: at.map(days_since).unwrap_or(i64::MAX),
+            });
+        }
+
+        // 新的在前：这一页的用途是"决定要不要清"，最近删的最需要看见
+        out.sort_by(|a, b| b.deleted_at.cmp(&a.deleted_at));
+        Ok(out)
+    }
+
+    /// 清理回收站：删掉超过 `older_than_days` 天的条目。
+    ///
+    /// 传 0 表示"全部清理"（任何条目都满足"已删 0 天以上"）。
+    /// 清完顺手做一次内容块回收 —— 在此之前，那些块还被回收站的日志引用着，
+    /// 只有日志没了它们才真正无人引用。
+    pub fn purge_trash(&self, older_than_days: i64) -> Result<PurgeReport, VaultError> {
+        let mut report = PurgeReport {
+            removed: 0,
+            freed_bytes: 0,
+            blobs: GcReport::default(),
+        };
+
+        let mut titles = self.titles()?;
+        let mut purged: Vec<String> = Vec::new();
+
+        for (id, _) in &titles.trashed {
+            let path = self.trashed_path(id);
+            if !path.is_file() {
+                continue;
+            }
+            let events = self.read_events_at(&path)?;
+            let Some(at) = deletion_time(&events) else {
+                // 读不出删除时间就不动它：**宁可不删，也不要误删**
+                continue;
+            };
+            if days_since(at) < older_than_days {
+                continue;
+            }
+
+            report.freed_bytes += fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0);
+            fs::remove_file(&path)?;
+            report.removed += 1;
+            purged.push(id.clone());
+        }
+
+        for id in purged {
+            titles.trashed.remove(&id);
+        }
+        if report.removed > 0 {
+            self.save_titles(&titles)?;
+            // 日志没了，它们引用的内容块这时才成为孤块
+            report.blobs = self.gc(true, false)?;
+        }
+
+        Ok(report)
+    }
+
     /// 跳数上限统一把关：会"跟下去"的指令都先过这一关，免得新增指令时漏掉。
     fn guard_hops(&self, title: &str, hops: usize) -> Result<(), VaultError> {
         if hops >= MAX_REDIRECT_HOPS {
@@ -1850,12 +1932,34 @@ fn strip_prefix_ci<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
 }
 
 /// 现有的特殊页面。不在这里面的 `special:` 地址直接报「不存在」。
-pub(crate) const SPECIAL_PAGES: [&str; 5] = ["newtab", "settings", "all", "random", "gc"];
+pub(crate) const SPECIAL_PAGES: [&str; 6] =
+    ["newtab", "settings", "all", "random", "gc", "trash"];
 
 /// 重定向最多跟几跳。超过就报错，而不是让 A→B→A 这类环无限递归。
 ///
 /// 这是**仓库的跟跳策略**，不是指令语法 —— 语法在 [`crate::command`]。
 const MAX_REDIRECT_HOPS: usize = 8;
+
+/// 解析 RFC3339 时间。坏数据一律当作"解析不出"，由调用方决定怎么办。
+fn parse_iso(text: &str) -> Option<time::OffsetDateTime> {
+    time::OffsetDateTime::parse(text, &time::format_description::well_known::Rfc3339).ok()
+}
+
+/// 一篇笔记的删除时间：取最后一条删除标记的时间。
+fn deletion_time(events: &[Event]) -> Option<time::OffsetDateTime> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            Event::Del { at, .. } => parse_iso(at),
+            _ => None,
+        })
+        .last()
+}
+
+/// 从某个时刻到现在过了多少天（未来时间当作 0 天，不算"过期"）。
+fn days_since(at: time::OffsetDateTime) -> i64 {
+    (time::OffsetDateTime::now_utc() - at).whole_days().max(0)
+}
 
 /// 规范地址拼装：`NAME[@STATE][#章节]`。
 ///
@@ -3135,6 +3239,77 @@ mod tests {
         assert_eq!(kind_of("随机页").as_deref(), Some("random-redirect"));
         // 认不出的那种最需要被看见：一打开就报错，得先在列表里找到它
         assert_eq!(kind_of("坏指令").as_deref(), Some("unrecognized"));
+    }
+
+    /// 回收站清单：删过的笔记按删除时间倒序列出，并带上"删了多久"
+    #[test]
+    fn trash_listing_reports_age() {
+        let temp = TempVault::new();
+        temp.vault.create("留下的").unwrap();
+        temp.vault.commit("留下的", "正文", None, 0).unwrap();
+        temp.vault.create("删掉的").unwrap();
+        temp.vault.commit("删掉的", "被删的正文", None, 0).unwrap();
+        temp.vault.delete("删掉的").unwrap();
+
+        let listed = temp.vault.list_trash().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].title, "删掉的");
+        assert_eq!(listed[0].days_old, 0, "刚删的应当是 0 天");
+        assert!(listed[0].bytes > 0);
+        assert!(!listed[0].deleted_at.is_empty());
+    }
+
+    /// 清理回收站：30 天不动刚删的；传 0 则全清，并顺手回收内容块
+    #[test]
+    fn purge_trash_respects_age_then_reclaims_blobs() {
+        let temp = TempVault::new();
+        temp.vault.create("留下的").unwrap();
+        temp.vault.commit("留下的", "留下的正文", None, 0).unwrap();
+        temp.vault.create("删掉的").unwrap();
+        temp.vault
+            .commit("删掉的", "只此一份的正文", None, 0)
+            .unwrap();
+        temp.vault.delete("删掉的").unwrap();
+
+        // 30 天：刚删的不该被动
+        let report = temp.vault.purge_trash(30).unwrap();
+        assert_eq!(report.removed, 0);
+        assert_eq!(temp.vault.list_trash().unwrap().len(), 1, "刚删的必须留着");
+
+        // 0 天：全部清掉；那份正文只被这一页引用，所以内容块这时才成为孤块
+        let report = temp.vault.purge_trash(0).unwrap();
+        assert_eq!(report.removed, 1);
+        assert!(temp.vault.list_trash().unwrap().is_empty());
+        assert_eq!(
+            report.blobs.removed_blobs, 1,
+            "回收站日志没了，那份正文才无人引用"
+        );
+        assert!(temp.vault.load("留下的").is_ok(), "没删的那篇不受影响");
+    }
+
+    /// 回收站里的引用要**连同草稿节点**一起计入 blob 统计。
+    ///
+    /// 已有的用例只覆盖了提交版本（`Rev`）；这里补上草稿（`Auto`）那一半 ——
+    /// 只被草稿引用的内容块，同样不能因为"引用它的笔记被删了"就被回收。
+    #[test]
+    fn gc_counts_draft_references_from_the_trash() {
+        let temp = TempVault::new();
+        temp.vault.create("带草稿").unwrap();
+        temp.vault.commit("带草稿", "第一版", None, 0).unwrap();
+        // 一份只属于草稿的正文
+        temp.vault.save_draft("带草稿", "草稿独有的正文", 1).unwrap();
+        temp.vault.delete("带草稿").unwrap();
+
+        let report = temp.vault.gc(true, false).unwrap();
+        assert_eq!(report.removed_blobs, 0, "回收站里的草稿仍然引用着它的内容块");
+
+        // 整条清掉回收站之后，这块才真正无人引用
+        let purged = temp.vault.purge_trash(0).unwrap();
+        assert_eq!(purged.removed, 1);
+        assert!(
+            purged.blobs.removed_blobs >= 1,
+            "回收站清掉后，草稿独有的内容块才成为孤块"
+        );
     }
 
     #[test]
