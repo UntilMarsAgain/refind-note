@@ -286,6 +286,70 @@ fn capitalize_first(text: &str) -> String {
     }
 }
 
+// ---------------------------------------------------------------- 路径转义
+//
+// 布局重写（按标题直查）是下一步，这几个函数届时会被 storage 用上
+
+#[allow(dead_code)]
+/// 在文件名里有问题、或本项目规则不允许出现在文件名里的字符
+fn needs_escape(ch: char) -> bool {
+    matches!(
+        ch,
+        '%' | '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'
+    ) || ch.is_control()
+}
+
+/// 标题 → 文件名用的转义。
+///
+/// 只转义有问题的字符，其余（含 CJK）原样保留 —— 于是目录里看到的还是人能读的标题。
+/// 转义可逆（`%XX` 是该字符 UTF-8 字节的大写十六进制），所以路径能反解回标题；
+/// 这正是「按标题直查、不需要全局索引」的前提。
+#[allow(dead_code)]
+pub fn encode_for_path(title: &str) -> String {
+    let mut out = String::with_capacity(title.len());
+
+    for ch in title.chars() {
+        if needs_escape(ch) {
+            let mut buffer = [0u8; 4];
+            for byte in ch.encode_utf8(&mut buffer).as_bytes() {
+                out.push('%');
+                out.push_str(&format!("{byte:02X}"));
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+
+    // 整个名字都是点（`.` / `..`）时，在路径上会指向别处，转义掉第一个点
+    if !out.is_empty() && out.chars().all(|ch| ch == '.') {
+        out.replace_range(0..1, "%2E");
+    }
+
+    out
+}
+
+/// 文件名 → 标题。转义非法、或解出来的字节不是合法 UTF-8 时返回 `None`。
+#[allow(dead_code)]
+pub fn decode_from_path(name: &str) -> Option<String> {
+    let mut bytes: Vec<u8> = Vec::with_capacity(name.len());
+    let mut chars = name.chars();
+
+    while let Some(ch) = chars.next() {
+        if ch != '%' {
+            let mut buffer = [0u8; 4];
+            bytes.extend_from_slice(ch.encode_utf8(&mut buffer).as_bytes());
+            continue;
+        }
+
+        let high = chars.next()?;
+        let low = chars.next()?;
+        let byte = u8::from_str_radix(&format!("{high}{low}"), 16).ok()?;
+        bytes.push(byte);
+    }
+
+    String::from_utf8(bytes).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -403,5 +467,59 @@ mod tests {
         let resolver =
             LinkResolver::new(Arc::new(table()), Arc::new(HashSet::new()), true, None);
         assert!(resolver.resolve("Help:目录").is_none());
+    }
+
+    #[test]
+    fn path_escapes_are_reversible() {
+        for title in [
+            "平陆运河",
+            "平陆运河/航道",
+            "带:冒号",
+            "带 空格",
+            "带%百分号",
+            "带\\反斜杠",
+            "带\"引号\"",
+            "带*星号?",
+            "带<尖括号>|竖线",
+            "末尾点.",
+            "..",
+            "...",
+            "换\n行",
+        ] {
+            let encoded = encode_for_path(title);
+            assert!(
+                !encoded.contains('/'),
+                "{title:?} 转义后不该还有斜杠：{encoded:?}"
+            );
+            assert_eq!(
+                decode_from_path(&encoded).as_deref(),
+                Some(title),
+                "{title:?} 转义往返不一致：{encoded:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn readable_titles_stay_readable() {
+        // CJK 与普通字符不转义，目录里要能直接看懂
+        assert_eq!(encode_for_path("平陆运河"), "平陆运河");
+        assert_eq!(encode_for_path("H1 Test"), "H1 Test");
+        assert_eq!(encode_for_path("平陆运河/航道"), "平陆运河%2F航道");
+    }
+
+    #[test]
+    fn dotted_names_are_made_safe() {
+        assert_eq!(encode_for_path("."), "%2E");
+        assert_eq!(encode_for_path(".."), "%2E.");
+        assert_eq!(decode_from_path("%2E.").as_deref(), Some(".."));
+    }
+
+    #[test]
+    fn bad_escapes_are_rejected() {
+        assert!(decode_from_path("%ZZ").is_none());
+        assert!(
+            decode_from_path("%E4").is_none(),
+            "残缺的多字节转义应当被拒"
+        );
     }
 }
