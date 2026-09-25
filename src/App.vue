@@ -188,7 +188,6 @@ async function createNote(title: string) {
   busy.value = true;
   try {
     await invoke<Note>("create_note", { title: trimmed });
-    missingTitle.value = "";
     loadError.value = "";
     await refreshNotes();
     // 建完进编辑器：同样通过改地址（`$edit`）
@@ -335,8 +334,18 @@ async function renameCurrent(nextTitle: string) {
       from: current.title,
       to: nextTitle,
     });
-    note.value = renamed;
     await refreshNotes();
+
+    // 改名改变了「在哪」：地址必须跟着变。但编辑器里的内容不能丢 ——
+    // 先把缓冲区作为草稿存到新标题上，再导航过去（navigate 会把草稿恢复出来）。
+    if (draftText.value !== renamed.markdown) {
+      await invoke("save_draft", {
+        title: renamed.title,
+        markdown: draftText.value,
+        baseRev: renamed.rev,
+      });
+    }
+    await navigate(`${renamed.title}$edit`);
     editorStatus.value = `已改名为「${renamed.title}」（改名本身记为一版）`;
   } catch (error) {
     editorStatus.value = `改名失败：${String(error)}`;
@@ -468,12 +477,25 @@ const revisionView = ref<{ rev: number; shortId: string; html: string } | null>(
 const localSection = ref("");
 
 /**
+ * 解析失败时保留用户写的那一行。
+ *
+ * 规范里的例外：`@` 没找到对应版本时（无论是 `NAME@VERSION` 该页没这版，还是
+ * `@VERSION` 全局没有），地址栏应当保留用户输入 —— 其余情况一律回显规范全称。
+ */
+const rejectedAddress = ref("");
+
+/**
  * 地址栏显示的文本。
  *
  * 直接用解析结果里的 `address`（后端已按标准顺序排好），前端不自己拼字符串 ——
  * 于是「语法糖跳转后回显全称」只有一处实现。唯一例外是章节：本地章节叠加上去。
  */
 const addressText = computed(() => {
+  // 例外：解析失败时显示用户写的原文
+  if (rejectedAddress.value) {
+    return rejectedAddress.value;
+  }
+
   const address = route.value;
   if (!address || address.kind === "empty") {
     return "";
@@ -566,13 +588,21 @@ async function onSubmit(value: string) {
  */
 async function navigate(input: string) {
   addressError.value = "";
+  rejectedAddress.value = "";
 
   let address: Address;
   try {
     address = await invoke<Address>("parse_address", { input });
   } catch (error) {
     addressError.value = String(error);
+    // 例外：解析不了就保留用户写的那一行，别换成规范地址
+    rejectedAddress.value = input.trim();
     console.debug("地址解析失败:", error);
+    return;
+  }
+
+  // 空地址不是地址：保留当前规范地址，什么都不动
+  if (address.kind === "empty") {
     return;
   }
 
@@ -619,6 +649,7 @@ async function doDelete() {
     }
 
     confirmDelete.value = false;
+    rejectedAddress.value = "";
     note.value = null;
     await refreshNotes();
 
