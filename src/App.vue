@@ -740,6 +740,11 @@ const settingsFocus = computed(() => {
   return address ? sectionOf(address) : "";
 });
 
+/** 列表里点一条（special:all 等）：算「跳转」，进历史 —— 与正文内部链接一致 */
+function openFromList(address: string) {
+  void navigate(address);
+}
+
 /** 标签栏底部的设置入口 */
 function openSettings() {
   void navigate("special:settings");
@@ -1174,7 +1179,7 @@ function onAction(name: string) {
       />
       <AllPages
         v-else-if="mode === 'special' && specialPage === 'all'"
-        @open="onSubmit"
+        @open="openFromList"
         @open-new="openTabWith"
       />
       <SettingsPage
