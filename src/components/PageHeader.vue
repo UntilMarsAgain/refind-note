@@ -122,17 +122,22 @@ const actions: {
   margin: 0;
   font-size: 2.15em;
   font-weight: 600;
-  /* 不能低于 ~1.5：CJK 字体 ascent+descent 约 1.48em，
-     而这里配了 overflow:hidden 做省略号，行盒不够高会把字的底部裁掉 */
+  /* 1.5 的行高同时服务两种状态：展开时给多行标题留出舒展的行距；收起成粘顶细栏时
+     那条栏仍然截断（见下），行盒不够高会把 CJK 字的底部裁掉 */
   line-height: 1.5;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* 标题过长**换行**，不截断成省略号 —— 标题是这一页的身份，看不全很要命 */
+  white-space: normal;
+  /* 长串英文/链接没有空格可断，不这样会顶破容器 */
+  overflow-wrap: anywhere;
   transition: font-size 160ms ease;
 }
 
 .page-header--collapsed .page-title {
   font-size: 1.05em;
+  /* 收起后是粘在顶部的一条细栏，必须只有一行高：这里继续截断 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .page-actions {
