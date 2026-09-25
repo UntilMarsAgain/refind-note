@@ -830,23 +830,7 @@ function onAction(name: string) {
           />
 
           <template v-else-if="note">
-            <p v-if="addressError" class="app__error">{{ addressError }}</p>
-
             <!-- 不是最新提交：明确提示，并给一个回最新的出口 -->
-            <p v-if="revisionView" class="app__rev">
-              正在查看历史版本
-              <code>{{ note.title }}@{{ revisionView.shortId }}</code>
-              （第 {{ revisionView.rev }} 版，不是最新提交）。
-              <button type="button" @click="leaveRevision">回到最新版本</button>
-            </p>
-
-            <!-- 未提交的草稿：两个选项 —— 预览（走地址跳转）或直接编辑 -->
-            <p v-if="!revisionView && draftExists" class="app__draft">
-              这篇笔记有未提交的草稿（当前显示的是最新提交）。
-              <button type="button" @click="openDraftPreview">预览</button>
-              <button type="button" @click="onAction('edit')">编辑</button>
-            </p>
-
             <PageHeader
               v-if="!revisionView"
               :title="note.title"
@@ -855,16 +839,6 @@ function onAction(name: string) {
               @action="onAction"
               @open-parent="onNoteSelected"
             />
-
-            <p v-if="confirmDelete" class="app__confirm">
-              <span>删除《{{ note.title }}》？历史一条都不会丢，文件会挪进 trash/。</span>
-              <label class="app__confirm-gc">
-                <input v-model="deleteWithGc" type="checkbox" />
-                顺手回收悬置数据
-              </label>
-              <button type="button" :disabled="busy" @click="doDelete">确认删除</button>
-              <button type="button" @click="confirmDelete = false">取消</button>
-            </p>
 
             <NoteContent
               v-if="!revisionView"
@@ -881,8 +855,6 @@ function onAction(name: string) {
             />
           </template>
 
-          <p v-else-if="loadError" class="app__error">{{ loadError }}</p>
-
           <p v-else class="app__empty">仓库位置：{{ vaultRoot || "（未能读取）" }}</p>
         </div>
       </main>
@@ -895,6 +867,53 @@ function onAction(name: string) {
     @scroll-top="scrollToTop"
     @scroll-bottom="scrollToBottom"
   />
+
+  <!-- 提示条：fixed 浮层，不参与正文排版（提示不该看起来像正文的一部分） -->
+  <div class="app__notices">
+    <p v-if="addressError" class="notice notice--error">
+      <span>{{ addressError }}</span>
+      <button type="button" @click="addressError = ''">知道了</button>
+    </p>
+
+    <p v-if="!addressError && loadError" class="notice notice--error">
+      <span>{{ loadError }}</span>
+    </p>
+
+    <p v-if="revisionView && note" class="notice">
+      <span>
+        正在查看历史版本
+        <code>{{ note.title }}@{{ revisionView.shortId }}</code>
+        （第 {{ revisionView.rev }} 版，不是最新提交）
+      </span>
+      <button type="button" @click="leaveRevision">回到最新版本</button>
+    </p>
+
+    <p v-if="!revisionView && draftExists" class="notice">
+      <span>这篇笔记有未提交的草稿（当前显示的是最新提交）</span>
+      <button type="button" @click="openDraftPreview">预览</button>
+      <button type="button" @click="onAction('edit')">编辑</button>
+    </p>
+  </div>
+
+  <!-- 删除确认：整页弹出，必须明确选择才继续 -->
+  <div v-if="confirmDelete && note" class="modal" @click.self="confirmDelete = false">
+    <div class="modal__card">
+      <h2 class="modal__title">删除《{{ note.title }}》？</h2>
+      <p class="modal__body">
+        历史一条都不会丢：会写一条删除标记，文件挪进 <code>trash/</code>，随时可以捞回来。
+      </p>
+      <label class="modal__opt">
+        <input v-model="deleteWithGc" type="checkbox" />
+        顺手回收悬置数据
+      </label>
+      <div class="modal__actions">
+        <button type="button" @click="confirmDelete = false">取消</button>
+        <button class="modal__danger" type="button" :disabled="busy" @click="doDelete">
+          确认删除
+        </button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <style scoped>
@@ -942,91 +961,6 @@ function onAction(name: string) {
   max-width: 100%;
 }
 
-.app__rev {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  margin: 16px 0 0;
-  padding: 8px 12px;
-  border: 1px solid var(--accent-soft);
-  border-radius: 8px;
-  color: var(--text-dim);
-  font-size: 13px;
-}
-
-.app__rev code {
-  font-family: var(--mono-font);
-  font-size: 12.5px;
-  color: var(--text);
-}
-
-.app__rev button {
-  appearance: none;
-  height: 26px;
-  padding: 0 10px;
-  border: 1px solid var(--accent-soft);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--accent-soft);
-  font-size: 12.5px;
-  cursor: pointer;
-}
-
-.app__rev button:hover {
-  background: var(--hover);
-}
-
-.app__draft,
-.app__confirm {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-  margin: 16px 0 0;
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text-dim);
-  font-size: 13px;
-}
-
-.app__draft button,
-.app__confirm button {
-  appearance: none;
-  height: 26px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--accent-soft);
-  font-size: 12.5px;
-  cursor: pointer;
-}
-
-.app__draft button:hover,
-.app__confirm button:hover:not(:disabled) {
-  background: var(--hover);
-}
-
-.app__confirm button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.app__confirm-gc {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  cursor: pointer;
-}
-
-.app__error {
-  margin: 28px 0 0;
-  color: var(--accent-soft);
-  font-size: 14px;
-}
-
 .app__empty {
   margin: 28px 0 0;
   color: var(--text-dim);
@@ -1038,5 +972,137 @@ function onAction(name: string) {
   .app__column {
     transition: none;
   }
+}
+/* 提示条：fixed 浮层，和 FloatingTools 一样脱离正文流 */
+.app__notices {
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  z-index: 46;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  max-width: min(680px, 80vw);
+  margin: 0;
+  padding: 9px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 22%);
+  pointer-events: auto;
+}
+
+.notice--error {
+  border-color: var(--link-missing);
+}
+
+.notice code {
+  font-family: var(--mono-font);
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.notice button {
+  appearance: none;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--accent-soft);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent-soft);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.notice button:hover {
+  background: var(--hover);
+}
+
+/* 删除确认：整页弹出 */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 45%);
+}
+
+.modal__card {
+  width: min(420px, 86vw);
+  padding: 20px 22px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 20px 60px rgb(0 0 0 / 35%);
+}
+
+.modal__title {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.modal__body {
+  margin: 0 0 14px;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.modal__opt {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 16px;
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.modal__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.modal__actions button {
+  appearance: none;
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.modal__actions button:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.modal__actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.modal__danger {
+  border-color: var(--link-missing);
+  color: var(--link-missing);
 }
 </style>
