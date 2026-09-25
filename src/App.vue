@@ -4,9 +4,9 @@ import { invoke } from "@tauri-apps/api/core";
 import FloatingTools from "./components/FloatingTools.vue";
 import HistoryView from "./components/HistoryView.vue";
 import MissingNote from "./components/MissingNote.vue";
+import NewTab from "./components/NewTab.vue";
 import NoteContent from "./components/NoteContent.vue";
 import NoteEditor from "./components/NoteEditor.vue";
-import NoteSearch from "./components/NoteSearch.vue";
 import PageHeader from "./components/PageHeader.vue";
 import TabRail from "./components/TabRail.vue";
 import TitleBar from "./components/TitleBar.vue";
@@ -64,7 +64,14 @@ interface RevisionContent {
   html: string;
 }
 
-type Mode = "read" | "edit" | "missing" | "history" | "delete" | "rollback";
+type Mode =
+  | "read"
+  | "edit"
+  | "missing"
+  | "history"
+  | "delete"
+  | "rollback"
+  | "special";
 
 /** 与 Rust 端 `Address` 对应：地址栏那一行的解析结果（后端解析到底） */
 type Address =
@@ -89,6 +96,7 @@ type Address =
       short_id: string;
       address: string;
     }
+  | { kind: "special"; page: string; address: string }
   | { kind: "missing"; title: string; address: string };
 
 /** 自动保存：停手三秒后写一条草稿到链上 */
@@ -117,6 +125,8 @@ const mode = computed<Mode>(() => {
       return "delete";
     case "rollback-confirm":
       return "rollback";
+    case "special":
+      return "special";
     case "missing":
       return "missing";
     default:
@@ -139,10 +149,82 @@ const draftText = ref("");
 /** 保存 / 提交进行中，用来禁掉按钮避免连点 */
 const busy = ref(false);
 const editorStatus = ref("");
-/** 搜索面板是否打开 */
-const searchOpen = ref(false);
 /** 阅读页只显示最新提交；存在草稿时提示，由用户点开 */
 const draftExists = ref(false);
+/**
+ * 打开着的标签页。每个标签页背后就是一个**地址**，所以整页重解析之后它仍然成立。
+ *
+ * 以前标签栏列的是仓库里全部笔记（「浏览全部文档」），暂时不做 —— 入口改为
+ * `special:newtab`，标签栏只列真正打开着的。
+ */
+const tabs = ref<{ address: string; title: string }[]>([]);
+const activeTab = ref(0);
+
+/** 标签页上显示什么名字 */
+function tabTitleOf(address: Address): string {
+  switch (address.kind) {
+    case "empty":
+      return "";
+    case "special":
+      return address.page === "newtab" ? "新标签页" : `special:${address.page}`;
+    default:
+      return address.title;
+  }
+}
+
+/** 把解析结果同步进当前标签页 */
+function syncActiveTab(address: Address) {
+  if (address.kind === "empty") {
+    return;
+  }
+  const tab = tabs.value[activeTab.value];
+  if (tab) {
+    tab.address = address.address;
+    tab.title = tabTitleOf(address);
+    return;
+  }
+  tabs.value.push({ address: address.address, title: tabTitleOf(address) });
+}
+
+/** 开一个新标签页。以前这个「+」是「新建笔记」，现在它是真正的开标签页。 */
+function openNewTab() {
+  tabs.value.push({ address: "special:newtab", title: "新标签页" });
+  activeTab.value = tabs.value.length - 1;
+  void navigate("special:newtab");
+}
+
+/** 切到某个标签页：它带着自己的地址，重新解析一遍（全量重载） */
+function selectTab(index: number) {
+  const tab = tabs.value[index];
+  if (!tab) {
+    return;
+  }
+  activeTab.value = index;
+  void navigate(tab.address);
+}
+
+/** 关闭标签页；关掉当前这个就切到邻居，全关了就给一个新的，免得出现没有标签页的空壳 */
+function closeTab(index: number) {
+  if (tabs.value.length <= 1) {
+    tabs.value = [];
+    openNewTab();
+    return;
+  }
+
+  tabs.value.splice(index, 1);
+  if (index < activeTab.value) {
+    activeTab.value -= 1;
+    return;
+  }
+  if (index === activeTab.value) {
+    activeTab.value = Math.min(index, tabs.value.length - 1);
+    const next = tabs.value[activeTab.value];
+    if (next) {
+      void navigate(next.address);
+    }
+  }
+}
+
 /** 草稿提醒被忽略过一次（换地址会重新出现） */
 const draftHintDismissed = ref(false);
 /** 删除时顺手回收悬置数据 */
@@ -386,12 +468,8 @@ onMounted(async () => {
 
   try {
     await refreshNotes();
-    const first = notes.value[0];
-    if (first) {
-      await navigate(first.title);
-    } else {
-      loadError.value = "仓库里还没有笔记";
-    }
+    // 入口是 `special:newtab`：暂时不列全部文档，所以启动也不再自动打开第一篇
+    openNewTab();
   } catch (error) {
     loadError.value = String(error);
   }
@@ -451,18 +529,9 @@ function onNoteSelected(title: string) {
   void navigate(title);
 }
 
-/** 标签栏里的「新建笔记」：取一个没被占用的名字再建 */
-function createNoteFromRail() {
-  const taken = new Set(notes.value.map((item) => item.title));
-  let title = "未命名";
-  for (let index = 2; taken.has(title); index += 1) {
-    title = `未命名 ${index}`;
-  }
-  void createNote(title);
-}
-
 function onSearch() {
-  searchOpen.value = true;
+  // 全量列表（NoteSearch）暂时移除：浏览全部文档不做，入口统一走 special:newtab
+  openNewTab();
 }
 
 function onMenu() {
@@ -664,8 +733,12 @@ async function navigate(input: string) {
   rollbackTarget.value = null;
   localSection.value = "";
   draftHintDismissed.value = false;
+  syncActiveTab(address);
 
   switch (address.kind) {
+    case "special":
+      // 特殊页面：后端只负责解析出来，内容由前端渲染
+      return;
     case "note":
       await loadNote(address.title);
       return;
@@ -805,13 +878,6 @@ function onAction(name: string) {
 <template>
   <WindowResizeHandles />
 
-  <NoteSearch
-    :notes="notes"
-    :open="searchOpen"
-    @close="searchOpen = false"
-    @open-note="onNoteSelected"
-  />
-
   <div class="app">
     <TitleBar
       :title="addressText"
@@ -822,10 +888,11 @@ function onAction(name: string) {
 
     <div class="app__main">
       <TabRail
-        :notes="notes"
-        :active="note?.key ?? ''"
-        @open="onNoteSelected"
-        @create="createNoteFromRail"
+        :tabs="tabs"
+        :active="activeTab"
+        @select="selectTab"
+        @close="closeTab"
+        @new-tab="openNewTab"
       />
 
       <main
@@ -835,9 +902,12 @@ function onAction(name: string) {
         @scroll.passive="onScroll"
       >
         <div class="app__column" :class="{ 'app__column--wide': !limitWidth }">
+          <!-- 特殊页面：由前端渲染（后端只负责把地址解析成 Special） -->
+          <NewTab v-if="mode === 'special'" @open="onSubmit" />
+
           <!-- 编辑中：不显示页头，操作都在编辑器自己那一行里 -->
           <NoteEditor
-            v-if="mode === 'edit' && note"
+            v-else-if="mode === 'edit' && note"
             v-model="draftText"
             :title="note.title"
             :busy="busy"
