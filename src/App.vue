@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import FloatingTools from "./components/FloatingTools.vue";
 import HistoryView from "./components/HistoryView.vue";
@@ -723,6 +723,36 @@ function dismissNotices() {
   loadError.value = "";
 }
 
+/** 从规范地址里取章节（`NAME[@STATE][#章节]` 的最后一段） */
+function sectionOf(address: Address): string {
+  if (address.kind === "empty") {
+    return "";
+  }
+  const hash = address.address.indexOf("#");
+  return hash >= 0 ? address.address.slice(hash + 1) : "";
+}
+
+/**
+ * 滚到章节处。
+ *
+ * 地址里的 `#章节` 由后端解析并原样带回，但**滚动是前端的事**（和点页内锚点一样）。
+ * 必须等一次 nextTick：正文是 v-html 渲染的，此刻 DOM 里还没有那个锚点。
+ */
+async function scrollToSection(section: string) {
+  if (!section) {
+    return;
+  }
+  await nextTick();
+
+  let id = section;
+  try {
+    id = decodeURIComponent(section);
+  } catch {
+    // 非法转义序列就按原样找
+  }
+  document.getElementById(id)?.scrollIntoView({ block: "start" });
+}
+
 /** 回到最新提交 */
 function leaveRevision() {
   const title = note.value?.title;
@@ -853,6 +883,7 @@ async function navigate(input: string, movement: "replace" | "push" | "history" 
       return;
     case "note":
       await loadNote(address.title);
+      await scrollToSection(sectionOf(address));
       return;
     case "edit":
       await loadNote(address.title);
@@ -867,6 +898,7 @@ async function navigate(input: string, movement: "replace" | "push" | "history" 
       return;
     case "view-version":
       await openRevision(address.title, address.rev, address.short_id);
+      await scrollToSection(sectionOf(address));
       return;
     case "rollback-confirm":
       await loadNote(address.title);
