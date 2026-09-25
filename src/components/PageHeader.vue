@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Component } from "vue";
-import { History, Pencil } from "@lucide/vue";
+import { History, Pencil, Trash2 } from "@lucide/vue";
 
 /**
  * 页面标题行 + 页面操作。
@@ -15,11 +15,16 @@ import { History, Pencil } from "@lucide/vue";
 
 defineProps<{
   title: string;
+  /** 有斜杠（子页面）时上一级的标题；空串表示没有 */
+  parent: string;
   /** 正文已滚下去：收起并冻结 */
   collapsed: boolean;
 }>();
 
-const emit = defineEmits<{ (e: "action", name: string): void }>();
+const emit = defineEmits<{
+  (e: "action", name: string): void;
+  (e: "open-parent", title: string): void;
+}>();
 
 const actions: {
   name: string;
@@ -29,12 +34,24 @@ const actions: {
 }[] = [
   { name: "edit", label: "编辑", icon: Pencil },
   { name: "history", label: "版本历史", icon: History },
+  { name: "delete", label: "删除", icon: Trash2 },
 ];
 </script>
 
 <template>
   <div class="page-header" :class="{ 'page-header--collapsed': collapsed }">
-    <h1 class="page-title" :title="title">{{ title }}</h1>
+    <div class="page-heading">
+      <h1 class="page-title" :title="title">{{ title }}</h1>
+      <!-- 子页面（标题里有斜杠）给一个回上一级的出口 -->
+      <button
+        v-if="parent"
+        class="page-up"
+        type="button"
+        @click="emit('open-parent', parent)"
+      >
+        ◀ 返回上一级：{{ parent }}
+      </button>
+    </div>
 
     <div class="page-actions">
       <button
@@ -77,6 +94,28 @@ const actions: {
 
 /* 刻意比正文里的 H1（1.55em）大出一档：页面标题是这一页的主标题，
    正文的 H1 不该压过它 */
+.page-heading {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.page-up {
+  appearance: none;
+  display: block;
+  margin-top: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.page-up:hover {
+  color: var(--accent-soft);
+}
+
 .page-title {
   flex: 1 1 auto;
   min-width: 0;

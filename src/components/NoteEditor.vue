@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import { Check, Pencil, Save, Trash2, X } from "@lucide/vue";
+import { checkTitle } from "../title";
 
 /**
  * 顶用的编辑器：一个纯文本框 + 一排真按钮。
@@ -51,12 +53,29 @@ watch(
   },
 );
 
+/** 词法问题（空、@、非法字符、过长）即时反馈，不打扰后端 */
+const renameProblem = ref<string | null>(null);
+
+function localCheck() {
+  renameProblem.value = newTitle.value === props.title ? null : checkTitle(newTitle.value);
+  return renameProblem.value;
+}
+
 function submitRename() {
   const value = newTitle.value.trim();
   if (!value || value === props.title) {
     return;
   }
-  emit("rename", value);
+  if (localCheck()) {
+    return;
+  }
+
+  // 词法之外还有后端才知道的规则（命名空间前缀），所以落盘前问一次权威判定
+  void invoke("validate_title", { title: value })
+    .then(() => emit("rename", value))
+    .catch((error) => {
+      renameProblem.value = String(error);
+    });
 }
 
 function onInput(event: Event) {
@@ -85,12 +104,13 @@ function submit() {
         v-if="newTitle.trim() && newTitle.trim() !== title"
         class="ebtn"
         type="button"
-        :disabled="busy"
+        :disabled="busy || localCheck() !== null"
         @click="submitRename"
       >
         <Pencil :size="14" :stroke-width="1.9" />
         改名为「{{ newTitle.trim() }}」
       </button>
+      <span v-if="renameProblem" class="editor__problem">{{ renameProblem }}</span>
     </div>
 
     <div class="editor__bar">
@@ -161,6 +181,11 @@ function submit() {
   gap: 8px;
   align-items: center;
   margin-bottom: 8px;
+}
+
+.editor__problem {
+  color: var(--link-missing);
+  font-size: 12.5px;
 }
 
 .editor__name {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import FloatingTools from "./components/FloatingTools.vue";
 import HistoryView from "./components/HistoryView.vue";
@@ -12,6 +12,7 @@ import TabRail from "./components/TabRail.vue";
 import TitleBar from "./components/TitleBar.vue";
 import WindowResizeHandles from "./components/WindowResizeHandles.vue";
 import { PREFERENCE_KEYS, readFlag, writeFlag } from "./settings";
+import { splitTitleAndVersion } from "./title";
 
 /** 与 Rust 端 `NoteSummary` 对应（标签栏用，不含正文） */
 interface NoteSummary {
@@ -87,6 +88,14 @@ const busy = ref(false);
 const editorStatus = ref("");
 /** 搜索面板是否打开 */
 const searchOpen = ref(false);
+/** 阅读页只显示最新提交；存在草稿时提示，由用户点开 */
+const draftExists = ref(false);
+/** 删除确认条 */
+const confirmDelete = ref(false);
+/** 删除时顺手回收悬置数据 */
+const deleteWithGc = ref(false);
+/** 地址栏写了「标题@版本」时带进历史页 */
+const historyRev = ref<number | null>(null);
 let autosaveTimer: number | undefined;
 
 async function refreshNotes() {
@@ -120,6 +129,7 @@ async function openNote(title: string) {
     loadError.value = "";
     scrolled.value = false;
     scrollEl.value?.scrollTo({ top: 0 });
+    void refreshDraftHint(outcome.note.title);
   } catch (error) {
     console.debug("打开笔记失败:", title, error);
     // 只有在还没有任何笔记可看时，才让错误占满正文
@@ -393,9 +403,97 @@ function onMenu() {
   // TODO: 展开菜单（展开内容之后再接）
 }
 
-/** 地址栏提交 = 按标题打开（目标不存在会切到「不存在」视图） */
+/** 阅读页只显示最新提交；有草稿就提示一下，点按钮才进编辑器看 */
+async function refreshDraftHint(title: string) {
+  draftExists.value = false;
+  try {
+    const draft = await invoke<Draft | null>("load_draft", { title });
+    draftExists.value = Boolean(draft);
+  } catch (error) {
+    console.debug("检查草稿失败:", error);
+  }
+}
+
+/** 子页面（标题里有斜杠）的上一级 */
+const parentTitle = computed(() => {
+  const title = note.value?.title ?? "";
+  const cut = title.lastIndexOf("/");
+  return cut > 0 ? title.slice(0, cut) : "";
+});
+
+/**
+ * 地址栏提交 = 按标题打开，支持「标题@版本」指定版本。
+ * 标题里不允许 @（后端也拦），所以这个语法不会和标题打架。
+ */
 function onSubmit(value: string) {
-  void openNote(value);
+  const { title, version } = splitTitleAndVersion(value);
+  if (!title) {
+    return;
+  }
+
+  historyRev.value = version;
+  void openNote(title).then(() => {
+    if (version && note.value) {
+      mode.value = "history";
+    }
+  });
+}
+
+/** 删除：写删除标记 + 把文件挪进 trash/，历史不丢；可勾选顺手回收 */
+async function doDelete() {
+  const current = note.value;
+  if (!current) {
+    return;
+  }
+
+  busy.value = true;
+  try {
+    await invoke("delete_note", { title: current.title });
+    if (deleteWithGc.value) {
+      await invoke("gc", { orphanBlobs: true, supersededDrafts: true });
+    }
+
+    confirmDelete.value = false;
+    note.value = null;
+    await refreshNotes();
+
+    const first = notes.value[0];
+    if (first) {
+      await openNote(first.title);
+    } else {
+      mode.value = "read";
+      loadError.value = "仓库里还没有笔记";
+    }
+  } catch (error) {
+    loadError.value = String(error);
+  } finally {
+    busy.value = false;
+  }
+}
+
+/** 回退：把某一版内容作为**新提交**写上去，旧记录一条不改 */
+async function onRevert(rev: number) {
+  const current = note.value;
+  if (!current) {
+    return;
+  }
+
+  busy.value = true;
+  try {
+    note.value = await invoke<Note>("revert_note", {
+      title: current.title,
+      rev,
+      summary: null,
+    });
+    // 清掉「指定版本」，历史页重新挂载后回到最新一版
+    historyRev.value = null;
+    draftExists.value = false;
+    await refreshNotes();
+  } catch (error) {
+    console.debug("回退失败:", error);
+  } finally {
+    busy.value = false;
+  }
 }
 
 /**
@@ -419,6 +517,10 @@ function onAction(name: string) {
   }
   if (name === "history") {
     openHistory();
+    return;
+  }
+  if (name === "delete") {
+    confirmDelete.value = true;
     return;
   }
   console.debug("page action:", name);
@@ -480,18 +582,39 @@ function onAction(name: string) {
 
           <HistoryView
             v-else-if="mode === 'history' && note"
+            :key="`${note.key}:${historyRev ?? 0}:${note.rev}`"
             :title="note.title"
             :current-rev="note.rev"
+            :initial-rev="historyRev"
             @close="closeHistory"
             @restore="restoreVersion"
+            @revert="onRevert"
           />
 
           <template v-else-if="note">
+            <p v-if="draftExists" class="app__draft">
+              这篇笔记有未提交的草稿（当前显示的是最新提交）。
+              <button type="button" @click="beginEditing">查看草稿</button>
+            </p>
+
             <PageHeader
               :title="note.title"
+              :parent="parentTitle"
               :collapsed="scrolled"
               @action="onAction"
+              @open-parent="onNoteSelected"
             />
+
+            <p v-if="confirmDelete" class="app__confirm">
+              <span>删除《{{ note.title }}》？历史一条都不会丢，文件会挪进 trash/。</span>
+              <label class="app__confirm-gc">
+                <input v-model="deleteWithGc" type="checkbox" />
+                顺手回收悬置数据
+              </label>
+              <button type="button" :disabled="busy" @click="doDelete">确认删除</button>
+              <button type="button" @click="confirmDelete = false">取消</button>
+            </p>
+
             <NoteContent :html="note.html" @wikilink="onWikiLink" />
           </template>
 
@@ -554,6 +677,50 @@ function onAction(name: string) {
    用 100% 而不是 none —— none 不可插值，上面的过渡会直接断掉。 */
 .app__column--wide {
   max-width: 100%;
+}
+
+.app__draft,
+.app__confirm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin: 16px 0 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.app__draft button,
+.app__confirm button {
+  appearance: none;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent-soft);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.app__draft button:hover,
+.app__confirm button:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.app__confirm button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.app__confirm-gc {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  cursor: pointer;
 }
 
 .app__error {

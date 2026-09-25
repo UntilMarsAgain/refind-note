@@ -54,12 +54,16 @@ const props = defineProps<{
   title: string;
   /** 当前版本号，用来在列表里标出「当前」 */
   currentRev: number;
+  /** 地址栏写了「标题@版本」时，进来就选中这一版 */
+  initialRev?: number | null;
 }>();
 
 const emit = defineEmits<{
   (e: "close"): void;
   /** 把某一版的内容取回编辑器继续编辑 */
   (e: "restore", content: RevisionContent): void;
+  /** 回退到某一版：作为新提交写上去，旧记录不动 */
+  (e: "revert", rev: number): void;
 }>();
 
 /** 差异里每条改动前后保留的上下文行数 */
@@ -148,10 +152,14 @@ async function load() {
     history.value = await invoke<RevisionSummary[]>("note_history", {
       title: props.title,
     });
-    // 默认选中最新一个有正文的版本
-    const latest = [...history.value].reverse().find((item) => item.rev > 0);
-    if (latest) {
-      await select(latest.rev);
+    // 地址栏指定了版本就选它，否则选最新一个有正文的版本
+    const wanted = props.initialRev;
+    const target =
+      wanted && history.value.some((item) => item.rev === wanted)
+        ? wanted
+        : [...history.value].reverse().find((item) => item.rev > 0)?.rev;
+    if (target) {
+      await select(target);
     }
   } catch (err) {
     error.value = String(err);
@@ -286,6 +294,14 @@ watch(() => props.title, load);
             </span>
           </span>
 
+          <button
+            v-if="content && selectedRev !== null && selectedRev !== currentRev"
+            class="hbtn"
+            type="button"
+            @click="emit('revert', selectedRev)"
+          >
+            回退到这一版
+          </button>
           <button
             v-if="panel === 'content' && content"
             class="hbtn hbtn--accent"
