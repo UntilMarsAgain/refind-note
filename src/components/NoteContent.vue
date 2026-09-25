@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref, watch } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import hljs from "highlight.js/lib/common";
@@ -91,6 +92,18 @@ watch(
 function onClick(event: MouseEvent) {
   const target = event.target;
   if (!(target instanceof Element)) {
+    return;
+  }
+
+  // 内部链接没有 href，必须先判它，否则会被下面的 a[href] 分支漏掉
+  const wikiLink = target.closest("a.wikilink");
+  if (wikiLink) {
+    event.preventDefault();
+    const doc = wikiLink.getAttribute("data-doc");
+    if (doc) {
+      // 跳转还没实现，先由后端把调用打到命令行
+      void invoke("open_wikilink", { doc });
+    }
     return;
   }
 

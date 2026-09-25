@@ -89,10 +89,20 @@
   color: var(--accent-soft);
   text-decoration: none;
   border-bottom: 1px solid transparent;
+  cursor: pointer;
 }
 
 .note-body a:hover {
   border-bottom-color: currentColor;
+}
+
+/* 内部链接：用点状下划线跟外链区分开，也暗示它暂时还没法真正跳转 */
+.note-body a.wikilink {
+  border-bottom-style: dotted;
+}
+
+.note-body a.wikilink:hover {
+  border-bottom-style: solid;
 }
 
 /* ---------- 列表 ---------- */
