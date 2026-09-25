@@ -57,7 +57,8 @@ const emit = defineEmits<{
   /** 导航到某一版的地址（前端拼成「标题@缩写」交给统一的地址栏解析） */
   (e: "open-revision", reference: string): void;
   /** 回退到某一版：作为新提交写上去，旧记录不动 */
-  (e: "revert", rev: number): void;
+  /** 请求回退到某一版：带上缩写，交给统一的地址解析（先落到确认页） */
+  (e: "rollback", reference: string): void;
 }>();
 
 /** 差异里每条改动前后保留的上下文行数 */
@@ -269,10 +270,10 @@ watch(() => props.title, load);
           </button>
 
           <button
-            v-if="selectedRev !== null && selectedRev !== currentRev"
+            v-if="selectedShort && selectedRev !== currentRev"
             class="hbtn"
             type="button"
-            @click="emit('revert', selectedRev)"
+            @click="emit('rollback', selectedShort)"
           >
             回退到这一版
           </button>

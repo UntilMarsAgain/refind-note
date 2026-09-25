@@ -64,22 +64,31 @@ interface RevisionContent {
   html: string;
 }
 
-type Mode = "read" | "edit" | "missing" | "history";
+type Mode = "read" | "edit" | "missing" | "history" | "delete" | "rollback";
 
 /** 与 Rust 端 `Address` 对应：地址栏那一行的解析结果（后端解析到底） */
 type Address =
   | { kind: "empty" }
   | { kind: "note"; title: string; address: string }
+  | { kind: "edit"; title: string; address: string }
+  | { kind: "history"; title: string; address: string }
+  | { kind: "delete"; title: string; address: string }
   | {
-      kind: "revision";
+      kind: "view-version";
       title: string;
       rev: number;
       id: string;
       short_id: string;
       address: string;
     }
-  | { kind: "edit"; title: string; address: string }
-  | { kind: "history"; title: string; address: string }
+  | {
+      kind: "rollback-confirm";
+      title: string;
+      rev: number;
+      id: string;
+      short_id: string;
+      address: string;
+    }
   | { kind: "missing"; title: string; address: string };
 
 /** 自动保存：停手三秒后写一条草稿到链上 */
@@ -104,6 +113,10 @@ const mode = computed<Mode>(() => {
       return "edit";
     case "history":
       return "history";
+    case "delete":
+      return "delete";
+    case "rollback-confirm":
+      return "rollback";
     case "missing":
       return "missing";
     default:
@@ -130,8 +143,6 @@ const editorStatus = ref("");
 const searchOpen = ref(false);
 /** 阅读页只显示最新提交；存在草稿时提示，由用户点开 */
 const draftExists = ref(false);
-/** 删除确认条 */
-const confirmDelete = ref(false);
 /** 草稿提醒被忽略过一次（换地址会重新出现） */
 const draftHintDismissed = ref(false);
 /** 删除时顺手回收悬置数据 */
@@ -469,8 +480,15 @@ async function refreshDraftHint(title: string) {
   }
 }
 
-/** 只读查看的那一版内容；只有 navigate() 会写它 */
+/** 只读查看的那一版内容（地址 `名称@view-缩写` 时才有）；只有 navigate() 会写它 */
 const revisionView = ref<{ rev: number; shortId: string; html: string } | null>(null);
+
+/**
+ * 回退确认页要回退到哪一版（地址 `名称@rollback-缩写` 时才有）。
+ *
+ * 同样只有 navigate() 写它 —— 确认页本身也是一个地址，所以「要回退到哪一版」在地址里。
+ */
+const rollbackTarget = ref<{ rev: number; shortId: string } | null>(null);
 
 /**
  * 章节是**唯一允许前端自己确定**的部分：正文里的定位属于界面自己的事，
@@ -544,19 +562,31 @@ function leaveRevision() {
   }
 }
 
+/** 从确认页取消：回退确认取消时回到「查看那一版」（用户本来就是从那里点过来的） */
+function cancelConfirm() {
+  const title = note.value?.title;
+  if (!title) {
+    return;
+  }
+  if (mode.value === "rollback" && rollbackTarget.value) {
+    void navigate(`view-${rollbackTarget.value.shortId}`);
+    return;
+  }
+  void navigate(title);
+}
+
 /** 只读查看某一版：地址解析已经确认它存在，这里只取内容 */
-async function openRevision(title: string, reference: string) {
-  const rev = await invoke<number>("resolve_revision", { title, reference });
+
+
+/**
+ * 只读查看某一版。
+ *
+ * 地址（`名称@view-缩写`）里已经有版本号与缩写，所以这里只取内容。
+ */
+async function openRevision(title: string, rev: number, shortId: string) {
   const content = await invoke<RevisionContent>("note_revision", { title, rev });
-
-  // 顺带拿到这一版的缩写（地址栏回显由后端给，这里只是兜底）
-  const history = await invoke<{ rev: number; short_id: string }[]>("note_history", {
-    title,
-  });
-  const entry = history.find((item) => item.rev === rev);
-
   await loadNote(title);
-  revisionView.value = { rev, shortId: entry?.short_id ?? reference, html: content.html };
+  revisionView.value = { rev, shortId, html: content.html };
 }
 
 /** 草稿预览：草稿也是链上的一版，所以走同一条地址通道 */
@@ -631,8 +661,8 @@ async function navigate(input: string) {
   // 权威副本先落地，其余派生状态都由它决定
   route.value = address;
   revisionView.value = null;
+  rollbackTarget.value = null;
   localSection.value = "";
-  confirmDelete.value = false;
   draftHintDismissed.value = false;
 
   switch (address.kind) {
@@ -646,8 +676,16 @@ async function navigate(input: string) {
     case "history":
       await loadNote(address.title);
       return;
-    case "revision":
-      await openRevision(address.title, address.short_id);
+    case "delete":
+      // 删除的二次确认页：确认状态本身也在地址里
+      await loadNote(address.title);
+      return;
+    case "view-version":
+      await openRevision(address.title, address.rev, address.short_id);
+      return;
+    case "rollback-confirm":
+      await loadNote(address.title);
+      rollbackTarget.value = { rev: address.rev, shortId: address.short_id };
       return;
     case "missing":
       showMissing(address.title);
@@ -671,7 +709,6 @@ async function doDelete() {
       await invoke("gc", { orphanBlobs: true, supersededDrafts: true });
     }
 
-    confirmDelete.value = false;
     rejectedAddress.value = "";
     note.value = null;
     await refreshNotes();
@@ -693,9 +730,25 @@ async function doDelete() {
 }
 
 /** 回退：把某一版内容作为**新提交**写上去，旧记录一条不改 */
-async function onRevert(rev: number) {
+
+
+/**
+ * 要求回退到某一版：**先去确认页**（`名称@rollback-缩写`），确认后才真的动手。
+ *
+ * 回退虽然不丢历史，但会写一个新提交，所以不直接执行 —— 与删除一样先落到一页确认上，
+ * 而这一页本身也是地址。
+ */
+function onRollbackRequire(reference: string) {
+  if (reference) {
+    void navigate(`rollback-${reference}`);
+  }
+}
+
+/** 确认回退：把那一版内容作为**新提交**写上去，旧记录一条不改 */
+async function doRollback() {
   const current = note.value;
-  if (!current) {
+  const target = rollbackTarget.value;
+  if (!current || !target) {
     return;
   }
 
@@ -703,15 +756,15 @@ async function onRevert(rev: number) {
   try {
     await invoke<Note>("revert_note", {
       title: current.title,
-      rev,
+      rev: target.rev,
       summary: null,
     });
     draftExists.value = false;
     await refreshNotes();
-    // 回退是一个新提交：回到阅读地址，让用户直接看到回退后的内容
+    // 回到阅读地址，让用户直接看到回退后的内容
     await navigate(current.title);
   } catch (error) {
-    console.debug("回退失败:", error);
+    addressError.value = String(error);
   } finally {
     busy.value = false;
   }
@@ -740,7 +793,8 @@ function onAction(name: string) {
     return;
   }
   if (name === "delete") {
-    confirmDelete.value = true;
+    // 删除不是弹出框，是一页地址：`名称@delete`
+    void navigate(`${title}@delete`);
     return;
   }
   console.debug("page action:", name);
@@ -806,9 +860,59 @@ function onAction(name: string) {
             :title="note.title"
             :current-rev="note.rev"
             @close="closeHistory"
-            @revert="onRevert"
+            @rollback="onRollbackRequire"
             @open-revision="onOpenRevision"
           />
+
+          <!-- 删除的二次确认：一页地址（`名称@delete`），不再是弹出框 -->
+          <template v-else-if="mode === 'delete' && note">
+            <section class="confirm">
+              <h2 class="confirm__title">删除《{{ note.title }}》？</h2>
+              <p class="confirm__body">
+                历史一条都不会丢：会写一条删除标记，文件挪进 <code>trash/</code>，
+                随时可以捞回来。
+              </p>
+              <label class="confirm__opt">
+                <input v-model="deleteWithGc" type="checkbox" />
+                顺手回收悬置数据
+              </label>
+              <div class="confirm__actions">
+                <button type="button" @click="cancelConfirm">取消</button>
+                <button
+                  class="confirm__danger"
+                  type="button"
+                  :disabled="busy"
+                  @click="doDelete"
+                >
+                  确认删除
+                </button>
+              </div>
+            </section>
+          </template>
+
+          <!-- 回退的二次确认：`名称@rollback-缩写` -->
+          <template v-else-if="mode === 'rollback' && note && rollbackTarget">
+            <section class="confirm">
+              <h2 class="confirm__title">
+                回退到版本 {{ rollbackTarget.rev }}（{{ rollbackTarget.shortId }}）？
+              </h2>
+              <p class="confirm__body">
+                内容取自 <code>{{ note.title }}@view-{{ rollbackTarget.shortId }}</code>
+                ，作为<strong>新提交</strong>写上去；旧版本一条不改，历史里会多出一版。
+              </p>
+              <div class="confirm__actions">
+                <button type="button" @click="cancelConfirm">取消</button>
+                <button
+                  class="confirm__danger"
+                  type="button"
+                  :disabled="busy"
+                  @click="doRollback"
+                >
+                  确认回退
+                </button>
+              </div>
+            </section>
+          </template>
 
           <template v-else-if="note">
             <!-- 不是最新提交：明确提示，并给一个回最新的出口 -->
@@ -820,7 +924,10 @@ function onAction(name: string) {
                 （第 {{ revisionView.rev }} 版，不是最新提交）
               </span>
               <span class="revbar__actions">
-                <button type="button" @click="onRevert(revisionView.rev)">
+                <button
+                  type="button"
+                  @click="onRollbackRequire(revisionView.shortId)"
+                >
                   回退到这一版
                 </button>
                 <button type="button" @click="leaveRevision">回到最新版本</button>
@@ -882,25 +989,6 @@ function onAction(name: string) {
     </span>
   </div>
 
-  <!-- 删除确认：整页弹出，必须明确选择才继续 -->
-  <div v-if="confirmDelete && note" class="modal" @click.self="confirmDelete = false">
-    <div class="modal__card">
-      <h2 class="modal__title">删除《{{ note.title }}》？</h2>
-      <p class="modal__body">
-        历史一条都不会丢：会写一条删除标记，文件挪进 <code>trash/</code>，随时可以捞回来。
-      </p>
-      <label class="modal__opt">
-        <input v-model="deleteWithGc" type="checkbox" />
-        顺手回收悬置数据
-      </label>
-      <div class="modal__actions">
-        <button type="button" @click="confirmDelete = false">取消</button>
-        <button class="modal__danger" type="button" :disabled="busy" @click="doDelete">
-          确认删除
-        </button>
-      </div>
-    </div>
-  </div>
 </template>
 
 <style scoped>
@@ -1102,55 +1190,52 @@ function onAction(name: string) {
 }
 
 /* 删除确认：整页弹出 */
-.modal {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgb(0 0 0 / 45%);
-}
-
-.modal__card {
-  width: min(420px, 86vw);
+/* 确认页（删除 / 回退）：也是一页地址，不再用弹出框 */
+.confirm {
+  max-width: 560px;
+  margin: 24px auto 0;
   padding: 20px 22px;
   border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--bg);
+  border-left-width: 3px;
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.confirm__title {
+  margin: 0 0 10px;
   color: var(--text);
-  box-shadow: 0 20px 60px rgb(0 0 0 / 35%);
+  font-size: 16px;
 }
 
-.modal__title {
-  margin: 0 0 8px;
-  font-size: 15px;
-}
-
-.modal__body {
-  margin: 0 0 14px;
+.confirm__body {
+  margin: 0 0 16px;
   color: var(--text-dim);
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: 13.5px;
+  line-height: 1.7;
 }
 
-.modal__opt {
+.confirm__body code {
+  font-family: var(--mono-font);
+  color: var(--text);
+}
+
+.confirm__opt {
   display: flex;
   gap: 6px;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
   color: var(--text-dim);
   font-size: 13px;
   cursor: pointer;
 }
 
-.modal__actions {
+.confirm__actions {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
 }
 
-.modal__actions button {
+.confirm__actions button {
   appearance: none;
   height: 30px;
   padding: 0 14px;
@@ -1162,16 +1247,16 @@ function onAction(name: string) {
   cursor: pointer;
 }
 
-.modal__actions button:hover:not(:disabled) {
+.confirm__actions button:hover:not(:disabled) {
   background: var(--hover);
 }
 
-.modal__actions button:disabled {
+.confirm__actions button:disabled {
   opacity: 0.5;
   cursor: default;
 }
 
-.modal__danger {
+.confirm__danger {
   border-color: var(--link-missing);
   color: var(--link-missing);
 }
