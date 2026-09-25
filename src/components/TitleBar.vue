@@ -81,6 +81,25 @@ const themeIcons: Record<ThemeMode, Component> = {
 
 const themeIcon = computed(() => themeIcons[themeMode.value]);
 
+/**
+ * 图标文件按**解析后**的主题选。
+ *
+ * 外部 SVG 是独立文档，`currentColor` 无从继承，颜色必须写在文件里 —— 所以深色主题
+ * （浅色笔画）与浅色主题（深色笔画）各一张。`themeMode` 是响应式的，设置页改主题会立刻换图；
+ * "跟随系统"时另听 media query，这样系统切换也跟得上。
+ */
+const prefersLight = window.matchMedia("(prefers-color-scheme: light)");
+const systemPrefersLight = ref(prefersLight.matches);
+prefersLight.addEventListener("change", (event) => {
+  systemPrefersLight.value = event.matches;
+});
+
+const logoSrc = computed(() => {
+  const mode = themeMode.value;
+  const light = mode === "light" || (mode === "system" && systemPrefersLight.value);
+  return light ? "/logo-light.svg" : "/logo.svg";
+});
+
 let unlistenResized: (() => void) | undefined;
 
 onMounted(async () => {
@@ -132,45 +151,12 @@ function onBlur() {
         这样深色主题下是浅色笔画、浅色主题下是深色笔画（见 .logo 的 color）。
         内联而不是 <img> —— 只有内联的 SVG 才吃得到 currentColor。
       -->
-      <svg
-        class="logo"
-        xmlns="http://www.w3.org/2000/svg"
-        width="128"
-        height="128"
-        viewBox="0 0 128 128"
-        aria-hidden="true"
-        focusable="false"
-      >
-        <defs>
-          <mask id="refindKnock">
-            <rect x="8" y="8" width="112" height="112" rx="26" fill="#000" />
-            <path
-              d="M76 93H52A17 17 0 0 1 35 76V52A17 17 0 0 1 52 35h24A17 17 0 0 1 93 52v24"
-              fill="none"
-              stroke="#fff"
-              stroke-width="9"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-            <path
-              d="M56.5 47h15a4.5 4.5 0 0 1 4.5 4.5v29L64 72.8 52 80.5v-29A4.5 4.5 0 0 1 56.5 47Z"
-              fill="#fff"
-              stroke="#fff"
-              stroke-width="2.5"
-              stroke-linejoin="round"
-            />
-          </mask>
-        </defs>
-        <rect
-          x="8"
-          y="8"
-          width="112"
-          height="112"
-          rx="26"
-          fill="currentColor"
-          mask="url(#refindKnock)"
-        />
-      </svg>
+      <!--
+        引用 public/ 下的文件，不再内联。
+        代价：外部 SVG 无法继承 currentColor，颜色只能写进文件，因此按主题备两张
+        （深色用 logo.svg、浅色用 logo-light.svg），由下面的 logoSrc 选择。
+      -->
+      <img class="logo" :src="logoSrc" alt="" draggable="false" />
       <span class="divider" />
 
       <button
@@ -396,7 +382,8 @@ function onBlur() {
  * 原图是抠空的（可见的是方块、形是透明的洞），于是「形」永远等于
  * 背景色：方块一旦接近底色就整块看不见。这里把 mask 反相，让可见的是形本身。
  */
+/* 颜色写在文件里（见 logoSrc），这里不再设 color */
 .logo {
-  color: var(--text);
+  -webkit-user-drag: none;
 }
 </style>
