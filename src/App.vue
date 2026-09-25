@@ -337,10 +337,20 @@ function moveTab(from: number, to: number) {
 }
 
 /** 关闭标签页；关掉当前这个就切到邻居，全关了就给一个新的，免得出现没有标签页的空壳 */
+/**
+ * 抖动信号：每次"关掉最后一个标签、于是又新建了一个"就 +1。
+ *
+ * 只在**这一条路径**上自增 —— 点加号新建、启动时新建都不该抖（那本来就有明确的动作）。
+ */
+const shakeTick = ref(0);
+
 function closeTab(index: number) {
   if (tabs.value.length <= 1) {
     tabs.value = [];
     openNewTab();
+    // 让新建的这个抖一下：关闭**是**生效了，只是又开了一个。
+    // 不抖的话，点了关闭、界面看着没什么变化，用户会以为没反应。
+    shakeTick.value += 1;
     return;
   }
 
@@ -1369,6 +1379,7 @@ function onAction(name: string) {
       <TabRail
         :tabs="tabs"
         :active="activeTab"
+        :shake-tick="shakeTick"
         @select="selectTab"
         @close="closeTab"
         @new-tab="openNewTab"

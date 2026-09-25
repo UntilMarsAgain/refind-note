@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { onBeforeUnmount, ref, watch } from "vue";
 import {
   PanelLeftClose,
   PanelLeftOpen,
@@ -18,9 +18,16 @@ import { PREFERENCE_KEYS, readFlag, writeFlag } from "../settings";
  * 最顶部是展开 / 收起与新建标签页：收起时只留一个首字（没有图标可用时至少还能分辨），
  * 展开状态记进界面偏好，下次打开保持原样。
  */
-defineProps<{
+const props = defineProps<{
   tabs: { address: string; title: string }[];
   active: number;
+  /**
+   * 抖动信号：每变一次就让标签抖一下。
+   *
+   * 用在"关掉最后一个标签、于是又新建了一个"这种场合 —— 抖一下告诉用户
+   * 关闭生效了、只是又开了一个，而不是点了没反应。
+   */
+  shakeTick: number;
 }>();
 
 const emit = defineEmits<{
@@ -31,6 +38,24 @@ const emit = defineEmits<{
   (e: "move", from: number, to: number): void;
   (e: "settings"): void;
 }>();
+
+/** 正在抖的是哪一格（连索引一起记下来：之后切标签不该把动画挪走） */
+const shakeIndex = ref<number | null>(null);
+let shakeTimer: number | undefined;
+
+watch(
+  () => props.shakeTick,
+  () => {
+    shakeIndex.value = props.active;
+    window.clearTimeout(shakeTimer);
+    // 与 CSS 里的动画时长一致；到点把类摘掉，下次才能再触发
+    shakeTimer = window.setTimeout(() => {
+      shakeIndex.value = null;
+    }, 420);
+  },
+);
+
+onBeforeUnmount(() => window.clearTimeout(shakeTimer));
 
 /** 正在拖的标签页与拖到哪一格上面（用来画插入位置） */
 const dragging = ref<number | null>(null);
@@ -117,6 +142,7 @@ function initialOf(tab: { address: string; title: string }) {
           :class="{
             'rail__item--active': index === active,
             'rail__item--over': overIndex === index && dragging !== index,
+            'rail__item--shake': shakeIndex === index,
           }"
           @mousedown.middle.prevent="emit('close', index)"
         >
@@ -411,4 +437,49 @@ function initialOf(tab: { address: string; title: string }) {
 .rail__settings svg {
   flex-shrink: 0;
 }
+/* ---------- 抖动：关掉最后一个标签、于是又新建了一个 ---------- */
+
+/*
+ * 横向小幅晃动（不旋转、不放大）：要的是"这里有反应"，不是吸引眼球的特效。
+ * 时长与 TabRail 里那个 420ms 的定时器一致 —— 到点摘掉类，下次才能再抖。
+ */
+.rail__item--shake {
+  animation: rail-shake 420ms ease-in-out;
+}
+
+@keyframes rail-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-3px);
+  }
+  40% {
+    transform: translateX(3px);
+  }
+  60% {
+    transform: translateX(-2px);
+  }
+  80% {
+    transform: translateX(2px);
+  }
+}
+
+/* 关掉动效的用户：改成一次淡淡的底色提示 —— 信息不能因为"不喜欢动画"而丢掉 */
+@media (prefers-reduced-motion: reduce) {
+  .rail__item--shake {
+    animation: rail-flash 420ms ease-out;
+  }
+
+  @keyframes rail-flash {
+    from {
+      background-color: var(--accent-tint);
+    }
+    to {
+      background-color: transparent;
+    }
+  }
+}
+
 </style>
