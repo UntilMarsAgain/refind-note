@@ -126,8 +126,9 @@ function onBlur() {
   <header class="titlebar" data-tauri-drag-region="deep">
     <div class="titlebar__start">
       <!--
-        应用图标：用 currentColor 填色、靠 mask 抠出书形，
-        所以浅色/深色主题只要给它不同的 color 就自动适配（见 .logo 的 color）。
+        应用图标（敲门 + 书）。
+        mask 已反相：底色透明、**可见的就是这个形本身**，笔画色取 currentColor。
+        这样深色主题下是浅色笔画、浅色主题下是深色笔画（见 .logo 的 color）。
         内联而不是 <img> —— 只有内联的 SVG 才吃得到 currentColor。
       -->
       <svg
@@ -141,19 +142,19 @@ function onBlur() {
       >
         <defs>
           <mask id="refindKnock">
-            <rect x="8" y="8" width="112" height="112" rx="26" fill="#fff" />
+            <rect x="8" y="8" width="112" height="112" rx="26" fill="#000" />
             <path
               d="M76 93H52A17 17 0 0 1 35 76V52A17 17 0 0 1 52 35h24A17 17 0 0 1 93 52v24"
               fill="none"
-              stroke="#000"
+              stroke="#fff"
               stroke-width="9"
               stroke-linecap="round"
               stroke-linejoin="round"
             />
             <path
               d="M56.5 47h15a4.5 4.5 0 0 1 4.5 4.5v29L64 72.8 52 80.5v-29A4.5 4.5 0 0 1 56.5 47Z"
-              fill="#000"
-              stroke="#000"
+              fill="#fff"
+              stroke="#fff"
               stroke-width="2.5"
               stroke-linejoin="round"
             />
@@ -388,12 +389,13 @@ function onBlur() {
   color: #fff;
 }
 /*
- * 图标是一块实心圆角方块 + 抠空的「敲门/书」形，所以它的颜色就是**方块的颜色**：
- * 深色主题下要是深色方块、浅色主题下要是浅色方块（与这张图原样渲染出来一致）。
- * `--surface` 正好是这个走向：深色下 #372728、浅色下 #ffffff。
- * （用 --text 会反过来 —— 深色下变成浅色方块，那就不是这张图的样子了。）
+ * 笔画色跟随正文色：深色主题下是浅色形、浅色主题下是深色形 —— 两侧都与标题栏底色
+ * 反差足够，形才看得见。
+ *
+ * 教训：这张图原本是**抠空**的（可见的是方块、形是透明的洞），于是「形」永远等于
+ * 背景色 —— 方块一旦接近底色就整块看不见。所以这里把 mask 反了过来，让可见的是形。
  */
 .logo {
-  color: var(--surface);
+  color: var(--text);
 }
 </style>
