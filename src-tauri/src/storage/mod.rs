@@ -758,13 +758,16 @@ impl Vault {
 
         // 虚拟命名空间 `special:`：不对应笔记文件，交给前端渲染特殊页面。
         // 优先于笔记形态判断；标题里不允许冒号，所以不可能有笔记叫这个名字。
-        if raw.len() >= 8 && raw[..8].eq_ignore_ascii_case("special:") {
-            let rest = &raw[8..];
-            let page = match rest.find('#') {
-                Some(index) => &rest[..index],
-                None => rest,
-            };
-            let page = page.trim().to_ascii_lowercase();
+        // ⚠️ 这里必须用 get(..n) 而不是 &raw[..n]：后者按**字节**切，中文标题（如
+        // 「平陆运河」12 字节）会让切口落在字符中间直接 panic；而这个 panic 发生在
+        // GTK 回调里不能 unwind，会把整个应用 abort。
+        if let Some(rest) = strip_prefix_ci(raw, "special:") {
+            let page = rest
+                .split('#')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase();
 
             if page.is_empty() {
                 return Err(VaultError::BadAddress(
@@ -1396,6 +1399,15 @@ pub fn default_root() -> Result<PathBuf, VaultError> {
 }
 
 
+
+/// 大小写不敏感地去掉 ASCII 前缀。
+///
+/// 刻意用 `get(..n)`：直接切 `&value[..n]` 会在多字节字符中间 panic。
+fn strip_prefix_ci<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
+    let head = value.get(..prefix.len())?;
+    head.eq_ignore_ascii_case(prefix)
+        .then(|| &value[prefix.len()..])
+}
 
 /// 规范地址拼装：`NAME[@STATE][#章节]`。
 ///
@@ -2142,6 +2154,31 @@ mod tests {
 
         // 笔记不可能叫这个名字：标题里禁止冒号
         assert!(temp.vault.validate_title("special:newtab").is_err());
+    }
+
+    /// 回归：多字节标题不能让解析 panic。
+    ///
+    /// 曾经写成 `raw[..8]`（按字节切），中文标题会让切口落在字符中间 —— 而且这个
+    /// panic 在 GTK 回调里不能 unwind，会把整个应用 abort。
+    #[test]
+    fn multi_byte_titles_do_not_panic() {
+        let temp = TempVault::new();
+
+        // 「平陆运河」是 12 字节，第 8 个字节落在「运」中间
+        assert!(matches!(
+            temp.vault.parse_address("平陆运河").unwrap(),
+            Address::Missing { .. }
+        ));
+
+        // 各种长度都过一遍，确保没有别处按字节切
+        for title in ["页", "页面", "页面名", "页面名字", "页面名字啊", "页面名字啊啊"] {
+            let _ = temp.vault.parse_address(title);
+            let _ = temp.vault.validate_title(title);
+        }
+
+        // 大小写不敏感的前缀判断本身也要能处理多字节
+        assert!(strip_prefix_ci("Special:newtab", "special:").is_some());
+        assert!(strip_prefix_ci("特殊:newtab", "special:").is_none());
     }
 
     #[test]
