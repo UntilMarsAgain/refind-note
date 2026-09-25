@@ -22,6 +22,14 @@ interface Settings {
 const props = defineProps<{ settings: Settings; focus?: string }>();
 
 /**
+ * 当前运行的前端产物文件名（含内容哈希）。
+ *
+ * 没有 devtools 时，这是判断"看到的是不是最新构建"的唯一可靠依据 ——
+ * 把它和构建日志里的文件名对一下即可。
+ */
+const bundleName = import.meta.url.split("/").pop() ?? "";
+
+/**
  * 每个设置项的 id 是**地址的一部分**（`special:settings#accent` 能直接跳过去），
  * 因此它们等于对外接口：改名要同步改这里的 id 与文案。
  */
@@ -105,6 +113,8 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
       每一项的 id 可直接用作地址锚点，例如 <code>special:settings#accent</code>
       会跳到主题色并高亮。
     </p>
+
+    <p class="settings__where">界面版本：<code>{{ bundleName }}</code></p>
 
     <h2 class="settings__section">外观</h2>
 
