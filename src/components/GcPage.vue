@@ -9,41 +9,26 @@
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 
-interface GcReport {
-  removed_blobs: number;
-  freed_bytes: number;
-  removed_drafts: number;
-}
-
 const orphanBlobs = ref(true);
 const supersededDrafts = ref(true);
-const busy = ref(false);
-const report = ref<GcReport | null>(null);
+/** 已提交的任务 id（提交本身是瞬时的，所以这里只用来给一句反馈） */
+const submitted = ref<number | null>(null);
 const error = ref("");
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes} 字节`;
-  }
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KiB`;
-  }
-  return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
-}
-
+/**
+ * 只**提交任务**，不等它跑完：回收是长期操作，进度与结果都在底部任务栏。
+ * 这样按钮不会长时间处于"忙"状态，也可以连续提交。
+ */
 async function run() {
-  busy.value = true;
   error.value = "";
-  report.value = null;
+  submitted.value = null;
   try {
-    report.value = await invoke<GcReport>("gc", {
+    submitted.value = await invoke<number>("submit_gc", {
       orphanBlobs: orphanBlobs.value,
       supersededDrafts: supersededDrafts.value,
     });
   } catch (reason) {
     error.value = String(reason);
-  } finally {
-    busy.value = false;
   }
 }
 </script>
@@ -81,21 +66,18 @@ async function run() {
       <button
         class="gc__run"
         type="button"
-        :disabled="busy || (!orphanBlobs && !supersededDrafts)"
+        :disabled="!orphanBlobs && !supersededDrafts"
         @click="run"
       >
-        {{ busy ? "正在回收…" : "开始回收" }}
+        开始回收
       </button>
       <span class="gc__warn">回收会删除这些数据，无法撤销。</span>
     </div>
 
-    <p v-if="error" class="gc__error">回收失败：{{ error }}</p>
-    <div v-else-if="report" class="gc__report">
-      <p class="gc__report-row">
-        孤立数据块：{{ report.removed_blobs }} 个，释放 {{ formatBytes(report.freed_bytes) }}
-      </p>
-      <p class="gc__report-row">已被取代的草稿：{{ report.removed_drafts }} 个</p>
-    </div>
+    <p v-if="error" class="gc__error">提交失败：{{ error }}</p>
+    <p v-else-if="submitted !== null" class="gc__submitted">
+      已提交（任务 #{{ submitted }}），进度与结果见左下角任务栏。
+    </p>
   </section>
 </template>
 
@@ -183,22 +165,16 @@ async function run() {
   font-size: 12px;
 }
 
+.gc__submitted {
+  margin-top: 14px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
 .gc__error {
   margin-top: 16px;
   color: var(--link-missing);
   font-size: 13px;
 }
 
-.gc__report {
-  margin-top: 16px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
-}
-
-.gc__report-row {
-  margin: 2px 0;
-  font-size: 13px;
-}
 </style>

@@ -10,6 +10,7 @@ import AllPages from "./components/AllPages.vue";
 import AppMenu from "./components/AppMenu.vue";
 import GcPage from "./components/GcPage.vue";
 import TrashPage from "./components/TrashPage.vue";
+import TaskBar from "./components/TaskBar.vue";
 import { labelOf } from "./special";
 import { BASE_ZOOM } from "./settings";
 import { setThemeMode, themeMode, type ThemeMode } from "./theme";
@@ -731,11 +732,10 @@ async function onMenu() {
 }
 
 /**
- * 自动维护只跑一次（应用启动后）。
+ * 自动维护只提交一次（应用启动后）。
  *
- * 间隔判定在后端（用上次执行时间比），这里只负责"启动时问一次"。
- * 跑过什么不弹提示，但**不是静默的**：回收站页面会显示保留期与上次清理时间，
- * 设置页也显示两个上次执行时间 —— 自动删数据这件事必须能被查到。
+ * 间隔判定在后端（用上次执行时间比），这里只负责"启动时提交一次"；**跑在后台**，
+ * 做了什么会出现在底部任务栏 —— 自动删数据这件事必须能被看到，而不是只写进控制台。
  */
 let maintenanceRequested = false;
 
@@ -745,14 +745,25 @@ async function runMaintenanceOnce() {
   }
   maintenanceRequested = true;
   try {
-    const report = await invoke<{
-      purged: { removed: number } | null;
-      gc: { removed_blobs: number } | null;
-    }>("run_maintenance");
-    console.debug("自动维护完成:", report);
+    await invoke<number>("submit_maintenance");
   } catch (error) {
-    // 维护失败不该拦住用户用应用：记下来即可
-    console.debug("自动维护失败:", error);
+    // 提交失败不该拦住用户用应用
+    console.debug("自动维护提交失败:", error);
+  }
+}
+
+/**
+ * 重新读取设置。
+ *
+ * 后台任务（维护 / 回收）会改写"上次执行时间"，界面上的值必须跟着更新 ——
+ * 否则设置页会一直显示任务执行之前的旧时间。
+ */
+async function reloadSettings() {
+  try {
+    vaultSettings.value = await invoke<VaultSettings>("get_settings");
+    applyAppearance();
+  } catch (error) {
+    console.debug("重新读取设置失败:", error);
   }
 }
 
@@ -1542,6 +1553,8 @@ function onAction(name: string) {
     @open="openFromMenu"
     @close="menuOpen = false"
   />
+
+  <TaskBar @finished="reloadSettings" />
 
   <FloatingTools
     :limited="limitWidth"
