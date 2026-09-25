@@ -405,11 +405,19 @@ function submit() {
 </template>
 
 <style scoped>
-/* 根撑满可用高度：父容器（编辑页时）不再滚动，高度从它一路传下来 */
+/*
+ * 根**绝对定位**撑满正文容器。
+ *
+ * 为什么不用 `height: 100%`：编辑器外面还有包装层（阅读栏那一类），`100%` 到那里就断了
+ * ——父级高度是 auto，百分比等于没写。结果两栏高度由内容撑开，再被容器的 overflow:hidden
+ * 裁掉，于是"既不显示滚动条、也滚不动"。绝对定位跳过这一层：容器只要 position: relative，
+ * 编辑器就以它的内边距盒为基准，中间有几层包装都无所谓。
+ */
 .editor {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
-  height: 100%;
   min-height: 0;
   padding-top: 18px;
 }
@@ -617,45 +625,39 @@ function submit() {
 
 
 /*
- * 刷新预览。选择器带上 `.editor__actions`：
- * 同组按钮的通用样式若写在文件更靠后的位置，仅凭类名会被它盖住（上一版就是因此
- * 显示成浅色默认按钮）。这里用更高特异性，确保颜色与边框由本规则说了算。
+ * 刷新预览。两个坑都踩过，记在这里：
+ * 1. 它曾是 `.editor__bar` 的直接子元素，**不在按钮组的样式范围内** —— 已移进
+ *    `.editor__actions`，选择器也带上该前缀提高特异性；
+ * 2. 原来用简写 `background: transparent`，压缩后变成 `background: 0 0` ——
+ *    那是**位置**不是颜色！背景色因此没被设上，按钮退回默认的浅色外观。
+ *    改用长属性 `background-color`，压缩不会把它变成别的意思。
  */
 .editor__actions .editor__preview-btn {
   padding: 5px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: transparent;
-  color: var(--text-dim);
+  background-color: transparent;
+  color: var(--text);
   font-size: 12px;
   cursor: pointer;
 }
 
 .editor__actions .editor__preview-btn:hover {
-  background: var(--hover);
+  background-color: var(--hover);
   color: var(--text);
 }
 
 /*
- * 两栏**各自滚动**，而不是整页滚动。
+ * 两栏各占剩余高度、各自滚动。
  *
- * 关键不是加 overflow，而是**高度要有确定来源**：高度由内容撑开时，页面本身就会变高，
- * 滚轮滚的就是页面。所以这里走 flex 链 —— 根 `.editor` 撑满父容器，两栏吃掉剩余高度，
- * 再各自 overflow: auto。
- *
- * 下面那条 `:global(...)` 是降级路径：父容器不支持 `:has()` 时按视口高度兜底
- * （旧行为：两栏各有滚动条，页面可能还能滚一点）。
+ * 关键不是加 overflow，而是**高度要有确定来源**：根 `.editor` 已绝对定位为定高，
+ * `flex: 1 1 auto` + `min-height: 0` 让两栏吃掉剩余空间，再各自 `overflow: auto`。
+ * 中间没有任何一环由内容撑开，所以滚轮滚的必然是所在那一栏。
  */
 .editor__panes {
   flex: 1 1 auto;
   height: auto;
   min-height: 0;
-}
-
-/* 没有 :has() 的老实现环境：父容器仍在滚，只能按视口给一个固定高度兜底 */
-:global(.app__body:not(:has(.editor))) .editor__panes {
-  height: calc(100vh - 190px);
-  min-height: 320px;
 }
 
 /* 状态为空时也占住这一行，避免布局上下跳 */

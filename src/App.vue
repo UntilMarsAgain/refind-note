@@ -1393,6 +1393,8 @@ function onAction(name: string) {
 }
 
 .app__body {
+  /* 编辑页的编辑器以它为定位参照（绝对定位撑满），所以这里必须是定位元素 */
+  position: relative;
   flex: 1 1 auto;
   /* 同理，允许它被 TabRail 挤窄 */
   min-width: 0;
@@ -1692,12 +1694,3 @@ function onAction(name: string) {
 }
 </style>
 
-<!--
-  全局规则（非 scoped）：编辑页要让高度沿 flex 链传下去，正文容器就不能再整体滚动。
-  用 :has(.editor) 只在"里面有编辑器"时生效 —— 阅读、历史等页面照旧整体滚动。
--->
-<style>
-.app__body:has(.editor) {
-  overflow: hidden;
-}
-</style>
