@@ -6,6 +6,7 @@ import HistoryView from "./components/HistoryView.vue";
 import MissingNote from "./components/MissingNote.vue";
 import NewTab from "./components/NewTab.vue";
 import SettingsPage from "./components/SettingsPage.vue";
+import AllPages from "./components/AllPages.vue";
 import { setThemeMode, themeMode, type ThemeMode } from "./theme";
 import NoteContent from "./components/NoteContent.vue";
 import NoteEditor from "./components/NoteEditor.vue";
@@ -180,6 +181,13 @@ const activeTab = ref(0);
 /** 仓库设置（含外观）：唯一来源是后端的 vault.json */
 const vaultSettings = ref<VaultSettings | null>(null);
 
+/** 特殊页面的显示名（新增页面在这里补一行） */
+const SPECIAL_TITLES: Record<string, string> = {
+  all: "全部页面",
+  newtab: "新标签页",
+  settings: "设置",
+};
+
 /** 当前特殊页的页面名（模板里据此分派；用计算属性避免在模板里碰联合类型） */
 const specialPage = computed(() => {
   // 先取到局部变量，联合类型才收窄得动
@@ -195,7 +203,7 @@ function tabTitleOf(address: Address): string {
     case "empty":
       return "";
     case "special":
-      return address.page === "newtab" ? "新标签页" : `special:${address.page}`;
+      return SPECIAL_TITLES[address.page] ?? `special:${address.page}`;
     default:
       return address.title;
   }
@@ -1163,6 +1171,11 @@ function onAction(name: string) {
           <NewTab
         v-if="mode === 'special' && specialPage === 'newtab'"
         @open="onSubmit"
+      />
+      <AllPages
+        v-else-if="mode === 'special' && specialPage === 'all'"
+        @open="onSubmit"
+        @open-new="openTabWith"
       />
       <SettingsPage
         v-else-if="mode === 'special' && specialPage === 'settings' && vaultSettings"

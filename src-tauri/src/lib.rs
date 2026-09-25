@@ -71,6 +71,16 @@ fn update_settings(
     Ok(vault.settings_view())
 }
 
+/// 现有的特殊页面。**哪个页面存在由后端说了算**，前端只负责显示 ——
+/// 否则每加一个页面都要在前端再登记一次，那就是两个真相。
+#[tauri::command]
+fn special_pages() -> Vec<String> {
+    crate::storage::SPECIAL_PAGES
+        .iter()
+        .map(|page| page.to_string())
+        .collect()
+}
+
 /// 标题校验：只有解析，不落盘。前端即时检查之外的权威判定。
 #[tauri::command]
 fn validate_title(title: String) -> Result<(), String> {
@@ -266,6 +276,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_settings,
             update_settings,
+            special_pages,
             list_notes,
             load_note,
             create_note,

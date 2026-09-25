@@ -1631,7 +1631,7 @@ fn strip_prefix_ci<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
 }
 
 /// 现有的特殊页面。不在这里面的 `special:` 地址直接报「不存在」。
-const SPECIAL_PAGES: [&str; 2] = ["newtab", "settings"];
+pub(crate) const SPECIAL_PAGES: [&str; 3] = ["newtab", "settings", "all"];
 
 /// 规范地址拼装：`NAME[@STATE][#章节]`。
 ///
@@ -2540,6 +2540,15 @@ mod tests {
         let text = error.to_string();
         assert!(text.contains("没有这个特殊页面"), "{text}");
         assert!(text.contains("newtab"), "{text}");
+
+        // 新增的页面同样注册在册（special:all）
+        match temp.vault.parse_address("special:all").unwrap() {
+            Address::Special { page, address } => {
+                assert_eq!(page, "all");
+                assert_eq!(address, "special:all");
+            }
+            other => panic!("{other:?}"),
+        }
 
         // 空页面名仍然是另一种错误
         assert!(temp.vault.parse_address("special:").is_err());
