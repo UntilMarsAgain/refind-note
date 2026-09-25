@@ -9,7 +9,9 @@ import SettingsPage from "./components/SettingsPage.vue";
 import AllPages from "./components/AllPages.vue";
 import AppMenu from "./components/AppMenu.vue";
 import GcPage from "./components/GcPage.vue";
+import TrashPage from "./components/TrashPage.vue";
 import { labelOf } from "./special";
+import { BASE_ZOOM } from "./settings";
 import { setThemeMode, themeMode, type ThemeMode } from "./theme";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -748,8 +750,9 @@ function applyAppearance() {
   root.setProperty("--accent-tint", tintOf(appearance.accent));
   root.setProperty("--reading-width", `${appearance.reading_width}px`);
 
-  // 界面缩放交给 WebView 自己做：整页等比，和浏览器一致
-  void getCurrentWebview().setZoom(appearance.zoom);
+  // 界面缩放交给 WebView 自己做：整页等比，和浏览器一致。
+  // 生效的是"基准 × 用户缩放"：基准负责把默认字号整体抬高，用户值只做相对调整。
+  void getCurrentWebview().setZoom(appearance.zoom * BASE_ZOOM);
 }
 
 /** 设置页改了哪一项就只传哪一项（后端是补丁式更新） */
@@ -1355,6 +1358,7 @@ function onAction(name: string) {
         @update="updateSettings"
       />
       <GcPage v-else-if="mode === 'special' && specialPage === 'gc'" />
+      <TrashPage v-else-if="mode === 'special' && specialPage === 'trash'" />
 
           <!-- 编辑中：不显示页头，操作都在编辑器自己那一行里 -->
           <NoteEditor

@@ -1186,7 +1186,7 @@ impl Vault {
                     })
                     .unwrap_or_default(),
                 bytes,
-                days_old: at.map(days_since).unwrap_or(i64::MAX),
+                days_old: at.map(days_since),
             });
         }
 
@@ -3254,7 +3254,7 @@ mod tests {
         let listed = temp.vault.list_trash().unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].title, "删掉的");
-        assert_eq!(listed[0].days_old, 0, "刚删的应当是 0 天");
+        assert_eq!(listed[0].days_old, Some(0), "刚删的应当是 0 天");
         assert!(listed[0].bytes > 0);
         assert!(!listed[0].deleted_at.is_empty());
     }

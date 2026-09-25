@@ -7,7 +7,7 @@
  * 不会因为忘了登记而从界面上消失。
  */
 import type { Component } from "vue";
-import { Dices, List, Plus, Settings, Wrench } from "@lucide/vue";
+import { Dices, List, Plus, Settings, Trash2, Wrench } from "@lucide/vue";
 
 export interface SpecialPageMeta {
   /** 显示名 */
@@ -29,6 +29,12 @@ export const SPECIAL_META: Record<string, SpecialPageMeta> = {
   random: { label: "随机条目", tip: "随机跳到一篇笔记", icon: Dices, group: "导航" },
   newtab: { label: "新标签页", tip: "打开一个空白标签页", icon: Plus, group: "导航" },
   settings: { label: "设置", tip: "外观与存储设置", icon: Settings, group: "工具" },
+  trash: {
+    label: "回收站",
+    tip: "查看删过的笔记，并清理 30 天前的",
+    icon: Trash2,
+    group: "维护",
+  },
   gc: {
     label: "数据库回收",
     tip: "回收孤立数据块与已作废的草稿",

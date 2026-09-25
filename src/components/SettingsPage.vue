@@ -7,6 +7,7 @@
  * 多一次忘记点。
  */
 import { nextTick, ref, watch } from "vue";
+import { BASE_ZOOM } from "../settings";
 
 interface Settings {
   root: string;
@@ -112,9 +113,10 @@ function submitZoom(event: Event) {
   if (!Number.isFinite(value)) {
     return;
   }
-  const percent = Math.min(300, Math.max(50, value));
+  // 区间按"生效后的百分比"夹：后端把缩放夹在 0.5–3.0，乘上基准就是 56%–336%
+  const percent = Math.min(336, Math.max(56, value));
   target.value = String(percent);
-  emit("update", { zoom: percent / 100 });
+  emit("update", { zoom: percent / (BASE_ZOOM * 100) });
 }
 
 function submitNumber(key: string, event: Event, min: number, max: number) {
@@ -217,13 +219,13 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
         min="50"
         max="300"
         step="10"
-        :value="Math.round(settings.zoom * 100)"
+        :value="Math.round(settings.zoom * BASE_ZOOM * 100)"
         @change="submitZoom"
       />
       <span class="row__unit">%</span>
     </div>
     <p class="settings__hint">
-      也可按住 Ctrl 滚轮随时调整。默认 100%。
+      也可按住 Ctrl 滚轮随时调整。默认 112%（界面缩放的基准；这一项在基准之上再做增减）。
     </p>
 
     <h2 class="settings__section">存储</h2>
