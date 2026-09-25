@@ -78,20 +78,8 @@ type Address =
       short_id: string;
       address: string;
     }
-  | {
-      kind: "edit";
-      title: string;
-      address: string;
-      rev: number | null;
-      short_id: string | null;
-    }
-  | {
-      kind: "history";
-      title: string;
-      address: string;
-      rev: number | null;
-      short_id: string | null;
-    }
+  | { kind: "edit"; title: string; address: string }
+  | { kind: "history"; title: string; address: string }
   | { kind: "missing"; title: string; address: string };
 
 /** 自动保存：停手三秒后写一条草稿到链上 */
@@ -144,8 +132,8 @@ const searchOpen = ref(false);
 const draftExists = ref(false);
 /** 删除确认条 */
 const confirmDelete = ref(false);
-/** 进历史页要选中哪一版（地址里的 `@版本$history` 带来的） */
-const historyRev = ref<number | null>(null);
+/** 草稿提醒被忽略过一次（换地址会重新出现） */
+const draftHintDismissed = ref(false);
 /** 删除时顺手回收悬置数据 */
 const deleteWithGc = ref(false);
 /** 地址栏解析出的错误（比如缩写写错了）；以前这类错误被悄悄吞掉了 */
@@ -528,6 +516,26 @@ const addressText = computed(() => {
   return `${base}#${localSection.value}${state}`;
 });
 
+/**
+ * 是否有需要整页覆盖提醒的事。
+ *
+ * 这些都是「不处理就会误事」的信息（解析失败、读不出来、有未提交的草稿），所以用整页
+ * 覆盖而不是角落里的小条。**看历史版本不算**：那是要边看边用的状态，用正文顶部的条。
+ */
+const noticeOpen = computed(
+  () =>
+    Boolean(addressError.value) ||
+    Boolean(loadError.value) ||
+    (!revisionView.value && draftExists.value && !draftHintDismissed.value),
+);
+
+/** 关掉覆盖式提示（点空白处或点「知道了」） */
+function dismissNotices() {
+  addressError.value = "";
+  loadError.value = "";
+  draftHintDismissed.value = true;
+}
+
 /** 回到最新提交 */
 function leaveRevision() {
   const title = note.value?.title;
@@ -573,23 +581,6 @@ const parentTitle = computed(() => {
   const cut = title.lastIndexOf("/");
   return cut > 0 ? title.slice(0, cut) : "";
 });
-
-/**
- * 从某一版开始编写。
- *
- * 内容取自那一版，但**提交仍然接在最新版本之后**：旧版本一条不改 —— 所以这是
- * 「以某一版为起点」，不是重写历史。（草稿本身也挂在最新提交上，是链的正常一步。）
- */
-async function beginEditingFromVersion(
-  title: string,
-  rev: number,
-  shortId: string | null,
-) {
-  const version = await invoke<RevisionContent>("note_revision", { title, rev });
-  draftText.value = version.markdown;
-  editorStatus.value = `从版本 ${rev}${shortId ? `（${shortId}）` : ""}开始编写；提交后会成为链上的新版本`;
-  scrolled.value = false;
-}
 
 /**
  * 记录本地章节。
@@ -642,9 +633,7 @@ async function navigate(input: string) {
   revisionView.value = null;
   localSection.value = "";
   confirmDelete.value = false;
-  if (address.kind !== "history") {
-    historyRev.value = null;
-  }
+  draftHintDismissed.value = false;
 
   switch (address.kind) {
     case "note":
@@ -652,17 +641,10 @@ async function navigate(input: string) {
       return;
     case "edit":
       await loadNote(address.title);
-      if (address.rev != null) {
-        // `名称@版本$edit`：从这一版开始编写
-        await beginEditingFromVersion(address.title, address.rev, address.short_id);
-      } else {
-        await beginEditing();
-      }
+      await beginEditing();
       return;
     case "history":
       await loadNote(address.title);
-      // `名称@版本$history`：进来就选中那一版
-      historyRev.value = address.rev;
       return;
     case "revision":
       await openRevision(address.title, address.short_id);
@@ -726,8 +708,8 @@ async function onRevert(rev: number) {
     });
     draftExists.value = false;
     await refreshNotes();
-    // 回退产生了一个新提交：留在历史页（地址同样说明位置），并让列表刷新出来
-    await navigate(`${current.title}$history`);
+    // 回退是一个新提交：回到阅读地址，让用户直接看到回退后的内容
+    await navigate(current.title);
   } catch (error) {
     console.debug("回退失败:", error);
   } finally {
@@ -820,10 +802,9 @@ function onAction(name: string) {
 
           <HistoryView
             v-else-if="mode === 'history' && note"
-            :key="`${note.key}:${note.rev}:${historyRev ?? 0}`"
+            :key="`${note.key}:${note.rev}`"
             :title="note.title"
             :current-rev="note.rev"
-            :initial-rev="historyRev"
             @close="closeHistory"
             @revert="onRevert"
             @open-revision="onOpenRevision"
@@ -831,6 +812,21 @@ function onAction(name: string) {
 
           <template v-else-if="note">
             <!-- 不是最新提交：明确提示，并给一个回最新的出口 -->
+            <!-- 看历史版本是一种状态：做成醒目的条，并在这里给「回退到这一版」 -->
+            <div v-if="revisionView" class="revbar">
+              <span class="revbar__text">
+                正在查看历史版本
+                <code>{{ note.title }}@{{ revisionView.shortId }}</code>
+                （第 {{ revisionView.rev }} 版，不是最新提交）
+              </span>
+              <span class="revbar__actions">
+                <button type="button" @click="onRevert(revisionView.rev)">
+                  回退到这一版
+                </button>
+                <button type="button" @click="leaveRevision">回到最新版本</button>
+              </span>
+            </div>
+
             <PageHeader
               v-if="!revisionView"
               :title="note.title"
@@ -868,8 +864,8 @@ function onAction(name: string) {
     @scroll-bottom="scrollToBottom"
   />
 
-  <!-- 提示条：fixed 浮层，不参与正文排版（提示不该看起来像正文的一部分） -->
-  <div class="app__notices">
+  <!-- 提示：整页覆盖，确保被注意到（点空白处可关掉） -->
+  <div v-if="noticeOpen" class="app__notices" @click.self="dismissNotices">
     <p v-if="addressError" class="notice notice--error">
       <span>{{ addressError }}</span>
       <button type="button" @click="addressError = ''">知道了</button>
@@ -879,19 +875,11 @@ function onAction(name: string) {
       <span>{{ loadError }}</span>
     </p>
 
-    <p v-if="revisionView && note" class="notice">
-      <span>
-        正在查看历史版本
-        <code>{{ note.title }}@{{ revisionView.shortId }}</code>
-        （第 {{ revisionView.rev }} 版，不是最新提交）
-      </span>
-      <button type="button" @click="leaveRevision">回到最新版本</button>
-    </p>
-
-    <p v-if="!revisionView && draftExists" class="notice">
+    <p v-if="!revisionView && draftExists && !draftHintDismissed" class="notice">
       <span>这篇笔记有未提交的草稿（当前显示的是最新提交）</span>
       <button type="button" @click="openDraftPreview">预览</button>
       <button type="button" @click="onAction('edit')">编辑</button>
+      <button type="button" @click="draftHintDismissed = true">知道了</button>
     </p>
   </div>
 
@@ -973,18 +961,18 @@ function onAction(name: string) {
     transition: none;
   }
 }
-/* 提示条：fixed 浮层，和 FloatingTools 一样脱离正文流 */
+/* 覆盖式提示：整页遮罩 + 居中卡片，确保被注意到 */
 .app__notices {
   position: fixed;
-  left: 50%;
-  bottom: 22px;
-  z-index: 46;
+  inset: 0;
+  z-index: 55;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
-  transform: translateX(-50%);
-  pointer-events: none;
+  justify-content: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 45%);
 }
 
 .notice {
@@ -992,17 +980,16 @@ function onAction(name: string) {
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
-  max-width: min(680px, 80vw);
+  max-width: min(520px, 86vw);
   margin: 0;
-  padding: 9px 14px;
+  padding: 14px 18px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
   color: var(--text);
   font-size: 13px;
   line-height: 1.6;
-  box-shadow: 0 8px 28px rgb(0 0 0 / 22%);
-  pointer-events: auto;
+  box-shadow: 0 20px 60px rgb(0 0 0 / 35%);
 }
 
 .notice--error {
@@ -1028,6 +1015,49 @@ function onAction(name: string) {
 }
 
 .notice button:hover {
+  background: var(--hover);
+}
+
+/* 看历史版本：正文顶部的醒目条（不是弹出 —— 要边看边用） */
+.revbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--accent-soft);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.revbar__text code {
+  font-family: var(--mono-font);
+  color: var(--text);
+}
+
+.revbar__actions {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.revbar__actions button {
+  appearance: none;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--accent-soft);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent-soft);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.revbar__actions button:hover {
   background: var(--hover);
 }
 

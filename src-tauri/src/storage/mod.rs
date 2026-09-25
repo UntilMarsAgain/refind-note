@@ -745,15 +745,14 @@ impl Vault {
 
     /// 解析地址栏那一行，并**解析到底**。
     ///
-    /// 标准顺序是 `NAMESPACE:NAME@VERSION#SECTION$STATE`。**顺序不强制**（各部分靠保留
-    /// 字符切分），但回显一律按标准顺序 —— 界面只显示 `address` 字段，不必自己拼。
-    /// 除 NAME 外都可省略。
+    /// 标准顺序是 `NAMESPACE:NAME@VERSION#SECTION$STATE`，**顺序不强制**（靠保留字符切分），
+    /// 但回显一律按标准顺序 —— 界面只显示 `address` 字段，不必自己拼。除 NAME 外都可省略。
     ///
-    /// 保留字符：`:` 命名空间、`@` 版本、`#` 章节、`$` 状态。它们都不允许出现在标题里，
-    /// 所以切分不必猜。
+    /// 两条**规范化裁剪**（在回显里执行，所以「跳到哪」与「显示什么」永远一致）：
+    /// - **某一版不能编辑**：`@版本$edit` 裁掉 `$edit`，结果就是只读查看那一版；
+    /// - **历史属于整篇**，不属于某一版：`@版本$history` 裁掉 `@版本`，结果就是整篇历史页。
     ///
-    /// **章节是唯一允许前端自己更新的部分**：它在地址里被原样带回，前端改章节不必再问
-    /// 后端（阅读位置本来就是界面的事）。
+    /// 章节是唯一允许前端自己确定的成分：原样带回，前端改章节不必再问后端。
     pub fn parse_address(&self, input: &str) -> Result<Address, VaultError> {
         let raw = input.trim();
         if raw.is_empty() {
@@ -806,56 +805,34 @@ impl Vault {
             }
         };
 
+        // 规范化裁剪
+        let has_version = reference.is_some();
+        let drop_version = has_version && state == Some("history");
+        let echo_state = if has_version && state == Some("edit") {
+            None
+        } else {
+            state
+        };
+
         // 按标准顺序组装回显地址
         let compose = |title: &str, version: Option<&str>| {
             let mut out = title.to_string();
-            if let Some(version) = version {
-                out.push('@');
-                out.push_str(version);
+            if !drop_version {
+                if let Some(version) = version {
+                    out.push('@');
+                    out.push_str(version);
+                }
             }
             if let Some(section) = &section {
                 out.push('#');
                 out.push_str(section);
             }
-            if let Some(state) = state {
+            if let Some(state) = echo_state {
                 out.push('$');
                 out.push_str(state);
             }
             out
         };
-
-        /// 把状态叠到「某一版」上：不写状态＝只读查看，`$edit`＝从这一版开始编写，
-        /// `$history`＝进历史页并选中它。
-        fn apply_state(
-            state: Option<&str>,
-            title: String,
-            rev: u64,
-            id: String,
-            short: String,
-            address: String,
-        ) -> Address {
-            match state {
-                Some("edit") => Address::Edit {
-                    title,
-                    address,
-                    rev: Some(rev),
-                    short_id: Some(short),
-                },
-                Some("history") => Address::History {
-                    title,
-                    address,
-                    rev: Some(rev),
-                    short_id: Some(short),
-                },
-                _ => Address::Revision {
-                    title,
-                    address,
-                    rev,
-                    id,
-                    short_id: short,
-                },
-            }
-        }
 
         let Some(reference) = reference else {
             // 没有 @版本：NAME 决定一切
@@ -874,14 +851,10 @@ impl Vault {
                 Some("edit") => Address::Edit {
                     title: display,
                     address,
-                    rev: None,
-                    short_id: None,
                 },
                 Some("history") => Address::History {
                     title: display,
                     address,
-                    rev: None,
-                    short_id: None,
                 },
                 _ => Address::Note {
                     title: display,
@@ -890,7 +863,7 @@ impl Vault {
             });
         };
 
-        // 只写 @版本：commit ID 全局不重复，所以扫全仓库，是谁就跳到谁
+        // 只写 @版本：commit ID 全局不重复，扫全仓库，是谁就跳到谁
         if name_part.is_empty() {
             if reference.len() < MIN_SHORT_ID {
                 return Err(VaultError::BadAddress(format!(
@@ -938,22 +911,28 @@ impl Vault {
                 }
             };
 
-            let address = compose(&title, Some(&short));
-            return Ok(apply_state(
-                state,
+            // `$history` 说的是「看整篇的历史」，版本因此被裁掉
+            if drop_version {
+                return Ok(Address::History {
+                    address: compose(&title, Some(&short)),
+                    title,
+                });
+            }
+
+            return Ok(Address::Revision {
+                address: compose(&title, Some(&short)),
                 title,
                 rev,
+                short_id: short,
                 id,
-                short,
-                address,
-            ));
+            });
         }
 
         let parsed = self.table.parse(name_part, self.config.capital_links)?;
         let display = parsed.display(&self.table);
         let id = Self::id_of(&parsed);
         if !self.log_path(&id).is_file() {
-            // 笔记还没建立，版本无从谈起；但**照原样回显**用户写的版本，别把他的话吞掉
+            // 笔记还没建立：版本无从谈起，但照原样回显用户写的版本，别把它吞掉
             return Ok(Address::Missing {
                 address: compose(&display, Some(&reference)),
                 title: display,
@@ -971,16 +950,21 @@ impl Vault {
             })?;
         let full_id = revision_id(event);
         let short = short_revision_id(&full_id);
-        let address = compose(&display, Some(&short));
 
-        Ok(apply_state(
-            state,
-            display,
+        if drop_version {
+            return Ok(Address::History {
+                address: compose(&display, Some(&short)),
+                title: display,
+            });
+        }
+
+        Ok(Address::Revision {
+            address: compose(&display, Some(&short)),
+            title: display,
             rev,
-            full_id,
-            short,
-            address,
-        ))
+            id: full_id,
+            short_id: short,
+        })
     }
 
     /// 把「版本引用」解析成版本号。
@@ -2134,12 +2118,7 @@ mod tests {
         temp.vault.commit("模式", "正文", None, 0).unwrap();
 
         match temp.vault.parse_address("模式$edit").unwrap() {
-            Address::Edit {
-                title,
-                address,
-                rev: None,
-                ..
-            } => {
+            Address::Edit { title, address } => {
                 assert_eq!(title, "模式");
                 assert_eq!(address, "模式$edit", "回显用标准顺序");
             }
@@ -2182,15 +2161,10 @@ mod tests {
             .parse_address(&format!("顺序@{}#小节$history", second.short_id))
             .unwrap()
         {
-            // 带 $history：现在返回 History 并带回版本 —— 状态与版本是**组合**关系
-            Address::History {
-                address,
-                title,
-                rev: Some(2),
-                ..
-            } => {
+            // 带 $history：版本被裁掉（历史属于整篇），章节保留
+            Address::History { address, title } => {
                 assert_eq!(title, "顺序");
-                assert_eq!(address, format!("顺序@{}#小节$history", second.short_id));
+                assert_eq!(address, "顺序#小节$history");
             }
             other => panic!("{other:?}"),
         }
@@ -2218,73 +2192,61 @@ mod tests {
         ));
     }
 
-    /// `@版本$编辑` ＝ 从这一版开始编写；`@版本$历史` ＝ 进历史页并选中它
+    /// 规范化裁剪：某一版不能编辑，历史不属于某一版
     #[test]
-    fn version_and_state_combine() {
+    fn address_crops_what_cannot_combine() {
         let temp = TempVault::new();
-        temp.vault.create("分支").unwrap();
-        temp.vault.commit("分支", "第一版", None, 0).unwrap();
-        temp.vault.commit("分支", "第二版", None, 1).unwrap();
+        temp.vault.create("裁剪").unwrap();
+        temp.vault.commit("裁剪", "第一版", None, 0).unwrap();
+        temp.vault.commit("裁剪", "第二版", None, 1).unwrap();
 
         let first = temp
             .vault
-            .history("分支")
+            .history("裁剪")
             .unwrap()
             .into_iter()
             .find(|item| item.rev == 1)
             .unwrap();
 
-        // 不带状态：只读查看那一版
-        assert!(matches!(
-            temp.vault
-                .parse_address(&format!("分支@{}", first.short_id))
-                .unwrap(),
-            Address::Revision { rev: 1, .. }
-        ));
-
-        // 带 $edit：从那一版开始编写
+        // 某一版不能编辑 → 只读查看，回显里没有 $edit
         match temp
             .vault
-            .parse_address(&format!("分支@{}#小节$edit", first.short_id))
+            .parse_address(&format!("裁剪@{}$edit", first.short_id))
             .unwrap()
         {
-            Address::Edit {
-                rev: Some(1),
-                short_id: Some(short),
-                address,
-                ..
-            } => {
-                assert_eq!(short, first.short_id);
-                assert_eq!(address, format!("分支@{}#小节$edit", first.short_id));
+            Address::Revision { rev, address, .. } => {
+                assert_eq!(rev, 1);
+                assert_eq!(address, format!("裁剪@{}", first.short_id));
             }
             other => panic!("{other:?}"),
         }
 
-        // 带 $history：进历史页并选中那一版
+        // 历史属于整篇 → 版本被裁掉，结果是历史页
         match temp
             .vault
-            .parse_address(&format!("分支@{}$history", first.short_id))
+            .parse_address(&format!("裁剪@{}$history", first.short_id))
             .unwrap()
         {
-            Address::History {
-                rev: Some(1),
-                address,
-                ..
-            } => assert_eq!(address, format!("分支@{}$history", first.short_id)),
+            Address::History { address, title } => {
+                assert_eq!(title, "裁剪");
+                assert_eq!(address, "裁剪$history");
+            }
             other => panic!("{other:?}"),
         }
 
-        // 只写 @缩写 + 状态：先全局找到是谁，再叠状态
+        // 只写 @缩写$edit 同理，且回显的是全局找到的那一篇的名称
         match temp
             .vault
             .parse_address(&format!("@{}$edit", first.short_id))
             .unwrap()
         {
-            Address::Edit {
-                title,
-                rev: Some(1),
-                ..
-            } => assert_eq!(title, "分支"),
+            Address::Revision {
+                title, rev, address, ..
+            } => {
+                assert_eq!(title, "裁剪");
+                assert_eq!(rev, 1);
+                assert_eq!(address, format!("裁剪@{}", first.short_id));
+            }
             other => panic!("{other:?}"),
         }
     }

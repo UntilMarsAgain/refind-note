@@ -278,7 +278,8 @@ watch(() => props.title, load);
           </button>
         </div>
 
-        <template>
+        <!-- 注意：这里必须是真元素。裸 <template> 是惰性的，里面的内容不会渲染 -->
+        <div class="history__diff">
           <p v-if="!diff" class="history__hint">这一版没有可比对的上一版。</p>
           <div v-else class="diff">
             <div
@@ -293,7 +294,7 @@ watch(() => props.title, load);
               <span class="diff__text">{{ line.text }}</span>
             </div>
           </div>
-        </template>
+        </div>
       </div>
     </div>
   </section>
