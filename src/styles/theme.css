@@ -29,8 +29,8 @@
   --text: #e8e8e8;
   --text-dim: #a8a2a2;
   --icon: #dcdcdc;
-  --accent: #9f5354;
-  --accent-soft: #c68e8c;
+  --accent: #5b8dd6;
+  --accent-soft: #a8c6ef;
   /* 指向尚未建立的笔记的内部链接（MediaWiki 意义上的「红链」） */
   --link-missing: #e2645c;
   /* 版本对比里增删行的底色 */
@@ -51,7 +51,7 @@
 
   /* 选中文本的底色。系统默认那抹蓝在深色下过于刺眼，
      而且和上面的语法配色打架，所以自己给一个。 */
-  --selection-bg: rgba(159, 83, 84, 0.5);
+  --selection-bg: rgba(91, 141, 214, 0.5);
 
   /* 等宽字体栈，供笔记正文的代码样式使用；与主题无关，浅色下沿用同一份 */
   --mono-font: "JetBrains Mono", "Cascadia Code", "Noto Sans Mono CJK SC",
@@ -80,8 +80,8 @@
   --text: #201c1c;
   --text-dim: #6d6464;
   --icon: #3a3434;
-  --accent: #9f5354;
-  --accent-soft: #8a4748;
+  --accent: #2f6fc4;
+  --accent-soft: #5f93d8;
   --link-missing: #b02a2a;
   --diff-add-bg: rgba(60, 160, 90, 0.16);
   --diff-del-bg: rgba(200, 70, 70, 0.12);
@@ -96,7 +96,7 @@
   --syntax-type: #c18401;
   --syntax-deleted: #e45649;
 
-  --selection-bg: rgba(159, 83, 84, 0.22);
+  --selection-bg: rgba(47, 111, 196, 0.22);
 }
 
 *,

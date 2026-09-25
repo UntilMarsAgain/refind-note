@@ -336,3 +336,23 @@
 .note-body .hljs-strong {
   font-weight: 600;
 }
+
+/*
+ * 外链后面挂一个小「跳出去」符号，与内部链接区分开。
+ *
+ * - 内部链接（wikilink）故意不带 href，所以 `a[href]` 就是外链；
+ * - 页内锚点 href="#…" 不是外链，排除；
+ * - 用 mask 而不是背景图：符号跟随文字颜色，浅色/深色主题都不用另配色。
+ */
+.note-body a[href]:not([href^="#"])::after {
+  content: "";
+  display: inline-block;
+  width: 0.62em;
+  height: 0.62em;
+  margin-left: 0.18em;
+  vertical-align: 0.02em;
+  background-color: currentColor;
+  opacity: 0.7;
+  -webkit-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M9.5 3H13v3.5'/><path d='M13 3 7.5 8.5'/><path d='M12 10.5V13a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 2 13V4a.5.5 0 0 1 .5-.5H5'/></svg>") center / contain no-repeat;
+  mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M9.5 3H13v3.5'/><path d='M13 3 7.5 8.5'/><path d='M12 10.5V13a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 2 13V4a.5.5 0 0 1 .5-.5H5'/></svg>") center / contain no-repeat;
+}
