@@ -15,6 +15,10 @@ interface RevisionSummary {
   rev: number;
   /** create / commit / draft / delete */
   kind: string;
+  /** 完整 commit ID */
+  id: string;
+  /** 展示用的缩写（历史页显示的就是它） */
+  short_id: string;
   at: string;
   bytes: number;
   delta: number;
@@ -40,16 +44,6 @@ interface DiffResult {
   deleted: number;
 }
 
-/** 与 Rust 端 `RevisionContent` 对应 */
-interface RevisionContent {
-  rev: number;
-  kind: string;
-  at: string;
-  title: string;
-  markdown: string;
-  html: string;
-}
-
 const props = defineProps<{
   title: string;
   /** 当前版本号，用来在列表里标出「当前」 */
@@ -60,8 +54,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "close"): void;
-  /** 把某一版的内容取回编辑器继续编辑 */
-  (e: "restore", content: RevisionContent): void;
+  /** 导航到某一版的地址（前端拼成「标题@缩写」交给统一的地址栏解析） */
+  (e: "open-revision", reference: string): void;
   /** 回退到某一版：作为新提交写上去，旧记录不动 */
   (e: "revert", rev: number): void;
 }>();
@@ -74,8 +68,6 @@ const loading = ref(false);
 const error = ref("");
 const selectedRev = ref<number | null>(null);
 const diff = ref<DiffResult | null>(null);
-const content = ref<RevisionContent | null>(null);
-const panel = ref<"diff" | "content">("diff");
 /** 草稿默认不显示：它们是可被提交取代的临时节点，平时不是历史 */
 const showDrafts = ref(false);
 
@@ -83,6 +75,11 @@ const visible = computed(() =>
   showDrafts.value
     ? history.value
     : history.value.filter((item) => item.kind !== "draft"),
+);
+
+/** 选中那一版的缩写 ID */
+const selectedShort = computed(
+  () => visible.value.find((item) => item.rev === selectedRev.value)?.short_id ?? "",
 );
 
 /** 折叠成片的 equal：只留改动行前后各 CONTEXT 行，其余折起来 */
@@ -171,8 +168,6 @@ async function load() {
 /** 选中某一版：默认跟「列表里的上一条」比，也就是这一版改了什么 */
 async function select(rev: number) {
   selectedRev.value = rev;
-  panel.value = "diff";
-  content.value = null;
 
   const list = visible.value;
   const index = list.findIndex((item) => item.rev === rev);
@@ -189,21 +184,6 @@ async function select(rev: number) {
       title: props.title,
       from: previous.rev,
       to: rev,
-    });
-  } catch (err) {
-    error.value = String(err);
-  }
-}
-
-async function showContent() {
-  if (selectedRev.value === null) {
-    return;
-  }
-  panel.value = "content";
-  try {
-    content.value = await invoke<RevisionContent>("note_revision", {
-      title: props.title,
-      rev: selectedRev.value,
     });
   } catch (err) {
     error.value = String(err);
@@ -250,7 +230,8 @@ watch(() => props.title, load);
               {{ item.summary || "（无摘要）" }}
             </span>
             <span class="rentry__meta">
-              {{ formatTime(item.at) }}
+              <code class="rentry__id">{{ item.short_id }}</code>
+              · {{ formatTime(item.at) }}
               <template v-if="item.kind !== 'create'">
                 · {{ item.bytes }} 字节
                 <span v-if="item.delta > 0" class="rentry__plus">
@@ -269,24 +250,7 @@ watch(() => props.title, load);
 
       <div class="history__panel">
         <div class="history__panelbar">
-          <button
-            class="hbtn"
-            :class="{ 'hbtn--on': panel === 'diff' }"
-            type="button"
-            @click="panel = 'diff'"
-          >
-            差异
-          </button>
-          <button
-            class="hbtn"
-            :class="{ 'hbtn--on': panel === 'content' }"
-            type="button"
-            @click="showContent"
-          >
-            全文
-          </button>
-
-          <span v-if="panel === 'diff' && diff" class="history__stat">
+          <span v-if="diff" class="history__stat">
             <span class="rentry__plus">+{{ diff.inserted }}</span>
             <span class="rentry__minus">−{{ diff.deleted }}</span>
             <span class="history__subjects">
@@ -294,25 +258,27 @@ watch(() => props.title, load);
             </span>
           </span>
 
+          <!-- 不在这里预览全文：导航到这一版的地址，由统一的地址栏解析负责显示 -->
           <button
-            v-if="content && selectedRev !== null && selectedRev !== currentRev"
+            v-if="selectedShort"
+            class="hbtn hbtn--accent"
+            type="button"
+            @click="emit('open-revision', selectedShort)"
+          >
+            打开这一版 @{{ selectedShort }}
+          </button>
+
+          <button
+            v-if="selectedRev !== null && selectedRev !== currentRev"
             class="hbtn"
             type="button"
             @click="emit('revert', selectedRev)"
           >
             回退到这一版
           </button>
-          <button
-            v-if="panel === 'content' && content"
-            class="hbtn hbtn--accent"
-            type="button"
-            @click="emit('restore', content)"
-          >
-            以这一版为草稿继续编辑
-          </button>
         </div>
 
-        <template v-if="panel === 'diff'">
+        <template>
           <p v-if="!diff" class="history__hint">这一版没有可比对的上一版。</p>
           <div v-else class="diff">
             <div
@@ -328,12 +294,6 @@ watch(() => props.title, load);
             </div>
           </div>
         </template>
-
-        <article
-          v-else
-          class="history__content note-body"
-          v-html="content?.html ?? ''"
-        />
       </div>
     </div>
   </section>
@@ -461,6 +421,12 @@ watch(() => props.title, load);
 .rentry--draft {
   /* 草稿是可被提交取代的临时节点，视觉上就压低一档 */
   opacity: 0.7;
+}
+
+.rentry__id {
+  font-family: var(--mono-font);
+  font-size: 11.5px;
+  color: var(--text);
 }
 
 .rentry__rev {

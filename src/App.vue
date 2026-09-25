@@ -41,6 +41,9 @@ interface Draft {
   markdown: string;
   base_rev: number;
   at: string;
+  /** 草稿也是链上的一版，所以也有 commit ID —— 预览走的就是它 */
+  id: string;
+  short_id: string;
 }
 
 /** 与 Rust 端 `VaultSettings` 对应 */
@@ -278,18 +281,6 @@ function closeHistory() {
 }
 
 /**
- * 把历史里某一版取回编辑器。
- *
- * 刻意**不改写旧历史**：取回的内容先成为当前草稿，提交后是一个新版本，
- * 于是「回退」也只是版本链上正常的一步。
- */
-function restoreVersion(content: RevisionContent) {
-  draftText.value = content.markdown;
-  editorStatus.value = `已取回版本 ${content.rev} 的内容；提交后会成为一个新版本`;
-  mode.value = "edit";
-}
-
-/**
  * 改名。
  *
  * 注意它本身是一次提交（内容不变、标题变），版本号会往前一格——编辑器之后的
@@ -384,6 +375,14 @@ function scrollToBottom() {
   }
 }
 
+/** 历史页要求导航到某一版：拼成「标题@缩写」再交给统一的地址解析 */
+function onOpenRevision(reference: string) {
+  const current = note.value;
+  if (current) {
+    void onSubmit(`${current.title}@${reference}`);
+  }
+}
+
 function onNoteSelected(title: string) {
   // 切走之前先把草稿落盘：自动保存有三秒延迟，直接切会丢掉刚敲的字。
   // saveDraft 在第一个 await 之前就把 note.value 读定了，所以不会误存到新打开的笔记上。
@@ -419,6 +418,63 @@ async function refreshDraftHint(title: string) {
     draftExists.value = Boolean(draft);
   } catch (error) {
     console.debug("检查草稿失败:", error);
+  }
+}
+
+/** 正在只读查看的历史版本；null 表示在看最新提交 */
+const revView = ref<{ rev: number; shortId: string; html: string } | null>(null);
+
+/**
+ * 地址栏显示什么。
+ *
+ * 语法糖跳转之后要回显**规范全称**：看某一版时是「名称@缩写」，否则就是当前标题。
+ */
+const addressText = computed(() => {
+  const current = note.value;
+  if (revView.value && current) {
+    return `${current.title}@${revView.value.shortId}`;
+  }
+  return current?.title ?? missingTitle.value;
+});
+
+/** 打开某一版（只读）。引用可以是数字版本号，也可以是 commit ID 缩写。 */
+async function openRevision(title: string, reference: string) {
+  try {
+    const rev = await invoke<number>("resolve_revision", { title, reference });
+    const content = await invoke<RevisionContent>("note_revision", { title, rev });
+
+    // 顺带拿到这一版的缩写，用于地址栏回显
+    const history = await invoke<{ rev: number; short_id: string }[]>("note_history", {
+      title,
+    });
+    const entry = history.find((item) => item.rev === rev);
+
+    // 只读看历史版本时不动编辑器状态：退出查看即回到最新
+    addressError.value = "";
+    if (mode.value !== "edit") {
+      note.value = null;
+    }
+    await openNote(title);
+    revView.value = { rev, shortId: entry?.short_id ?? reference, html: content.html };
+  } catch (error) {
+    addressError.value = String(error);
+  }
+}
+
+/** 草稿预览：走同一条地址通道（草稿也是链上的一版） */
+async function openDraftPreview() {
+  const current = note.value;
+  if (!current) {
+    return;
+  }
+  try {
+    const draft = await invoke<Draft | null>("load_draft", { title: current.title });
+    if (!draft) {
+      return;
+    }
+    await openRevision(current.title, draft.short_id);
+  } catch (error) {
+    addressError.value = String(error);
   }
 }
 
@@ -459,12 +515,8 @@ async function onSubmit(value: string) {
       await openNote(address.title);
       return;
     case "revision":
-      // 后端已经解析成具体版本号，界面照旧带着它进历史页
-      historyRev.value = address.rev;
-      await openNote(address.title);
-      if (note.value) {
-        mode.value = "history";
-      }
+      // 后端已经解析到具体版本，直接只读查看它
+      await openRevision(address.title, address.short_id);
       return;
     case "missing":
       showMissing(address.title);
@@ -574,7 +626,7 @@ function onAction(name: string) {
 
   <div class="app">
     <TitleBar
-      :title="note?.title ?? missingTitle"
+      :title="addressText"
       @search="onSearch"
       @menu="onMenu"
       @submit="onSubmit"
@@ -622,17 +674,30 @@ function onAction(name: string) {
             :current-rev="note.rev"
             :initial-rev="historyRev"
             @close="closeHistory"
-            @restore="restoreVersion"
             @revert="onRevert"
+            @open-revision="onOpenRevision"
           />
 
           <template v-else-if="note">
-            <p v-if="draftExists" class="app__draft">
+            <p v-if="addressError" class="app__error">{{ addressError }}</p>
+
+            <!-- 不是最新提交：明确提示，并给一个回最新的出口 -->
+            <p v-if="revView" class="app__rev">
+              正在查看历史版本
+              <code>{{ note.title }}@{{ revView.shortId }}</code>
+              （第 {{ revView.rev }} 版，不是最新提交）。
+              <button type="button" @click="revView = null">回到最新版本</button>
+            </p>
+
+            <!-- 未提交的草稿：两个选项 —— 预览（走地址跳转）或直接编辑 -->
+            <p v-if="!revView && draftExists" class="app__draft">
               这篇笔记有未提交的草稿（当前显示的是最新提交）。
-              <button type="button" @click="beginEditing">查看草稿</button>
+              <button type="button" @click="openDraftPreview">预览</button>
+              <button type="button" @click="beginEditing">编辑</button>
             </p>
 
             <PageHeader
+              v-if="!revView"
               :title="note.title"
               :parent="parentTitle"
               :collapsed="scrolled"
@@ -650,7 +715,13 @@ function onAction(name: string) {
               <button type="button" @click="confirmDelete = false">取消</button>
             </p>
 
-            <NoteContent :html="note.html" @wikilink="onWikiLink" />
+            <NoteContent
+              v-if="!revView"
+              :html="note.html"
+              @wikilink="onWikiLink"
+            />
+
+            <NoteContent v-if="revView" :html="revView.html" @wikilink="onWikiLink" />
           </template>
 
           <p v-else-if="loadError" class="app__error">{{ loadError }}</p>
@@ -712,6 +783,41 @@ function onAction(name: string) {
    用 100% 而不是 none —— none 不可插值，上面的过渡会直接断掉。 */
 .app__column--wide {
   max-width: 100%;
+}
+
+.app__rev {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 16px 0 0;
+  padding: 8px 12px;
+  border: 1px solid var(--accent-soft);
+  border-radius: 8px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.app__rev code {
+  font-family: var(--mono-font);
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.app__rev button {
+  appearance: none;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--accent-soft);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent-soft);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.app__rev button:hover {
+  background: var(--hover);
 }
 
 .app__draft,

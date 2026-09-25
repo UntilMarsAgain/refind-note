@@ -32,6 +32,10 @@ pub struct Draft {
     pub markdown: String,
     pub base_rev: u64,
     pub at: String,
+    /// 草稿也是链上的一版，所以同样有 ID；
+    /// 界面据此用「标题@缩写」预览它，而不必单独做一套预览通道
+    pub id: String,
+    pub short_id: String,
 }
 
 /// `load_note` 的结果。

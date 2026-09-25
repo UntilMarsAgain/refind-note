@@ -64,6 +64,9 @@ struct Stored {
 /// 读取时允许的最大增量链深度（写入侧已有上限，这里是防损坏的兜底）
 const MAX_DELTA_DEPTH: usize = 1024;
 
+/// 引用 commit ID 时至少要写的位数
+const MIN_SHORT_ID: usize = 5;
+
 pub struct Vault {
     root: PathBuf,
     table: Arc<NamespaceTable>,
@@ -806,6 +809,13 @@ impl Vault {
             });
         }
 
+        // 缩写太短既容易撞车也难认，要求至少 5 位；纯数字版本号不受此限（上面已返回）
+        if reference.len() < MIN_SHORT_ID {
+            return Err(VaultError::BadAddress(format!(
+                "commit ID 缩写至少要写 {MIN_SHORT_ID} 位"
+            )));
+        }
+
         let needle = reference.to_ascii_lowercase();
         let mut matches: Vec<u64> = Vec::new();
         for event in &events {
@@ -1063,12 +1073,23 @@ impl Vault {
         let Some(draft) = state.draft else {
             return Ok(None);
         };
+
+        // 从链上找回这一版草稿的事件，好把它的 ID 一并给出去
+        let event = events
+            .iter()
+            .rev()
+            .find(|event| matches!(event, Event::Auto { blob, .. } if *blob == draft.blob))
+            .ok_or_else(|| VaultError::Corrupt("草稿事件不见了".to_string()))?;
+        let id = revision_id(event);
+
         let text = String::from_utf8(self.blobs.get(&draft.blob)?)
             .map_err(|_| VaultError::NotText(title.to_string()))?;
         Ok(Some(Draft {
             markdown: text,
             base_rev: draft.on,
             at: draft.at,
+            short_id: short_revision_id(&id),
+            id,
         }))
     }
 
@@ -1783,6 +1804,45 @@ mod tests {
 
         // 对不上的缩写必须是错误，不许猜
         assert!(temp.vault.parse_address("地址@zzzz", None).is_err());
+    }
+
+    /// 缩写下限：太短要明确报错（纯数字版本号不受限）
+    #[test]
+    fn short_ids_have_a_minimum_length() {
+        let temp = TempVault::new();
+        temp.vault.create("下限").unwrap();
+        temp.vault.commit("下限", "第一版", None, 0).unwrap();
+
+        assert_eq!(temp.vault.resolve_revision("下限", "1").unwrap(), 1, "数字版本号不受限");
+
+        let error = temp.vault.resolve_revision("下限", "ab").unwrap_err();
+        assert!(
+            matches!(error, VaultError::BadAddress(_)),
+            "太短的缩写应当是提示，而不是「找不到」：{error}"
+        );
+
+        let history = temp.vault.history("下限").unwrap();
+        let short = history.iter().find(|item| item.rev == 1).unwrap().short_id.clone();
+        assert!(short.len() >= 5, "展示用的缩写本来就有 8 位");
+        assert_eq!(temp.vault.resolve_revision("下限", &short).unwrap(), 1);
+    }
+
+    /// 草稿也带 ID，界面才能用「标题@缩写」预览它
+    #[test]
+    fn drafts_expose_their_own_id() {
+        let temp = TempVault::new();
+        temp.vault.create("草稿号").unwrap();
+        temp.vault.commit("草稿号", "第一版", None, 0).unwrap();
+        temp.vault.save_draft("草稿号", "草稿内容", 1).unwrap();
+
+        let draft = temp.vault.load_draft("草稿号").unwrap().unwrap();
+        assert_eq!(draft.id.len(), 64);
+        assert!(draft.short_id.len() >= 5);
+
+        // 用这个缩写能解析到草稿那一版，并读到它的内容
+        let rev = temp.vault.resolve_revision("草稿号", &draft.short_id).unwrap();
+        assert_eq!(rev, 2);
+        assert_eq!(temp.vault.revision("草稿号", rev).unwrap().markdown, "草稿内容");
     }
 
     #[test]
