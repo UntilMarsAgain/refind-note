@@ -492,6 +492,15 @@ impl Vault {
         self.save_preferences()
     }
 
+    /// 渲染任意 markdown：编辑器右侧的预览用它。
+    ///
+    /// 刻意复用**阅读视图同一个渲染器**（`markdown::render_with` + 当前仓库的链接解析）：
+    /// 预览自己再实现一套渲染，就会和正文各说各话 —— 那正是本项目反复吃亏的"第二个真相"。
+    pub fn render(&self, markdown: &str) -> String {
+        let resolver = self.resolver(None);
+        crate::markdown::render_with(markdown, Some(&resolver))
+    }
+
     /// 界面偏好（主题、主题色、限宽）
     pub fn preferences(&self) -> &crate::storage::config::Appearance {
         &self.preferences

@@ -81,6 +81,12 @@ fn special_pages() -> Vec<String> {
         .collect()
 }
 
+/// 渲染预览：与阅读视图同一个渲染器（编辑器右侧的预览区用它）
+#[tauri::command]
+fn render_markdown(markdown: String) -> Result<String, String> {
+    Ok(open()?.render(&markdown))
+}
+
 /// 标题校验：只有解析，不落盘。前端即时检查之外的权威判定。
 #[tauri::command]
 fn validate_title(title: String) -> Result<(), String> {
@@ -277,6 +283,7 @@ pub fn run() {
             get_settings,
             update_settings,
             special_pages,
+            render_markdown,
             list_notes,
             load_note,
             create_note,
