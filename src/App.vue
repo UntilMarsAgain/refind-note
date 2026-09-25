@@ -1191,7 +1191,10 @@ function onAction(name: string) {
       <main
         ref="scrollEl"
         class="app__body"
-        :class="{ 'app__body--wide': !limitWidth }"
+        :class="{
+          'app__body--wide': !limitWidth,
+          'app__body--fit': mode === 'edit',
+        }"
         @scroll.passive="onScroll"
       >
         <div class="app__column" :class="{ 'app__column--wide': !limitWidth }">
@@ -1698,23 +1701,31 @@ function onAction(name: string) {
 </style>
 
 <!--
-  全局规则（非 scoped）：编辑页的高度必须**沿链逐级传**。
-  两个条件同时成立才有独立滚动条 —— 正文容器不再整体滚动，且它到编辑器之间每一层
-  （通常是一层阅读栏，它也负责宽度限制）都成为可收缩的 flex 项、并允许被压缩。
-  用 :has(.editor) 限定，阅读 / 历史页面的滚动与版心都不受影响。
+  全局规则（非 scoped）：编辑页的高度必须**沿链逐级传**，否则两栏的高度由内容撑开，
+  页面就成了唯一的滚动容器（点预览里的锚点会让两栏一起动，就是这个现象）。
+
+  这里用**模板显式加的类** `.app__body--fit`，而不是 `:has(.editor)`：
+  后者在运行环境的 WebKitGTK 里若不支持，整条规则会被丢弃，于是"看起来写了却没生效"。
+  显式类没有这个不确定性。
 -->
 <style>
-.app__body:has(.editor) {
+.app__body--fit {
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
 /* 只作用直接子层：它可能是阅读栏，也可能直接就是编辑器 —— 不必知道类名 */
-.app__body:has(.editor) > * {
+.app__body--fit > * {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
+  min-height: 0;
+}
+
+/* 编辑器吃掉剩余高度。用 flex 而不是 height:100% —— 不依赖父级是"确定高度"的百分比 */
+.app__body--fit .editor {
+  flex: 1 1 auto;
   min-height: 0;
 }
 </style>
