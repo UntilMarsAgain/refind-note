@@ -312,14 +312,6 @@ function submit() {
     </div>
 
     <div class="editor__bar">
-      <button
-        class="editor__preview-btn"
-        type="button"
-        title="不等静默，立刻渲染当前内容"
-        @click="refreshPreviewNow"
-      >
-        刷新预览
-      </button>
 
       <input
         v-model="summary"
@@ -330,6 +322,15 @@ function submit() {
       />
 
       <div class="editor__actions">
+        <button
+          class="editor__preview-btn"
+          type="button"
+          title="不等静默，立刻渲染当前内容"
+          @click="refreshPreviewNow"
+        >
+          刷新预览
+        </button>
+
         <button class="ebtn" type="button" :disabled="busy" @click="emit('save-draft')">
           <Save :size="14" :stroke-width="1.9" />
           保存草稿
@@ -612,7 +613,12 @@ function submit() {
 }
 
 
-.editor__preview-btn {
+/*
+ * 刷新预览。选择器带上 `.editor__actions`：
+ * 同组按钮的通用样式若写在文件更靠后的位置，仅凭类名会被它盖住（上一版就是因此
+ * 显示成浅色默认按钮）。这里用更高特异性，确保颜色与边框由本规则说了算。
+ */
+.editor__actions .editor__preview-btn {
   padding: 5px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -622,9 +628,22 @@ function submit() {
   cursor: pointer;
 }
 
-.editor__preview-btn:hover {
+.editor__actions .editor__preview-btn:hover {
   background: var(--hover);
   color: var(--text);
+}
+
+/*
+ * 两栏**各自滚动**，而不是整页滚动 —— 前提是它们有**确定的高度**；
+ * 高度由内容撑开时，页面本身就会变高，滚轮滚的就是页面。
+ *
+ * 这里用视口高度减去本页固定开销（标题栏 40 + 笔记页头 + 编辑栏 + 上下留白，约 190px）。
+ * 这是权宜做法：更彻底的是让编辑页的父容器不再整体滚动、把高度传下来 ——
+ * 那需要改 App 侧的布局，留待后续。
+ */
+.editor__panes {
+  height: calc(100vh - 190px);
+  min-height: 320px;
 }
 
 /* 状态为空时也占住这一行，避免布局上下跳 */
