@@ -56,7 +56,9 @@ watch(
   () => props.title,
   (title) => {
     committed = title;
-    if (document.activeElement !== fieldEl.value) {
+    // 只改值，**绝不碰焦点**：地址栏同步不该把光标从输入框里赶走。
+    // prop 只在「应用完成了一次导航」时变化，所以正在输入时不会被抢走内容。
+    if (draft.value !== title) {
       draft.value = title;
     }
   },
@@ -94,7 +96,8 @@ function onKeydown(event: KeyboardEvent) {
   if (event.key === "Enter") {
     committed = draft.value;
     emit("submit", draft.value);
-    fieldEl.value?.blur();
+    // 刻意**不 blur**：提交后光标留在地址栏，方便接着敲下一条；
+    // 回显（规范地址）由 props.title 的 watcher 负责，它只改值、不动焦点。
   } else if (event.key === "Escape") {
     draft.value = committed;
     fieldEl.value?.blur();

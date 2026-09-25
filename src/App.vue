@@ -517,23 +517,23 @@ const addressText = computed(() => {
 });
 
 /**
- * 是否有需要整页覆盖提醒的事。
+ * 两类提示，**刻意不共用同一个框**：
  *
- * 这些都是「不处理就会误事」的信息（解析失败、读不出来、有未提交的草稿），所以用整页
- * 覆盖而不是角落里的小条。**看历史版本不算**：那是要边看边用的状态，用正文顶部的条。
+ * - **错误**（解析失败、读不出来）：整页覆盖 —— 不处理就会误事，必须被看到；
+ * - **状态提示**（有未提交的草稿）：顶部悬挂条 —— 只是提醒，不该挡住正文。
+ *
+ * 「正在查看历史版本」不属于这两类：它是正文顶部的常驻条，要边看边用。
  */
-const noticeOpen = computed(
-  () =>
-    Boolean(addressError.value) ||
-    Boolean(loadError.value) ||
-    (!revisionView.value && draftExists.value && !draftHintDismissed.value),
+const errorNotice = computed(() => addressError.value || loadError.value);
+
+const hintNotice = computed(
+  () => !revisionView.value && draftExists.value && !draftHintDismissed.value,
 );
 
-/** 关掉覆盖式提示（点空白处或点「知道了」） */
+/** 关掉覆盖式错误提示（点空白处或点「知道了」） */
 function dismissNotices() {
   addressError.value = "";
   loadError.value = "";
-  draftHintDismissed.value = true;
 }
 
 /** 回到最新提交 */
@@ -864,23 +864,22 @@ function onAction(name: string) {
     @scroll-bottom="scrollToBottom"
   />
 
-  <!-- 提示：整页覆盖，确保被注意到（点空白处可关掉） -->
-  <div v-if="noticeOpen" class="app__notices" @click.self="dismissNotices">
-    <p v-if="addressError" class="notice notice--error">
-      <span>{{ addressError }}</span>
-      <button type="button" @click="addressError = ''">知道了</button>
+  <!-- 错误：整页覆盖（这一类必须被看到，点空白处关掉） -->
+  <div v-if="errorNotice" class="error-cover" @click.self="dismissNotices">
+    <p class="notice notice--error">
+      <span>{{ errorNotice }}</span>
+      <button type="button" @click="dismissNotices">知道了</button>
     </p>
+  </div>
 
-    <p v-if="!addressError && loadError" class="notice notice--error">
-      <span>{{ loadError }}</span>
-    </p>
-
-    <p v-if="!revisionView && draftExists && !draftHintDismissed" class="notice">
-      <span>这篇笔记有未提交的草稿（当前显示的是最新提交）</span>
+  <!-- 状态提示：顶部悬挂条（只是提醒，不挡正文） -->
+  <div v-if="hintNotice" class="hint-bar">
+    <span>这篇笔记有未提交的草稿（当前显示的是最新提交）</span>
+    <span class="hint-bar__actions">
       <button type="button" @click="openDraftPreview">预览</button>
       <button type="button" @click="onAction('edit')">编辑</button>
       <button type="button" @click="draftHintDismissed = true">知道了</button>
-    </p>
+    </span>
   </div>
 
   <!-- 删除确认：整页弹出，必须明确选择才继续 -->
@@ -961,18 +960,59 @@ function onAction(name: string) {
     transition: none;
   }
 }
-/* 覆盖式提示：整页遮罩 + 居中卡片，确保被注意到 */
-.app__notices {
+/* 一、错误：整页遮罩 + 居中卡片（不处理就会误事） */
+.error-cover {
   position: fixed;
   inset: 0;
   z-index: 55;
   display: flex;
-  flex-direction: column;
-  gap: 10px;
   align-items: center;
   justify-content: center;
   padding: 24px;
   background: rgb(0 0 0 / 45%);
+}
+
+/* 二、状态提示：顶部悬挂条（不挡正文，也不抢焦点的视觉重心） */
+.hint-bar {
+  position: fixed;
+  top: calc(var(--titlebar-height) + 10px);
+  left: 50%;
+  z-index: 46;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  max-width: min(720px, 88vw);
+  padding: 9px 14px;
+  border: 1px solid var(--accent-soft);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-dim);
+  font-size: 13px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 25%);
+  transform: translateX(-50%);
+}
+
+.hint-bar__actions {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.hint-bar__actions button {
+  appearance: none;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--accent-soft);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent-soft);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.hint-bar__actions button:hover {
+  background: var(--hover);
 }
 
 .notice {
