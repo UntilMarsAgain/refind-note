@@ -868,12 +868,17 @@ impl Vault {
         // 「平陆运河」12 字节）会让切口落在字符中间直接 panic；而这个 panic 发生在
         // GTK 回调里不能 unwind，会把整个应用 abort。
         if let Some(rest) = strip_prefix_ci(raw, "special:") {
+            // 特殊页面**没有状态**：`special:newtab@edit` 这类把状态裁掉（不当错误）。
             let page = rest
-                .split('#')
+                .split(['@', '#'])
                 .next()
                 .unwrap_or("")
                 .trim()
                 .to_ascii_lowercase();
+            let section = rest
+                .split_once('#')
+                .map(|(_, tail)| tail.trim())
+                .filter(|value| !value.is_empty());
 
             if page.is_empty() {
                 return Err(VaultError::BadAddress(
@@ -881,8 +886,16 @@ impl Vault {
                 ));
             }
 
+            // 不存在的特殊页面要**明确报不存在**，而不是当普通笔记去找
+            if !SPECIAL_PAGES.contains(&page.as_str()) {
+                return Err(VaultError::BadAddress(format!(
+                    "没有这个特殊页面：special:{page}（现有：{}）",
+                    SPECIAL_PAGES.join("、")
+                )));
+            }
+
             return Ok(Address::Special {
-                address: format!("special:{page}"),
+                address: compose_address(&format!("special:{page}"), None, section),
                 page,
             });
         }
@@ -1558,6 +1571,9 @@ fn strip_prefix_ci<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
     head.eq_ignore_ascii_case(prefix)
         .then(|| &value[prefix.len()..])
 }
+
+/// 现有的特殊页面。不在这里面的 `special:` 地址直接报「不存在」。
+const SPECIAL_PAGES: [&str; 1] = ["newtab"];
 
 /// 规范地址拼装：`NAME[@STATE][#章节]`。
 ///
@@ -2435,6 +2451,40 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    /// 特殊页面：不存在要报错，状态不正确要裁掉（章节与状态都按标准顺序回显）
+    #[test]
+    fn special_pages_validate_and_crop_state() {
+        let temp = TempVault::new();
+
+        // 状态不合法 → 裁掉，仍然打开那个页面（不当错误）
+        match temp.vault.parse_address("special:newtab@edit").unwrap() {
+            Address::Special { page, address } => {
+                assert_eq!(page, "newtab");
+                assert_eq!(address, "special:newtab");
+            }
+            other => panic!("{other:?}"),
+        }
+        match temp.vault.parse_address("special:newtab@whatever").unwrap() {
+            Address::Special { address, .. } => assert_eq!(address, "special:newtab"),
+            other => panic!("{other:?}"),
+        }
+
+        // 章节保留
+        match temp.vault.parse_address("special:newtab#小节").unwrap() {
+            Address::Special { address, .. } => assert_eq!(address, "special:newtab#小节"),
+            other => panic!("{other:?}"),
+        }
+
+        // 不存在的特殊页面 → 报错，且提示里带上现有的页面
+        let error = temp.vault.parse_address("special:不存在").unwrap_err();
+        let text = error.to_string();
+        assert!(text.contains("没有这个特殊页面"), "{text}");
+        assert!(text.contains("newtab"), "{text}");
+
+        // 空页面名仍然是另一种错误
+        assert!(temp.vault.parse_address("special:").is_err());
     }
 
     #[test]

@@ -112,9 +112,11 @@ function onKeydown(event: KeyboardEvent) {
 
 function onBlur() {
   // 没提交就退回上一次的值，行为对齐浏览器地址栏
-  if (draft.value !== committed) {
-    draft.value = committed;
-  }
+  // 失焦一律以外部（解析结果）为准回显 —— **无论刚才有没有发生跳转**，
+  // 否则输入框会停在用户敲的原文上，与地址栏该显示的内容不一致。
+  // （解析失败时 props.title 本身就是用户写的原文，所以那条例外仍然成立。）
+  committed = props.title;
+  draft.value = props.title;
 }
 </script>
 
