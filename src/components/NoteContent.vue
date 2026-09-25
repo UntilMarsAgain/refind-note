@@ -94,6 +94,17 @@ watch(
  * 把整个应用界面冲掉。所以一律拦下来：页内锚点自己滚动，外链交给系统浏览器。
  * 协议白名单由 opener 插件的作用域兜底（只允许 http/https/mailto/tel）。
  */
+/**
+ * 归一化要交给系统浏览器的地址。
+ *
+ * 已经带协议的**必须原样**（否则会变成 `https://https://…`）；没写协议的补一个 https，
+ * 这样「裸地址」也能点开。判断协议用 RFC 3986 的 `scheme:` 形状，不用字符串前缀猜。
+ */
+function normalizeUrl(value: string): string {
+  const trimmed = value.trim();
+  return /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
 function onClick(event: MouseEvent) {
   const target = event.target;
   if (!(target instanceof Element)) {
@@ -144,7 +155,7 @@ function onClick(event: MouseEvent) {
     return;
   }
 
-  void openUrl(href);
+  void openUrl(normalizeUrl(href));
 }
 </script>
 

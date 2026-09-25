@@ -14,7 +14,8 @@ import {
   Minus,
   Monitor,
   Moon,
-  Search,
+  ArrowLeft,
+  ArrowRight,
   Square,
   Sun,
   X,
@@ -33,10 +34,15 @@ import {
  * capabilities 里的 core:window:allow-{minimize,toggle-maximize,close,start-dragging}。
  */
 
-const props = defineProps<{ title: string }>();
+const props = defineProps<{
+  title: string;
+  canBack?: boolean;
+  canForward?: boolean;
+}>();
 
 const emit = defineEmits<{
-  (e: "search"): void;
+  (e: "back"): void;
+  (e: "forward"): void;
   (e: "menu"): void;
   (e: "submit", value: string): void;
 }>();
@@ -124,10 +130,21 @@ function onBlur() {
       <button
         class="tbtn"
         type="button"
-        aria-label="搜索"
-        @click="emit('search')"
+        aria-label="后退"
+        :disabled="!canBack"
+        @click="emit('back')"
       >
-        <Search :size="16" :stroke-width="1.75" />
+        <ArrowLeft :size="16" :stroke-width="1.75" />
+      </button>
+
+      <button
+        class="tbtn"
+        type="button"
+        aria-label="前进"
+        :disabled="!canForward"
+        @click="emit('forward')"
+      >
+        <ArrowRight :size="16" :stroke-width="1.75" />
       </button>
 
       <!-- 菜单按钮留作占位：展开内容之后再接 -->

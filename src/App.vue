@@ -157,7 +157,10 @@ const draftExists = ref(false);
  * 以前标签栏列的是仓库里全部笔记（「浏览全部文档」），暂时不做 —— 入口改为
  * `special:newtab`，标签栏只列真正打开着的。
  */
-const tabs = ref<{ address: string; title: string }[]>([]);
+/** 每个标签页自带浏览历史（内部链接是「跳转」，会往里推一条） */
+const tabs = ref<
+  { address: string; title: string; history: string[]; cursor: number }[]
+>([]);
 const activeTab = ref(0);
 
 /** 标签页上显示什么名字 */
@@ -183,12 +186,22 @@ function syncActiveTab(address: Address) {
     tab.title = tabTitleOf(address);
     return;
   }
-  tabs.value.push({ address: address.address, title: tabTitleOf(address) });
+  tabs.value.push({
+    address: address.address,
+    title: tabTitleOf(address),
+    history: [address.address],
+    cursor: 0,
+  });
 }
 
 /** 开一个新标签页。以前这个「+」是「新建笔记」，现在它是真正的开标签页。 */
 function openNewTab() {
-  tabs.value.push({ address: "special:newtab", title: "新标签页" });
+  tabs.value.push({
+    address: "special:newtab",
+    title: "新标签页",
+    history: ["special:newtab"],
+    cursor: 0,
+  });
   activeTab.value = tabs.value.length - 1;
   void navigate("special:newtab");
 }
@@ -550,10 +563,40 @@ function onNoteSelected(title: string) {
   void navigate(title);
 }
 
-function onSearch() {
-  // 全量列表（NoteSearch）暂时移除：浏览全部文档不做，入口统一走 special:newtab
-  openNewTab();
+/** 后退 / 前进：只在当前标签页的历史里移动，不产生新记录 */
+function goBack() {
+  const tab = tabs.value[activeTab.value];
+  if (!tab || tab.cursor <= 0) {
+    return;
+  }
+  tab.cursor -= 1;
+  const target = tab.history[tab.cursor];
+  if (target) {
+    void navigate(target, "history");
+  }
 }
+
+function goForward() {
+  const tab = tabs.value[activeTab.value];
+  if (!tab || tab.cursor >= tab.history.length - 1) {
+    return;
+  }
+  tab.cursor += 1;
+  const target = tab.history[tab.cursor];
+  if (target) {
+    void navigate(target, "history");
+  }
+}
+
+const canGoBack = computed(() => {
+  const tab = tabs.value[activeTab.value];
+  return Boolean(tab && tab.cursor > 0);
+});
+
+const canGoForward = computed(() => {
+  const tab = tabs.value[activeTab.value];
+  return Boolean(tab && tab.cursor < tab.history.length - 1);
+});
 
 function onMenu() {
   // TODO: 展开菜单（展开内容之后再接）
@@ -728,7 +771,7 @@ async function onSubmit(value: string) {
  * 解析失败时**不动地址栏**：用户写错了版本引用（`@` 没找到对应版本）时，应当看见自己
  * 输入的内容，而不是被换成他并没有输入的规范地址。
  */
-async function navigate(input: string) {
+async function navigate(input: string, movement: "replace" | "push" | "history" = "replace") {
   addressError.value = "";
   rejectedAddress.value = "";
 
@@ -755,6 +798,17 @@ async function navigate(input: string) {
   localSection.value = "";
   draftHintDismissed.value = false;
   syncActiveTab(address);
+
+  // 记进当前标签页的浏览历史：内部链接＝跳转（推一条，并丢掉原来的前进部分）；
+  // 地址栏输入＝替换当前这条；前进后退＝只移动游标。
+  const tab = tabs.value[activeTab.value];
+  if (tab && movement === "push") {
+    tab.history = tab.history.slice(0, tab.cursor + 1);
+    tab.history.push(address.address);
+    tab.cursor = tab.history.length - 1;
+  } else if (tab && movement === "replace") {
+    tab.history[tab.cursor] = address.address;
+  }
 
   switch (address.kind) {
     case "special":
@@ -870,7 +924,8 @@ async function doRollback() {
  */
 function onWikiLink(payload: { title: string; missing: boolean }) {
   void payload.missing;
-  void navigate(payload.title);
+  // 内部链接算「跳转」，所以可以后退回上一条
+  void navigate(payload.title, "push");
 }
 
 function onAction(name: string) {
@@ -902,7 +957,10 @@ function onAction(name: string) {
   <div class="app">
     <TitleBar
       :title="addressText"
-      @search="onSearch"
+      :can-back="canGoBack"
+      :can-forward="canGoForward"
+      @back="goBack"
+      @forward="goForward"
       @menu="onMenu"
       @submit="onSubmit"
     />
