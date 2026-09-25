@@ -969,6 +969,15 @@ impl Vault {
                     })?;
                 let full_id = revision_id(event);
                 let short = short_revision_id(&full_id);
+                // 规则：看的就是**最新提交**时，`view-` 正是默认状态，回显里裁掉它
+                // （只裁 view —— rollback 不是默认状态，不能省）。
+                if head == "view" && rev == fold(&events).rev {
+                    return Ok(Address::Note {
+                        address: compose_address(&display, None, section.as_deref()),
+                        title: display,
+                    });
+                }
+
                 let canonical = format!("{head}-{short}");
 
                 // 先算好地址，再构造（否则 display 会先被移进 title、后面又借用）
@@ -2365,6 +2374,67 @@ mod tests {
         let table = fs::read_to_string(temp.root.join("titles.json")).unwrap();
         assert!(table.contains("trashed"), "{table}");
         assert!(table.contains("换个名字"), "删除后名字要留在 trashed 里：{table}");
+    }
+
+    /// 状态与章节随便怎么排，回显一律标准顺序；看最新提交时 `view-` 会被裁掉
+    #[test]
+    fn address_is_normalized_and_latest_view_is_cropped() {
+        let temp = TempVault::new();
+        temp.vault.create("顺序").unwrap();
+        temp.vault.commit("顺序", "第一版", None, 0).unwrap();
+        temp.vault.commit("顺序", "第二版", None, 1).unwrap();
+
+        let history = temp.vault.history("顺序").unwrap();
+        let first = history.iter().find(|item| item.rev == 1).unwrap();
+        let latest = history.iter().find(|item| item.rev == 2).unwrap();
+
+        // 顺序乱写（章节在前、状态在后）→ 回显按 `NAME@STATE#SECTION`
+        match temp
+            .vault
+            .parse_address(&format!("顺序#小节@view-{}", first.short_id))
+            .unwrap()
+        {
+            Address::ViewVersion { address, rev, .. } => {
+                assert_eq!(rev, 1);
+                assert_eq!(address, format!("顺序@view-{}#小节", first.short_id));
+            }
+            other => panic!("{other:?}"),
+        }
+
+        // 看的就是最新提交 → 裁掉 `view-`
+        match temp
+            .vault
+            .parse_address(&format!("顺序@view-{}", latest.short_id))
+            .unwrap()
+        {
+            Address::Note { address, title } => {
+                assert_eq!(title, "顺序");
+                assert_eq!(address, "顺序");
+            }
+            other => panic!("{other:?}"),
+        }
+
+        // 带章节时：裁状态、留章节
+        match temp
+            .vault
+            .parse_address(&format!("顺序@view-{}#小节", latest.short_id))
+            .unwrap()
+        {
+            Address::Note { address, .. } => assert_eq!(address, "顺序#小节"),
+            other => panic!("{other:?}"),
+        }
+
+        // rollback 不是默认状态，不能裁
+        match temp
+            .vault
+            .parse_address(&format!("顺序@rollback-{}", latest.short_id))
+            .unwrap()
+        {
+            Address::RollbackConfirm { address, .. } => {
+                assert_eq!(address, format!("顺序@rollback-{}", latest.short_id));
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]
