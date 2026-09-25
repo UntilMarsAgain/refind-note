@@ -756,6 +756,36 @@ impl Vault {
             return Ok(Address::Empty);
         }
 
+        // 模式后缀：`!edit` / `!history`。`!` 已列入非法标题字符，不会和标题打架。
+        if let Some(index) = raw.rfind('!') {
+            let parsed = self
+                .table
+                .parse(raw[..index].trim(), self.config.capital_links)?;
+            let display = parsed.display(&self.table);
+            let mode = raw[index + 1..].trim().to_ascii_lowercase();
+
+            if !self.log_path(&Self::id_of(&parsed)).is_file() {
+                return Ok(Address::Missing {
+                    address: display.clone(),
+                    title: display,
+                });
+            }
+
+            return match mode.as_str() {
+                "edit" => Ok(Address::Edit {
+                    address: format!("{display}!edit"),
+                    title: display,
+                }),
+                "history" => Ok(Address::History {
+                    address: format!("{display}!history"),
+                    title: display,
+                }),
+                other => Err(VaultError::BadAddress(format!(
+                    "不认识「!{other}」这种模式；目前只有 !edit 与 !history"
+                ))),
+            };
+        }
+
         let (title_part, reference) = match raw.rfind('@') {
             Some(index) => (raw[..index].trim(), Some(raw[index + 1..].trim().to_string())),
             None => (raw, None),
@@ -766,9 +796,15 @@ impl Vault {
             let parsed = self.table.parse(raw, self.config.capital_links)?;
             let display = parsed.display(&self.table);
             return Ok(if self.log_path(&Self::id_of(&parsed)).is_file() {
-                Address::Note { title: display }
+                Address::Note {
+                    address: display.clone(),
+                    title: display,
+                }
             } else {
-                Address::Missing { title: display }
+                Address::Missing {
+                    address: display.clone(),
+                    title: display,
+                }
             });
         };
 
@@ -796,8 +832,10 @@ impl Vault {
                     let Some(parsed) = Self::title_of_log_path(&path) else {
                         continue;
                     };
+                    let display = parsed.display(&self.table);
                     matches.push(Address::Revision {
-                        title: parsed.display(&self.table),
+                        address: format!("{display}@{}", short_revision_id(&id)),
+                        title: display,
                         rev,
                         short_id: short_revision_id(&id),
                         id,
@@ -822,7 +860,10 @@ impl Vault {
         let id = Self::id_of(&parsed);
         if !self.log_path(&id).is_file() {
             // 笔记还没有建立，版本自然无从谈起
-            return Ok(Address::Missing { title: display });
+            return Ok(Address::Missing {
+                address: display.clone(),
+                title: display,
+            });
         }
 
         let rev = self.resolve_revision(&display, &reference)?;
@@ -837,6 +878,7 @@ impl Vault {
         let full_id = revision_id(event);
 
         Ok(Address::Revision {
+            address: format!("{display}@{}", short_revision_id(&full_id)),
             title: display,
             rev,
             id: full_id.clone(),
@@ -1817,7 +1859,7 @@ mod tests {
 
         // 只有标题 → 打开笔记
         match temp.vault.parse_address("地址").unwrap() {
-            Address::Note { title } => assert_eq!(title, "地址"),
+            Address::Note { title, .. } => assert_eq!(title, "地址"),
             other => panic!("{other:?}"),
         }
 
@@ -1867,7 +1909,7 @@ mod tests {
 
         // 不存在的笔记 → 交给「不存在 + 创建」
         match temp.vault.parse_address("没建过").unwrap() {
-            Address::Missing { title } => assert_eq!(title, "没建过"),
+            Address::Missing { title, .. } => assert_eq!(title, "没建过"),
             other => panic!("{other:?}"),
         }
 
@@ -1985,6 +2027,34 @@ mod tests {
             events.len(),
             "拒绝写入时不该落下任何东西"
         );
+    }
+
+    /// 模式也是地址语法的一部分，并且带回规范地址用于回显
+    #[test]
+    fn address_modes_are_part_of_the_grammar() {
+        let temp = TempVault::new();
+        temp.vault.create("模式").unwrap();
+        temp.vault.commit("模式", "正文", None, 0).unwrap();
+
+        match temp.vault.parse_address("模式!edit").unwrap() {
+            Address::Edit { title, address } => {
+                assert_eq!(title, "模式");
+                assert_eq!(address, "模式!edit", "回显用规范地址");
+            }
+            other => panic!("{other:?}"),
+        }
+
+        match temp.vault.parse_address("模式!history").unwrap() {
+            Address::History { address, .. } => assert_eq!(address, "模式!history"),
+            other => panic!("{other:?}"),
+        }
+
+        // 不认识的模式要明确报错，不能悄悄当成标题
+        assert!(temp.vault.parse_address("模式!whatever").is_err());
+
+        // `!` 与 `@` 都不允许出现在标题里：否则地址语法就和标题打架了
+        assert!(temp.vault.validate_title("带!的标题").is_err());
+        assert!(temp.vault.validate_title("带@的标题").is_err());
     }
 
     #[test]

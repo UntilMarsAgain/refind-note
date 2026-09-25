@@ -11,7 +11,7 @@
  */
 
 /** MediaWiki 的非法字符，外加本项目自己的 `:` 与 `@` */
-const ILLEGAL = ["#", "<", ">", "[", "]", "|", "{", "}", ":", "@"];
+const ILLEGAL = ["#", "<", ">", "[", "]", "|", "{", "}", ":", "@", "!"];
 
 /** 与后端 `max_title_bytes` 对应（后端权威） */
 const MAX_TITLE_BYTES = 255;
@@ -26,9 +26,13 @@ export function checkTitle(title: string): string | null {
   }
   for (const ch of ILLEGAL) {
     if (trimmed.includes(ch)) {
-      return ch === "@"
-        ? "标题里不能有 @（地址栏用「标题@版本」表达版本）"
-        : `标题里不能有 ${ch}`;
+      if (ch === "@") {
+        return "标题里不能有 @（地址栏用「标题@版本」表达版本）";
+      }
+      if (ch === "!") {
+        return "标题里不能有 !（地址栏用「标题!edit」「标题!history」表达模式）";
+      }
+      return `标题里不能有 ${ch}`;
     }
   }
   if (encoder.encode(trimmed).length > MAX_TITLE_BYTES) {

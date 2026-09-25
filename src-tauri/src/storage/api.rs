@@ -120,17 +120,22 @@ pub struct DiffResult {
 pub enum Address {
     /// 空输入
     Empty,
-    /// 打开一篇笔记（已确认存在）
-    Note { title: String },
-    /// 打开某一版；`title` 与 `short_id` 用于回显 `名称@缩写`
+    /// 阅读一篇笔记（已确认存在）
+    Note { title: String, address: String },
+    /// 只读查看某一版
     Revision {
         title: String,
         rev: u64,
         id: String,
         short_id: String,
+        address: String,
     },
+    /// 编辑一篇笔记
+    Edit { title: String, address: String },
+    /// 看一篇笔记的版本历史
+    History { title: String, address: String },
     /// 目标还不存在，交给「不存在 + 创建」那条路
-    Missing { title: String },
+    Missing { title: String, address: String },
 }
 
 /// 一次回收的结果
