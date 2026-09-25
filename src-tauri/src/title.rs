@@ -45,51 +45,22 @@ impl Default for NamespaceTable {
 impl NamespaceTable {
     /// 内建命名空间：id 0..15 是内容空间（每个内容空间 N 都配一个讨论空间 N+1），
     /// -1 / -2 是虚拟空间。
+    /// 内建命名空间表。
+    ///
+    /// **目前只有主命名空间**：没有规范名、没有别名，所以任何非空前缀都查不到 ——
+    /// 于是带冒号的标题一律判非法（见 `parse`）。
+    ///
+    /// 以后允许用户创建命名空间时，把新项加进这个数组即可：路径（`notes/<id>/`）、
+    /// 显示标题拼装、以及「冒号前缀不是已知命名空间就报错」这条规则都已经预留好了。
     pub fn builtin() -> Self {
-        let mut items = vec![Namespace {
-            id: 0,
-            name: String::new(),
-            aliases: Vec::new(),
-            storable: true,
-        }];
-
-        // (id, 规范名, 别名)
-        let pairs: &[(i32, &str, &[&str])] = &[
-            (1, "Talk", &["讨论"]),
-            (2, "User", &["用户"]),
-            (3, "User talk", &["用户讨论"]),
-            (4, "Project", &["Refind", "重逢笔记"]),
-            (5, "Project talk", &["Project 讨论", "Refind talk"]),
-            (6, "File", &["Image", "文件"]),
-            (7, "File talk", &["Image talk", "文件讨论"]),
-            (8, "MediaWiki", &[]),
-            (9, "MediaWiki talk", &["MediaWiki 讨论"]),
-            (10, "Template", &["模板"]),
-            (11, "Template talk", &["模板讨论"]),
-            (12, "Help", &["帮助"]),
-            (13, "Help talk", &["帮助讨论"]),
-            (14, "Category", &["分类"]),
-            (15, "Category talk", &["分类讨论"]),
-        ];
-        for (id, name, aliases) in pairs {
-            items.push(Namespace {
-                id: *id,
-                name: (*name).to_string(),
-                aliases: aliases.iter().map(|a| (*a).to_string()).collect(),
+        Self {
+            items: vec![Namespace {
+                id: 0,
+                name: String::new(),
+                aliases: Vec::new(),
                 storable: true,
-            });
+            }],
         }
-
-        for (id, name, alias) in [(-1, "Special", "特殊"), (-2, "Media", "媒体")] {
-            items.push(Namespace {
-                id,
-                name: name.to_string(),
-                aliases: vec![alias.to_string()],
-                storable: false,
-            });
-        }
-
-        Self { items }
     }
 
     pub fn get(&self, id: i32) -> Option<&Namespace> {
@@ -324,6 +295,14 @@ mod tests {
     }
 
     #[test]
+    fn builtin_has_only_the_main_namespace() {
+        let table = table();
+        assert_eq!(table.items.len(), 1);
+        assert_eq!(table.items[0].id, 0);
+        assert!(table.items[0].name.is_empty(), "主命名空间没有前缀");
+    }
+
+    #[test]
     fn main_namespace_has_no_prefix() {
         let parsed = table().parse("平陆运河", true).unwrap();
         assert_eq!(parsed.ns, 0);
@@ -332,24 +311,17 @@ mod tests {
         assert_eq!(parsed.display(&table()), "平陆运河");
     }
 
+    /// 目前只有主命名空间，所以**任何**冒号前缀都查不到，标题一律判非法。
+    /// 这与 MediaWiki 不同（那边会退回主命名空间），理由见模块文档。
     #[test]
-    fn known_prefix_becomes_namespace() {
-        let parsed = table().parse("Help:目录", true).unwrap();
-        assert_eq!(parsed.ns, 12);
-        assert_eq!(parsed.title, "目录");
-        assert_eq!(parsed.display(&table()), "Help:目录");
-    }
-
-    #[test]
-    fn unknown_prefix_is_rejected_instead_of_falling_back() {
-        // 与 MediaWiki 明确不同：冒号后不是已知命名空间时直接判非法，
-        // 而不是把整串当主命名空间的标题
-        assert_eq!(
-            table().parse("随便什么:内容", true),
-            Err(TitleError::Illegal(':'))
-        );
-        // 命中命名空间之后，标题里也不允许再出现冒号
-        assert_eq!(table().parse("Help:A:B", true), Err(TitleError::Illegal(':')));
+    fn colon_titles_are_rejected() {
+        for input in ["Help:目录", "随便什么:内容", "Help:A:B", "Category:某分类"] {
+            assert_eq!(
+                table().parse(input, true),
+                Err(TitleError::Illegal(':')),
+                "{input} 应当被判非法"
+            );
+        }
     }
 
     #[test]
@@ -359,16 +331,8 @@ mod tests {
     }
 
     #[test]
-    fn aliases_and_case_are_accepted() {
-        assert_eq!(table().parse("讨论:主题", true).unwrap().ns, 1);
-        assert_eq!(table().parse("talk:主题", true).unwrap().ns, 1);
-        assert_eq!(table().parse("IMAGE:图.png", true).unwrap().ns, 6);
-        assert_eq!(table().parse("重逢笔记:首页", true).unwrap().ns, 4);
-    }
-
-    #[test]
     fn slash_is_part_of_the_title() {
-        // 斜杠原样进标题，不做层级展开
+        // 斜杠原样进标题（子页面语义只在链接解析时展开）
         let parsed = table().parse("平陆运河/航道", true).unwrap();
         assert_eq!(parsed.ns, 0);
         assert_eq!(parsed.title, "平陆运河/航道");
@@ -385,11 +349,8 @@ mod tests {
     #[test]
     fn illegal_titles_are_rejected() {
         assert_eq!(table().parse("", true), Err(TitleError::Empty));
-        assert_eq!(table().parse("Talk:", true), Err(TitleError::Empty));
-        assert_eq!(
-            table().parse("带|竖线", true),
-            Err(TitleError::Illegal('|'))
-        );
+        assert_eq!(table().parse("   ", true), Err(TitleError::Empty));
+        assert_eq!(table().parse("带|竖线", true), Err(TitleError::Illegal('|')));
         assert!(matches!(
             table().parse(&"字".repeat(300), true),
             Err(TitleError::TooLong(_))
@@ -436,14 +397,11 @@ mod tests {
         assert_eq!(resolver.resolve("/航道").unwrap().title, "平陆运河/航道");
     }
 
+    /// 带冒号的目标现在解析不了，链接只能退化成字面文本
     #[test]
-    fn leading_colon_is_stripped() {
-        let resolver = LinkResolver::new(
-            Arc::new(table()),
-            Arc::new(HashSet::new()),
-            true,
-            None,
-        );
-        assert_eq!(resolver.resolve(":Category:某分类").unwrap().key, "14:某分类");
+    fn colon_targets_do_not_resolve() {
+        let resolver =
+            LinkResolver::new(Arc::new(table()), Arc::new(HashSet::new()), true, None);
+        assert!(resolver.resolve("Help:目录").is_none());
     }
 }

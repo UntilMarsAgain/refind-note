@@ -1111,9 +1111,9 @@ mod tests {
         temp.vault.create("旧名").unwrap();
         temp.vault.commit("旧名", "正文", None, 0).unwrap();
 
-        let note = temp.vault.rename("旧名", "Help:新名").unwrap();
-        assert_eq!(note.key, "12:新名");
-        assert_eq!(note.title, "Help:新名");
+        let note = temp.vault.rename("旧名", "新名").unwrap();
+        assert_eq!(note.key, "0:新名");
+        assert_eq!(note.title, "新名");
         assert_eq!(note.rev, 2, "改名也是一次提交");
         assert_eq!(note.markdown, "正文", "内容不变");
 
