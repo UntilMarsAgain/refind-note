@@ -1,0 +1,110 @@
+//! 给前端的结构。
+//!
+//! 单独放着，是为了让「对外形状」和「内部实现」分开：改内部不必动前端契约。
+
+use serde::Serialize;
+
+// ---------------------------------------------------------------- 对外结构
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NoteSummary {
+    pub key: String,
+    pub title: String,
+    pub rev: u64,
+    pub modified: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Note {
+    pub key: String,
+    /// 显示标题（含命名空间前缀）
+    pub title: String,
+    /// 编辑用的原样源码
+    pub markdown: String,
+    /// 阅读用的 HTML（Rust 端编译，含红/蓝链标记）
+    pub html: String,
+    pub rev: u64,
+    pub modified: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Draft {
+    pub markdown: String,
+    pub base_rev: u64,
+    pub at: String,
+}
+
+/// `load_note` 的结果。
+///
+/// 刻意**不用 `Result` 表达「目标不存在」**：那不是错误，而是需要界面配合的正常
+/// 状态（显示「还没有这篇笔记」并给一个创建按钮）。用错误表达，前端就分不清
+/// 「不存在」和「真的读写失败」了。
+#[derive(Debug, Clone, Serialize)]
+pub struct LoadOutcome {
+    /// 目标存在时的笔记内容；`None` 表示还不存在
+    pub note: Option<Note>,
+    /// 请求的显示标题（前端创建时直接拿去用）
+    pub title: String,
+    /// 是被删除过，而不是从未建立（区分开是为了将来接恢复功能）
+    pub deleted: bool,
+}
+
+/// 历史的每一行：只有元信息，正文按需再取（见 `RevisionContent`）。
+#[derive(Debug, Clone, Serialize)]
+pub struct RevisionSummary {
+    /// 0 表示「创建」这条记录，它本身没有正文
+    pub rev: u64,
+    /// create / commit / draft / delete
+    pub kind: String,
+    pub at: String,
+    pub bytes: u64,
+    /// 相对上一条记录的字节增减，便于一眼看出改了多少
+    pub delta: i64,
+    /// 本次提交取代了哪些草稿节点（只有 commit 才有）
+    pub supersedes: Vec<u64>,
+    pub summary: Option<String>,
+}
+
+/// 某一个版本的正文
+#[derive(Debug, Clone, Serialize)]
+pub struct RevisionContent {
+    pub rev: u64,
+    pub kind: String,
+    pub at: String,
+    /// 该版本**当时**的显示标题：改名之前的版本显示旧标题
+    pub title: String,
+    pub markdown: String,
+    pub html: String,
+}
+
+/// 对比结果里的一行
+#[derive(Debug, Clone, Serialize)]
+pub struct DiffLine {
+    /// equal / insert / delete
+    pub kind: String,
+    /// 行号从 1 起；该侧没有这一行时是 null（插入的行没有旧行号）
+    pub old_line: Option<u64>,
+    pub new_line: Option<u64>,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DiffResult {
+    pub from_rev: u64,
+    pub to_rev: u64,
+    pub from_title: String,
+    pub to_title: String,
+    pub lines: Vec<DiffLine>,
+    pub inserted: usize,
+    pub deleted: usize,
+}
+/// 仓库级设置。**界面偏好不在这里**——那属于这台机器，不属于数据，留在前端。
+#[derive(Debug, Clone, Serialize)]
+pub struct VaultSettings {
+    /// 仓库根目录（界面上显示出来，方便直接去看文件）
+    pub root: String,
+    pub format: u32,
+    /// 标题首字母是否强制大写（对应 MediaWiki 的 $wgCapitalLinks）
+    pub capital_links: bool,
+    pub max_title_bytes: usize,
+}

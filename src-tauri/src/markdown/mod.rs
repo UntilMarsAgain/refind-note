@@ -4,7 +4,9 @@
 
 pub mod syntax;
 
+use crate::title::LinkResolver;
 use markdown_it::MarkdownIt;
+use std::cell::RefCell;
 use std::sync::LazyLock;
 
 /// 给标题生成 id，供页内跳转使用。
@@ -29,6 +31,21 @@ fn slugify_heading(text: &str) -> String {
     }
 
     out
+}
+
+thread_local! {
+    /// 当前渲染所用的链接解析器。
+    ///
+    /// 为什么不用解析器的 `ext` 集合：那是**解析器全局唯一**的，而渲染状态必须是
+    /// **每次调用各自一份**——两个线程同时渲染时，一个的「用完清空」会把另一个
+    /// 正在进行的渲染打断（并行跑测试就复现了）。`parse(&self, src)` 又没有 env
+    /// 参数，所以用线程局部变量承载：解析本身是同步的，规则必然跑在同一个线程上。
+    static CURRENT_RESOLVER: RefCell<Option<LinkResolver>> = const { RefCell::new(None) };
+}
+
+/// 取当前渲染的解析器（供自定义语法使用）
+pub fn current_resolver() -> Option<LinkResolver> {
+    CURRENT_RESOLVER.with(|cell| cell.borrow().clone())
 }
 
 /// markdown-it 默认是个**空解析器**：CommonMark 语法本身也是插件，必须显式注册。
@@ -59,9 +76,25 @@ static MARKDOWN: LazyLock<MarkdownIt> = LazyLock::new(|| {
     md
 });
 
-/// 把 markdown 编译成 HTML。
+/// 把 markdown 编译成 HTML。不带链接解析，因此内部链接不会被标出红/蓝。
+///
+/// 应用里读笔记走的是 [`render_with`]（要标红/蓝链），这条留给测试与不需要链接
+/// 解析的场合，所以在非测试构建里会被报告为「未使用」。
+#[allow(dead_code)]
 pub fn render(markdown: &str) -> String {
-    MARKDOWN.parse(markdown).render()
+    render_with(markdown, None)
+}
+
+/// 带链接解析的渲染：`[[目标]]` 会额外带上 `data-key` / `data-title` / `data-missing`。
+pub fn render_with(markdown: &str, resolver: Option<&LinkResolver>) -> String {
+    // 存下旧值、用完还原：万一日后出现嵌套渲染，也不会互相踩
+    let previous = CURRENT_RESOLVER.with(|cell| cell.borrow().clone());
+    CURRENT_RESOLVER.with(|cell| *cell.borrow_mut() = resolver.cloned());
+
+    let html = MARKDOWN.parse(markdown).render();
+
+    CURRENT_RESOLVER.with(|cell| *cell.borrow_mut() = previous);
+    html
 }
 
 #[cfg(test)]
@@ -134,5 +167,48 @@ mod tests {
         let html = render("# 一级\n\n## 二级\n");
         assert!(html.contains("<h1"), "{html}");
         assert!(html.contains("<h2"), "{html}");
+    }
+
+    /// 渲染状态必须是「每次调用各自一份」：并行渲染时不能互相干扰。
+    ///
+    /// 这条有来历——最初把解析器塞进解析器的全局 `ext` 集合，并行跑测试立刻出现
+    /// 「一个线程的清理打断了另一个线程的渲染」，于是改成线程局部变量。
+    #[test]
+    fn resolver_does_not_leak_across_threads() {
+        use crate::title::NamespaceTable;
+        use std::collections::HashSet;
+        use std::sync::Arc;
+
+        let handles: Vec<_> = (0..4)
+            .map(|index| {
+                std::thread::spawn(move || {
+                    let mut keys = HashSet::new();
+                    keys.insert(format!("0:条目{index}"));
+                    let resolver = LinkResolver::new(
+                        Arc::new(NamespaceTable::builtin()),
+                        Arc::new(keys),
+                        true,
+                        None,
+                    );
+                    let html = render_with(
+                        &format!("[[条目{index}]] 与 [[别的条目]]\n"),
+                        Some(&resolver),
+                    );
+                    assert!(
+                        html.contains(&format!(r#"data-key="0:条目{index}""#)),
+                        "{html}"
+                    );
+                    assert!(html.contains(r#"data-missing="true""#), "{html}");
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        // 渲染结束后不留残留：不带解析器的渲染不会标红/蓝
+        let html = render("[[条目0]]\n");
+        assert!(!html.contains("data-key"), "{html}");
     }
 }

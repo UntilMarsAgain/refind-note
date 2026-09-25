@@ -1,2 +1,15 @@
 [workspace]
 members = ["src-tauri"]
+# 工作区成员都是 edition 2021，解析器要显式跟上，否则 cargo 按 resolver 1 处理
+# （会做全局的 feature 合并，容易带进用不到的依赖）。
+resolver = "2"
+
+# release 优化配置必须写在**工作区根**：写在成员包里会被 cargo 直接忽略
+# （它原来就在 src-tauri/ 里，等于 lto / opt-level / strip 全都没生效）。
+# 详见 https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

@@ -20,6 +20,9 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
+# 单实例：同一个登录会话里只能有一个重逢笔记在跑。第二次启动时由它把已有窗口
+# 拉到前面（而不是又开一个进程去抢同一个仓库）。放在最前面注册，见 lib.rs。
+tauri-plugin-single-instance = "2"
 # 代码块的复制按钮用它，而不是 navigator.clipboard：
 # webview 里的 Web 剪贴板 API 在 Linux 上不保证可用，插件才是官方可靠路径。
 tauri-plugin-clipboard-manager = "2"
@@ -28,12 +31,14 @@ serde_json = "1"
 # default-features 里含 syntect，它把代码高亮配色以内联 style 写死，
 # 跟随不了浅色/深色切换，所以关掉，代码块交给前端 CSS。顺带少一条重依赖。
 markdown-it = { version = "0.6", default-features = false, features = ["linkify"] }
+# 内容寻址的哈希（blob 与草稿去重都靠它）。
+# 用最新的 0.11：这一代 API 与 0.10 不同，但安全更新只会往新版走，
+# 迁早就早，省得以后为了修漏洞再改一次 API。
+sha2 = "0.11"
+# 日志里的时间戳用人可读的 ISO-8601，省得自己写日期换算。
+time = { version = "0.3", features = ["formatting"] }
+# 「对比版本」用的行级差异。放在后端做：前端保持薄，而且差异算法能被单元测试钉住。
+similar = "3"
 
-
-# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
-[profile.release]
-codegen-units = 1
-lto = true
-opt-level = 3
-panic = "abort"
-strip = true
+# release 优化配置**不在这里**：写在成员包里会被 cargo 忽略，
+# 已挪到工作区根 Cargo.toml 的 [profile.release]。
