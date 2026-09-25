@@ -876,10 +876,8 @@ async function navigate(
     address = await invoke<Address>("parse_address", { input });
   } catch (error) {
     addressError.value = String(error);
-    // 只有「@ 版本没找到」那类才保留用户输入（这是规范里说的唯一例外）；
-    // 其它错误（例如 special 页面不存在）一律退回修改前的地址，免得地址栏
-    // 停在一个根本不存在的写法上。
-    rejectedAddress.value = input.includes("@") ? input.trim() : "";
+    // 统一规则：**用户输入的地址一旦报错，就退回修改前的地址**，不把用户输入留在
+    // 地址栏（以前为「@ 版本没找到」留的那条例外取消了）。
     console.debug("地址解析失败:", error);
     return;
   }
