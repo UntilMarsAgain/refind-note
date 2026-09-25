@@ -394,7 +394,21 @@ function initialOf(tab: { address: string; title: string }) {
   margin-top: auto;
 }
 
+/*
+ * 收起态：图标要居中，且**不许被压缩**。
+ *
+ * 收起宽 46px、栏左右内边距各 8px → 内容区 30px。上一版给按钮左右外边距各 6px、
+ * 内边距各 6px，剩给图标的只有 6px；而 SVG 作为 flex 项默认 `flex-shrink: 1`，
+ * 于是被压成一条细缝（看起来"几乎一个像素"）。现在收掉侧边距与内边距，
+ * 并把图标设为不可压缩。
+ */
 .rail--collapsed .rail__settings {
-  padding: 6px;
+  justify-content: center;
+  margin: 4px 2px;
+  padding: 6px 0;
+}
+
+.rail__settings svg {
+  flex-shrink: 0;
 }
 </style>
