@@ -371,4 +371,30 @@ function initialOf(tab: { address: string; title: string }) {
 .rail--collapsed .rail__settings .rail__text {
   display: none;
 }
+/*
+ * 设置入口固定在栏底。两条都是必需的：
+ *
+ * 1. **滚动的必须是列表本身，而不是整条栏**。原来 `.rail` 自己 overflow-y: auto，
+ *    按钮在列表之后，于是标签一多就被顶到滚动区外，看起来像"展开后才出现"。
+ * 2. **收起时（栏宽 46px，左右各 8px 内边距 → 内容区 30px）按钮的内边距要同步收窄**，
+ *    否则内容宽约 32px 超出而被 overflow-x: hidden 裁掉，图标就看不见。
+ */
+.rail {
+  overflow: hidden;
+}
+
+.rail__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.rail__settings {
+  margin-top: auto;
+}
+
+.rail--collapsed .rail__settings {
+  padding: 6px;
+}
 </style>
