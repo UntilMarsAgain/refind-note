@@ -131,24 +131,6 @@ const wikilinkHighlight = ViewPlugin.fromClass(
   { decorations: (plugin) => plugin.decorations },
 );
 
-/**
- * 临时诊断（没有 devtools 时的替代手段）。
- *
- * 它回答两个问题：滚动容器到底是谁（看各元素的 overflowY 与 scrollHeight），
- * 以及本组件的 scoped 样式有没有生效（若 `.editor__source` 的 overflowY 不是 hidden，
- * 说明样式没进来 —— 那前面的布局调整全都是白做）。
- */
-const layoutDebug = ref("");
-
-function readLayout(selector: string): string {
-  const el = document.querySelector(selector);
-  if (!el) {
-    return `${selector} 不存在`;
-  }
-  const style = getComputedStyle(el);
-  return `${selector} h=${el.clientHeight} sh=${el.scrollHeight} oy=${style.overflowY}`;
-}
-
 /** CodeMirror 挂载点 */
 const hostEl = ref<HTMLElement | null>(null);
 let view: EditorView | null = null;
@@ -243,15 +225,6 @@ onMounted(() => {
 
   void refreshPreview(props.modelValue);
 
-  // 等一帧再读，避免读到挂载前的空值
-  window.setTimeout(() => {
-    layoutDebug.value = [
-      readLayout(".editor__panes"),
-      readLayout(".editor__source"),
-      readLayout(".cm-scroller"),
-      readLayout(".editor__preview"),
-    ].join(" ｜ ");
-  }, 600);
 });
 
 onBeforeUnmount(() => {
@@ -418,8 +391,6 @@ function submit() {
       </div>
     </div>
 
-    <!-- 临时诊断：没有 devtools，用它看清滚动容器是谁。确认后即可删。 -->
-    <p v-if="layoutDebug" class="editor__debug">{{ layoutDebug }}</p>
 
     <textarea
       v-if="false"
@@ -640,14 +611,6 @@ function submit() {
   font-family: var(--mono-font);
   font-size: 13px;
   line-height: 1.7;
-}
-
-.editor__debug {
-  margin: 6px 0 0;
-  color: var(--text-dim);
-  font-family: var(--mono-font);
-  font-size: 11px;
-  word-break: break-all;
 }
 
 .editor__preview-error {
