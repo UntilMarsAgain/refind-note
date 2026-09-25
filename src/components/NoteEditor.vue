@@ -174,6 +174,53 @@ function refreshPreviewNow() {
 
 const previewProblem = ref("");
 
+/**
+ * 窄窗口时两栏改为上下排布。
+ *
+ * 判据是**两栏容器自己的宽度**，不是窗口宽度：左侧标签栏展开/收起、外层留白都会改变
+ * 可用空间，量窗口会得出错误结论。
+ *
+ * 为什么连"方向"都写在内联样式里：这个组件里 scoped CSS 在当前 WebView 下不生效
+ * （当初两栏不能独立滚动就是栽在这上面），所以布局只能写在元素上。
+ */
+const STACK_BREAKPOINT = 720;
+
+/** 并排时单栏的高度上限（视口减去本页固定开销的权宜值） */
+const PANE_HEIGHT = "calc(100vh - 240px)";
+/** 上下排布时每栏的高度：两者相加仍不超过上面那个值，页面不会被撑长 */
+const STACKED_PANE_HEIGHT = "calc((100vh - 240px) / 2)";
+
+const panesEl = ref<HTMLElement | null>(null);
+const stacked = ref(false);
+
+function measurePanes() {
+  const el = panesEl.value;
+  if (!el) {
+    return;
+  }
+  const width = el.clientWidth;
+  // 宽度为 0（还没布局 / 不可见）时不下结论，免得一上来就误判
+  stacked.value = width > 0 && width < STACK_BREAKPOINT;
+}
+
+let panesObserver: ResizeObserver | undefined;
+
+onMounted(() => {
+  measurePanes();
+  if (typeof ResizeObserver !== "undefined" && panesEl.value) {
+    panesObserver = new ResizeObserver(measurePanes);
+    panesObserver.observe(panesEl.value);
+  } else {
+    // 兜底：没有 ResizeObserver 也不能让响应式彻底失效
+    window.addEventListener("resize", measurePanes);
+  }
+});
+
+onBeforeUnmount(() => {
+  panesObserver?.disconnect();
+  window.removeEventListener("resize", measurePanes);
+});
+
 const emit = defineEmits<{
   (e: "update:modelValue", value: string): void;
   (e: "rename", title: string): void;
@@ -367,22 +414,54 @@ function submit() {
     <!--
       分栏直接写在元素上。样式表层面这两条本来也是并排（后出现的规则是 flex row），
       写成内联是为了排除"被某条更靠后的规则覆盖"这一可能 —— 内联样式只有 !important 能压。
+      方向也在这里切换：窗口窄了改上下排布。
     -->
     <div
+      ref="panesEl"
       class="editor__panes"
-      style="display: flex; flex-direction: row; align-items: stretch; gap: 12px"
+      :style="{
+        display: 'flex',
+        flexDirection: stacked ? 'column' : 'row',
+        alignItems: 'stretch',
+        gap: '12px',
+      }"
     >
       <!-- 左：源码（CodeMirror） -->
       <div
         ref="hostEl"
         class="editor__source selectable"
-        style="flex: 1 1 0; min-width: 0; overflow: hidden"
+        :style="
+          stacked
+            ? {
+                flex: '0 0 auto',
+                height: STACKED_PANE_HEIGHT,
+                minWidth: 0,
+                overflow: 'hidden',
+              }
+            : { flex: '1 1 0', minWidth: 0, overflow: 'hidden' }
+        "
       />
 
       <!-- 右：渲染预览（后端同一个渲染器；.note-body 复用正文样式） -->
+      <!-- 上下排布时给**确定的高度**：这个组件的高度链不可靠（见上），
+           靠 flex 均分会让 CM6 的滚动容器算不出可视范围 -->
       <div
         class="editor__preview selectable"
-        style="flex: 1 1 0; min-width: 0; overflow: auto; max-height: calc(100vh - 240px)"
+        :style="
+          stacked
+            ? {
+                flex: '0 0 auto',
+                height: STACKED_PANE_HEIGHT,
+                minWidth: 0,
+                overflow: 'auto',
+              }
+            : {
+                flex: '1 1 0',
+                minWidth: 0,
+                overflow: 'auto',
+                maxHeight: PANE_HEIGHT,
+              }
+        "
       >
         <p v-if="previewProblem" class="editor__preview-error">
           预览渲染失败：{{ previewProblem }}
