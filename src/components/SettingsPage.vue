@@ -6,7 +6,7 @@
  * 改了**立刻落盘**，没有「保存」按钮 —— 这些值改错也不会有损失，多一个按钮只会
  * 多一次忘记点。
  */
-import { ref, watch } from "vue";
+import { nextTick, ref, watch } from "vue";
 
 interface Settings {
   root: string;
@@ -19,7 +19,31 @@ interface Settings {
   reading_width: number;
 }
 
-const props = defineProps<{ settings: Settings }>();
+const props = defineProps<{ settings: Settings; focus?: string }>();
+
+/**
+ * 每个设置项的 id 是**地址的一部分**（`special:settings#accent` 能直接跳过去），
+ * 因此它们等于对外接口：改名要同步改这里的 id 与文案。
+ */
+const SECTION_IDS = ["theme", "accent", "reading-width", "delta-chain-limit"];
+
+/** 地址里带了哪个 id，就把哪一项高亮出来 */
+function isFocused(id: string): boolean {
+  return props.focus === id;
+}
+
+// 跳过来时滚到目标项。滚动放在组件内部：id 就在这儿，不必让上层去猜。
+watch(
+  () => props.focus,
+  async (focus) => {
+    if (!focus || !SECTION_IDS.includes(focus)) {
+      return;
+    }
+    await nextTick();
+    document.getElementById(focus)?.scrollIntoView({ block: "center" });
+  },
+  { immediate: true },
+);
 const emit = defineEmits<{ (e: "update", patch: Record<string, unknown>): void }>();
 
 const THEMES = [
@@ -79,7 +103,7 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
 
     <h2 class="settings__section">外观</h2>
 
-    <div class="row">
+    <div id="theme" class="row" :class="{ 'row--target': isFocused('theme') }">
       <span class="row__label">主题</span>
       <div class="seg">
         <button
@@ -95,7 +119,7 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
       </div>
     </div>
 
-    <div class="row">
+    <div id="accent" class="row" :class="{ 'row--target': isFocused('accent') }">
       <span class="row__label">主题色</span>
       <div class="swatches">
         <button
@@ -120,7 +144,11 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
       </div>
     </div>
 
-    <div class="row">
+    <div
+      id="reading-width"
+      class="row"
+      :class="{ 'row--target': isFocused('reading-width') }"
+    >
       <span class="row__label">正文限宽</span>
       <input
         class="num"
@@ -136,7 +164,11 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
 
     <h2 class="settings__section">存储</h2>
 
-    <div class="row">
+    <div
+      id="delta-chain-limit"
+      class="row"
+      :class="{ 'row--target': isFocused('delta-chain-limit') }"
+    >
       <span class="row__label">最多连续修改节点</span>
       <input
         class="num"
@@ -273,6 +305,26 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
   background: var(--field-bg);
   color: var(--text);
   font-size: 13px;
+}
+
+/* 跳过来时把目标那一项点出来：左侧一条强调色 + 淡底 */
+.row--target {
+  position: relative;
+  margin-left: -10px;
+  padding-left: 10px;
+  border-radius: 7px;
+  background: var(--hover);
+}
+
+.row--target::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 0;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
 }
 
 .settings__hint {

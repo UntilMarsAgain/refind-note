@@ -64,8 +64,10 @@ function nextOf(current: ThemeMode): ThemeMode {
   return themeOptions[(index + 1) % themeOptions.length].value;
 }
 
-export function cycleThemeMode() {
-  setThemeMode(nextOf(mode.value));
+export function cycleThemeMode(): ThemeMode {
+  const next = nextOf(mode.value);
+  setThemeMode(next);
+  return next;
 }
 
 export const themeMode = readonly(mode);

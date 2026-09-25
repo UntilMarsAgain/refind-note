@@ -6,6 +6,7 @@ import HistoryView from "./components/HistoryView.vue";
 import MissingNote from "./components/MissingNote.vue";
 import NewTab from "./components/NewTab.vue";
 import SettingsPage from "./components/SettingsPage.vue";
+import { setThemeMode, themeMode, type ThemeMode } from "./theme";
 import NoteContent from "./components/NoteContent.vue";
 import NoteEditor from "./components/NoteEditor.vue";
 import PageHeader from "./components/PageHeader.vue";
@@ -670,8 +671,7 @@ const canGoForward = computed(() => {
 });
 
 function onMenu() {
-  // 菜单键现在有了去处：设置页
-  void navigate("special:settings");
+  // TODO: 菜单键另有作用（设置入口已经挪到标签栏底部）
 }
 
 /**
@@ -688,19 +688,9 @@ function applyAppearance() {
     return;
   }
 
-  const prefersLight = window.matchMedia("(prefers-color-scheme: light)").matches;
-  const theme =
-    appearance.theme === "system"
-      ? prefersLight
-        ? "light"
-        : "dark"
-      : appearance.theme;
-
-  if (theme === "light") {
-    document.documentElement.dataset.theme = "light";
-  } else {
-    delete document.documentElement.dataset.theme;
-  }
+  // 主题**不在这里落地**：`theme.ts` 是它唯一的真相（标题栏按钮、index.html 的
+  // 防闪烁脚本、跟随系统的实时响应都在那儿）。这里只把后端的值交给它。
+  setThemeMode(appearance.theme as ThemeMode);
 
   const root = document.documentElement.style;
   root.setProperty("--accent", appearance.accent);
@@ -710,12 +700,41 @@ function applyAppearance() {
 
 /** 设置页改了哪一项就只传哪一项（后端是补丁式更新） */
 async function updateSettings(patch: Record<string, unknown>) {
+  // 主题是一条共享真相：先在本地落地（标题栏那个轮换按钮立刻跟上），再写回后端
+  if (typeof patch.theme === "string") {
+    setThemeMode(patch.theme as ThemeMode);
+  }
+
   try {
     vaultSettings.value = await invoke<VaultSettings>("update_settings", patch);
     applyAppearance();
   } catch (error) {
     addressError.value = String(error);
   }
+}
+
+/** 标题栏的轮换按钮：改的是同一条真相，落盘统一交给下面的 watcher */
+function onTitlebarTheme(mode: ThemeMode) {
+  void updateSettings({ theme: mode });
+}
+
+// 任何来源改了主题（标题栏按钮 / 设置页）都落回 preferences.json。
+// 判等在这里，所以两边不会来回打架。
+watch(themeMode, (mode) => {
+  if (vaultSettings.value && vaultSettings.value.theme !== mode) {
+    void updateSettings({ theme: mode });
+  }
+});
+
+/** 地址正指向设置页里的哪一项（`special:settings#accent`） */
+const settingsFocus = computed(() => {
+  const address = route.value;
+  return address ? sectionOf(address) : "";
+});
+
+/** 标签栏底部的设置入口 */
+function openSettings() {
+  void navigate("special:settings");
 }
 
 /** 阅读页只显示最新提交；有草稿就提示一下，点按钮才进编辑器看 */
@@ -1118,6 +1137,7 @@ function onAction(name: string) {
       @back="goBack"
       @forward="goForward"
       @menu="onMenu"
+      @theme="onTitlebarTheme"
       @submit="onSubmit"
     />
 
@@ -1128,6 +1148,7 @@ function onAction(name: string) {
         @select="selectTab"
         @close="closeTab"
         @new-tab="openNewTab"
+        @settings="openSettings"
         @move="moveTab"
       />
 
@@ -1146,6 +1167,7 @@ function onAction(name: string) {
       <SettingsPage
         v-else-if="mode === 'special' && specialPage === 'settings' && vaultSettings"
         :settings="vaultSettings"
+        :focus="settingsFocus"
         @update="updateSettings"
       />
 

@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { PanelLeftClose, PanelLeftOpen, Plus, X } from "@lucide/vue";
+import {
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  Settings,
+  X,
+} from "@lucide/vue";
 import { PREFERENCE_KEYS, readFlag, writeFlag } from "../settings";
 
 /**
@@ -23,6 +29,7 @@ const emit = defineEmits<{
   (e: "new-tab"): void;
   /** 拖放调整顺序 */
   (e: "move", from: number, to: number): void;
+  (e: "settings"): void;
 }>();
 
 /** 正在拖的标签页与拖到哪一格上面（用来画插入位置） */
@@ -134,6 +141,17 @@ function initialOf(tab: { address: string; title: string }) {
         </div>
       </li>
     </TransitionGroup>
+
+    <!-- 设置入口：放在标签列表底下，与标签区分开（它不是一个标签） -->
+    <button
+      class="rail__settings"
+      type="button"
+      aria-label="设置"
+      @click="emit('settings')"
+    >
+      <Settings :size="16" :stroke-width="1.75" />
+      <span class="rail__text">设置</span>
+    </button>
   </aside>
 </template>
 
@@ -323,5 +341,34 @@ function initialOf(tab: { address: string; title: string }) {
   .tab-leave-active {
     transition: none;
   }
+}
+/* 设置入口：贴在列表底下，视觉上与标签错开 */
+.rail__settings {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 6px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.rail__settings:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.rail--collapsed .rail__settings {
+  justify-content: center;
+}
+
+.rail--collapsed .rail__settings .rail__text {
+  display: none;
 }
 </style>

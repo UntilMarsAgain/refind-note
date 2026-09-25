@@ -43,6 +43,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: "back"): void;
   (e: "forward"): void;
+  (e: "theme", mode: ThemeMode): void;
   (e: "menu"): void;
   (e: "submit", value: string): void;
 }>();
@@ -221,7 +222,7 @@ function onBlur() {
       class="tbtn tbtn--theme"
       type="button"
       aria-label="切换外观"
-      @click="cycleThemeMode()"
+      @click="emit('theme', cycleThemeMode())"
     >
       <component :is="themeIcon" :size="16" :stroke-width="1.75" />
     </button>
