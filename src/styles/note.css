@@ -14,10 +14,7 @@
   user-select: text;
   -webkit-user-select: text;
 
-  /* 限宽 + 居中，形成一条居中的阅读栏；缺了 margin-inline 就会靠左、右侧空出 */
-  max-width: var(--reading-width);
-  margin-inline: auto;
-
+  /* 限宽与居中交给外层的 .app__column（页头和正文共用同一条阅读栏） */
   color: var(--text);
   font-size: 15px;
   line-height: 1.75;
