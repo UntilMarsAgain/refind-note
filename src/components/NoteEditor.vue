@@ -3,12 +3,15 @@ import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { Check, Pencil, Save, Trash2, X } from "@lucide/vue";
 import { checkTitle } from "../title";
+import { themeMode } from "../theme";
 // `codemirror` 是元包（提供 basicSetup 等），EditorState 由 @codemirror/state 提供 ——
 // 后者必须作为**直接依赖**安装：pnpm 的严格 node_modules 下，传递依赖不可直接导入。
 import { basicSetup } from "codemirror";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { markdown } from "@codemirror/lang-markdown";
+import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { tags } from "@lezer/highlight";
 import type { DecorationSet, ViewUpdate } from "@codemirror/view";
 import { Decoration, MatchDecorator, ViewPlugin } from "@codemirror/view";
 
@@ -32,6 +35,69 @@ const props = defineProps<{
   /** 状态行：已保存草稿 / 提交冲突 / 失败原因 */
   status: string;
 }>();
+
+/**
+ * CodeMirror 的配色**全部接项目的 token**，所以它跟着主题与主题色走，不必写两套样式。
+ *
+ * 为什么必须显式给：CM6 自带的 `basicSetup` 是按**浅色底**配的（正文近黑、高亮偏暗），
+ * 铺在深色主题上就是"浅色面板 + 浅色文字"，看不清。这里做两件事：
+ * 1. `EditorView.theme` 覆盖界面色（背景、正文、光标、选区、行号、当前行、提示框）；
+ * 2. `syntaxHighlighting` 换掉默认高亮，改用 token 里的 `--syntax-*` 系列 ——
+ *    与正文代码块同一套颜色。
+ *
+ * 值全是 `var(--…)`，所以切换深浅主题、甚至改主题色都不需要重新配置编辑器。
+ */
+const appTheme = EditorView.theme(
+  {
+    "&": { color: "var(--text)", backgroundColor: "transparent", height: "100%" },
+    ".cm-content": { caretColor: "var(--accent)", fontFamily: "var(--mono-font)" },
+    ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--accent)" },
+    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection":
+      { backgroundColor: "var(--selection-bg)" },
+    ".cm-gutters": {
+      backgroundColor: "transparent",
+      color: "var(--text-dim)",
+      border: "none",
+    },
+    ".cm-activeLine": { backgroundColor: "var(--hover)" },
+    ".cm-activeLineGutter": { backgroundColor: "var(--hover)" },
+    ".cm-panels": { backgroundColor: "var(--surface)", color: "var(--text)" },
+    ".cm-tooltip": {
+      backgroundColor: "var(--surface)",
+      color: "var(--text)",
+      border: "1px solid var(--border)",
+    },
+    ".cm-tooltip-autocomplete > ul > li[aria-selected]": {
+      backgroundColor: "var(--hover)",
+      color: "var(--text)",
+    },
+    /* 自定义的 [[内部链接]] 装饰（CM6 生成的元素不在 scoped 作用域里，只能写在这里） */
+    ".cm-wikilink": {
+      color: "var(--accent)",
+      borderBottom: "1px dotted var(--accent)",
+    },
+  },
+  {
+    // 显式选深色就是深色；"跟随系统"才去问系统（写反过一次：显式 dark 会被系统偏好否掉）
+    dark:
+      themeMode.value === "dark" ||
+      (themeMode.value === "system" &&
+        !window.matchMedia("(prefers-color-scheme: light)").matches),
+  },
+);
+
+const appHighlight = HighlightStyle.define([
+  { tag: tags.heading, color: "var(--syntax-title)", fontWeight: "600" },
+  { tag: tags.strong, color: "var(--text)", fontWeight: "600" },
+  { tag: tags.emphasis, color: "var(--text)", fontStyle: "italic" },
+  { tag: tags.link, color: "var(--accent)", textDecoration: "underline" },
+  { tag: tags.url, color: "var(--accent)" },
+  { tag: tags.monospace, color: "var(--syntax-string)" },
+  { tag: tags.quote, color: "var(--syntax-comment)" },
+  { tag: tags.list, color: "var(--syntax-number)" },
+  { tag: tags.contentSeparator, color: "var(--border)" },
+  { tag: tags.processingInstruction, color: "var(--syntax-keyword)" },
+]);
 
 /**
  * `[[内部链接]]` 的高亮。
@@ -137,6 +203,9 @@ onMounted(() => {
       extensions: [
         basicSetup,
         markdown(),
+        // 顺序有讲究：主题与高亮都要排在 basicSetup **之后**，才能盖掉它的浅色默认值
+        appTheme,
+        syntaxHighlighting(appHighlight),
         wikilinkHighlight,
         EditorView.lineWrapping,
         EditorView.updateListener.of((update) => {
@@ -290,12 +359,26 @@ function submit() {
       </div>
     </div>
 
-    <div class="editor__panes">
+    <!--
+      分栏直接写在元素上。样式表层面这两条本来也是并排（后出现的规则是 flex row），
+      写成内联是为了排除"被某条更靠后的规则覆盖"这一可能 —— 内联样式只有 !important 能压。
+    -->
+    <div
+      class="editor__panes"
+      style="display: flex; flex-direction: row; align-items: stretch; gap: 12px"
+    >
       <!-- 左：源码（CodeMirror） -->
-      <div ref="hostEl" class="editor__source selectable" />
+      <div
+        ref="hostEl"
+        class="editor__source selectable"
+        style="flex: 1 1 0; min-width: 0"
+      />
 
       <!-- 右：渲染预览（后端同一个渲染器；.note-body 复用正文样式） -->
-      <div class="editor__preview selectable">
+      <div
+        class="editor__preview selectable"
+        style="flex: 1 1 0; min-width: 0"
+      >
         <p v-if="previewProblem" class="editor__preview-error">
           预览渲染失败：{{ previewProblem }}
         </p>
@@ -528,11 +611,6 @@ function submit() {
   min-width: 0;
 }
 
-/* [[内部链接]] 的高亮（视图层装饰，不改文档） */
-.cm-wikilink {
-  color: var(--accent);
-  border-bottom: 1px dotted var(--accent);
-}
 
 .editor__preview-btn {
   padding: 5px 10px;
