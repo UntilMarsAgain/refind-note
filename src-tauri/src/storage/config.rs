@@ -13,6 +13,8 @@ pub struct VaultConfig {
     /// 标题首字母是否强制大写（对应 MediaWiki 的 $wgCapitalLinks）
     pub capital_links: bool,
     pub max_title_bytes: usize,
+    /// 增量链的长度上限：超过就让下一版退回整份快照，免得读取时一路回放。
+    pub delta_chain_limit: usize,
 }
 
 impl Default for VaultConfig {
@@ -21,6 +23,7 @@ impl Default for VaultConfig {
             format: 1,
             capital_links: true,
             max_title_bytes: crate::title::MAX_TITLE_BYTES,
+            delta_chain_limit: 32,
         }
     }
 }

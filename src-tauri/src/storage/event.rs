@@ -21,8 +21,18 @@ pub enum Event {
     Rev {
         at: String,
         rev: u64,
+        /// 内容落在哪个 blob 上：整份就是正文，增量就是补丁
         blob: String,
         bytes: u64,
+        /// `full`（整份）或 `delta`（相对 `base_rev` 的补丁）
+        #[serde(default = "default_encoding")]
+        encoding: String,
+        /// 增量的基准版本号。**一定是提交**——提交不能依赖草稿
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base_rev: Option<u64>,
+        /// 这一版完整内容的哈希（增量时也记，便于判断内容是否变过）
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        content_hash: String,
         mime: String,
         #[serde(default)]
         parent: Option<u64>,
@@ -36,12 +46,21 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         summary: Option<String>,
     },
-    /// 自动保存的草稿：也占一个版本号，挂在 `on` 所指的提交上
+    /// 自动保存的草稿：也占一个版本号，挂在 `on` 所指的提交上。
+    ///
+    /// 草稿一律**整份存**：它们随时会被提交取代、被清理，增量省下的那点字节不值得
+    /// 让清理逻辑去照顾增量链。（规则 3 允许草稿依赖草稿，这里作为备用能力保留。）
     Auto {
         at: String,
         rev: u64,
         blob: String,
         bytes: u64,
+        #[serde(default = "default_encoding")]
+        encoding: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base_rev: Option<u64>,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        content_hash: String,
         mime: String,
         on: u64,
     },
@@ -52,6 +71,11 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         summary: Option<String>,
     },
+}
+
+/// 老日志没写 `encoding` 时按整份内容理解
+fn default_encoding() -> String {
+    "full".to_string()
 }
 
 impl Event {
@@ -72,6 +96,10 @@ pub struct NoteState {
     pub rev: u64,
     pub blob: Option<String>,
     pub bytes: u64,
+    /// 上一版的存法：改名那一版要原样沿用，否则内容引用会错位
+    pub encoding: String,
+    pub base_rev: Option<u64>,
+    pub content_hash: String,
     pub mime: String,
     pub at: String,
     pub deleted: bool,
@@ -92,6 +120,7 @@ pub struct DraftState {
 pub fn fold(events: &[Event]) -> NoteState {
     let mut state = NoteState {
         mime: DEFAULT_MIME.to_string(),
+        encoding: "full".to_string(),
         ..Default::default()
     };
     let mut pending_draft: Option<DraftState> = None;
@@ -108,6 +137,9 @@ pub fn fold(events: &[Event]) -> NoteState {
                 rev,
                 blob,
                 bytes,
+                encoding,
+                base_rev,
+                content_hash,
                 mime,
                 supersedes,
                 ns,
@@ -117,6 +149,9 @@ pub fn fold(events: &[Event]) -> NoteState {
                 state.rev = *rev;
                 state.blob = Some(blob.clone());
                 state.bytes = *bytes;
+                state.encoding = encoding.clone();
+                state.base_rev = *base_rev;
+                state.content_hash = content_hash.clone();
                 state.mime = mime.clone();
                 state.at = at.clone();
                 state.deleted = false;
@@ -131,9 +166,17 @@ pub fn fold(events: &[Event]) -> NoteState {
                 pending_draft = None;
             }
             Event::Auto {
-                at, bytes, blob, on, ..
+                at,
+                bytes,
+                blob,
+                encoding,
+                content_hash,
+                on,
+                ..
             } => {
                 state.bytes = *bytes;
+                state.encoding = encoding.clone();
+                state.content_hash = content_hash.clone();
                 pending_draft = Some(DraftState {
                     blob: blob.clone(),
                     at: at.clone(),

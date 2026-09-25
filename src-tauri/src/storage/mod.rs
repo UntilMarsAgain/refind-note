@@ -51,6 +51,17 @@ const MAIN_NAMESPACE_DIR: &str = "0";
 
 // ---------------------------------------------------------------- 仓库
 
+/// 一次写入的结果：选了哪种存法、落在哪个 blob 上
+struct Stored {
+    blob: String,
+    encoding: &'static str,
+    base_rev: Option<u64>,
+    content_hash: String,
+}
+
+/// 读取时允许的最大增量链深度（写入侧已有上限，这里是防损坏的兜底）
+const MAX_DELTA_DEPTH: usize = 1024;
+
 pub struct Vault {
     root: PathBuf,
     table: Arc<NamespaceTable>,
@@ -300,6 +311,130 @@ impl Vault {
         Ok(())
     }
 
+    // ------------------------------------------------------------ 内容存储
+    //
+    // 一版内容可以整份存，也可以只存「相对某个基准的补丁」。三条规则：
+    // 1. 增量**不见得更小**（大改动要把新内容整段塞进去），所以真比一次再决定；
+    // 2. 增量可以递归依赖增量，但链太长读取会慢 —— 超过上限就退回整份快照；
+    // 3. 提交的基准**只能是提交**（不能依赖草稿），草稿一律整份存；
+    // 4. 二进制（非文本）一律整份存。
+
+    /// 某个版本所在的增量链有多长（从最近一次整份快照算起）
+    fn chain_length(&self, events: &[Event], rev: u64) -> usize {
+        let mut length = 0usize;
+        let mut cursor = Some(rev);
+
+        while let Some(current) = cursor {
+            let Some(event) = events.iter().find(|event| match event {
+                Event::Rev { rev, .. } | Event::Auto { rev, .. } => *rev == current,
+                _ => false,
+            }) else {
+                break;
+            };
+
+            let (encoding, base) = match event {
+                Event::Rev {
+                    encoding, base_rev, ..
+                }
+                | Event::Auto {
+                    encoding, base_rev, ..
+                } => (encoding.as_str(), *base_rev),
+                _ => break,
+            };
+
+            if encoding != "delta" {
+                break;
+            }
+            length += 1;
+            cursor = base;
+        }
+
+        length
+    }
+
+    /// 决定这一版怎么存：整份快照，还是相对基准的增量
+    fn store_content(
+        &self,
+        events: &[Event],
+        base: Option<(u64, String)>,
+        mime: &str,
+        content: &str,
+    ) -> Result<Stored, VaultError> {
+        let content_hash = hash_bytes(content.as_bytes());
+
+        if mime == DEFAULT_MIME {
+            if let Some((base_rev, base_text)) = base {
+                if self.chain_length(events, base_rev) < self.config.delta_chain_limit {
+                    let ops = delta::encode(&base_text, content);
+                    let patch = delta::encode_bytes(&ops);
+
+                    // 规则一：跟完整内容真比一次，补丁更大就用整份
+                    if patch.len() < content.len() {
+                        let blob = self.blobs.put(&patch)?;
+                        return Ok(Stored {
+                            blob,
+                            encoding: "delta",
+                            base_rev: Some(base_rev),
+                            content_hash,
+                        });
+                    }
+                }
+            }
+        }
+
+        let blob = self.blobs.put(content.as_bytes())?;
+        Ok(Stored {
+            blob,
+            encoding: "full",
+            base_rev: None,
+            content_hash,
+        })
+    }
+
+    /// 取某个版本的内容：整份直接读，增量先取基准再套补丁
+    fn content_of(&self, events: &[Event], rev: u64, depth: usize) -> Result<String, VaultError> {
+        if depth > MAX_DELTA_DEPTH {
+            return Err(VaultError::Corrupt(format!(
+                "增量链超过 {MAX_DELTA_DEPTH} 层，可能已经损坏"
+            )));
+        }
+
+        let found = events.iter().find_map(|event| match event {
+            Event::Rev {
+                rev: item_rev,
+                blob,
+                encoding,
+                base_rev,
+                ..
+            }
+            | Event::Auto {
+                rev: item_rev,
+                blob,
+                encoding,
+                base_rev,
+                ..
+            } if *item_rev == rev => Some((blob.clone(), encoding.clone(), *base_rev)),
+            _ => None,
+        });
+
+        let Some((blob, encoding, base_rev)) = found else {
+            return Err(VaultError::Corrupt(format!("找不到版本 {rev} 的内容")));
+        };
+
+        let bytes = self.blobs.get(&blob)?;
+        if encoding != "delta" {
+            return String::from_utf8(bytes)
+                .map_err(|_| VaultError::NotText(format!("版本 {rev}")));
+        }
+
+        let base_rev = base_rev
+            .ok_or_else(|| VaultError::Corrupt(format!("版本 {rev} 标为增量却没有基准")))?;
+        let base_text = self.content_of(events, base_rev, depth + 1)?;
+        let ops = delta::decode_bytes(&bytes)
+            .map_err(|error| VaultError::Corrupt(error.to_string()))?;
+        delta::apply(&base_text, &ops).map_err(|error| VaultError::Corrupt(error.to_string()))
+    }
+
     // ------------------------------------------------------------ 读
 
     pub fn list_notes(&self) -> Result<Vec<NoteSummary>, VaultError> {
@@ -341,10 +476,11 @@ impl Vault {
             });
         }
 
-        let markdown_text = match &state.blob {
-            Some(blob) => String::from_utf8(self.blobs.get(blob)?)
-                .map_err(|_| VaultError::NotText(display.clone()))?,
-            None => String::new(),
+        // rev 0 是「建了但还没提交」，内容为空；否则按版本回放（可能是增量）
+        let markdown_text = if state.rev == 0 {
+            String::new()
+        } else {
+            self.content_of(&events, state.rev, 0)?
         };
 
         let resolver = self.resolver(Some(parsed.clone()));
@@ -388,12 +524,15 @@ impl Vault {
         let mut previous_bytes = 0u64;
 
         for event in &events {
-            let (rev, kind, at, bytes, supersedes, summary) = match event {
-                Event::Meta { at, .. } => (0, "create", at.clone(), 0u64, Vec::new(), None),
+            let (rev, kind, at, bytes, supersedes, summary, encoding) = match event {
+                Event::Meta { at, .. } => {
+                    (0, "create", at.clone(), 0u64, Vec::new(), None, "full")
+                }
                 Event::Rev {
                     at,
                     rev,
                     bytes,
+                    encoding,
                     supersedes,
                     summary,
                     ..
@@ -404,9 +543,15 @@ impl Vault {
                     *bytes,
                     supersedes.clone(),
                     summary.clone(),
+                    encoding.as_str(),
                 ),
                 Event::Auto {
-                    at, rev, bytes, on, ..
+                    at,
+                    rev,
+                    bytes,
+                    encoding,
+                    on,
+                    ..
                 } => (
                     *rev,
                     "draft",
@@ -414,6 +559,7 @@ impl Vault {
                     *bytes,
                     Vec::new(),
                     Some(format!("自动保存（基于版本 {on}）")),
+                    encoding.as_str(),
                 ),
                 Event::Del { at, rev, summary } => (
                     *rev,
@@ -422,6 +568,7 @@ impl Vault {
                     0u64,
                     Vec::new(),
                     summary.clone(),
+                    "full",
                 ),
             };
 
@@ -442,6 +589,7 @@ impl Vault {
                 at,
                 bytes,
                 delta,
+                encoding: encoding.to_string(),
                 supersedes,
                 summary,
             });
@@ -530,8 +678,7 @@ impl Vault {
         }
 
         let parsed = ParsedTitle { ns, title: page };
-        let markdown_text = String::from_utf8(self.blobs.get(&blob)?)
-            .map_err(|_| VaultError::NotText(parsed.title.clone()))?;
+        let markdown_text = self.content_of(&events, rev, 0)?;
         let resolver = self.resolver(Some(parsed.clone()));
         let html = markdown::render_with(&markdown_text, Some(&resolver));
 
@@ -620,15 +767,25 @@ impl Vault {
             });
         }
 
-        let blob = self.blobs.put(markdown_text.as_bytes())?;
+        // 增量基准取上一个**提交**的内容（绝不用草稿：草稿会被清理）
+        let base = if state.rev > 0 {
+            Some((state.rev, self.content_of(&events, state.rev, 0)?))
+        } else {
+            None
+        };
+        let stored = self.store_content(&events, base, DEFAULT_MIME, markdown_text)?;
+
         let rev = next_rev(&events);
         self.append(
             &id,
             &Event::Rev {
                 at: now_iso(),
                 rev,
-                blob,
+                blob: stored.blob,
                 bytes: markdown_text.len() as u64,
+                encoding: stored.encoding.to_string(),
+                base_rev: stored.base_rev,
+                content_hash: stored.content_hash,
                 mime: DEFAULT_MIME.to_string(),
                 parent: (state.rev > 0).then_some(state.rev),
                 // 一次提交结束了挂在当前版本上的那一串草稿
@@ -671,6 +828,10 @@ impl Vault {
                 rev,
                 blob: state.blob.clone().unwrap_or_default(),
                 bytes: state.bytes,
+                // 内容没变，存法也照旧沿用
+                encoding: state.encoding.clone(),
+                base_rev: state.base_rev,
+                content_hash: state.content_hash.clone(),
                 mime: state.mime.clone(),
                 parent: (state.rev > 0).then_some(state.rev),
                 supersedes: drafts_of(&events, state.rev),
@@ -728,16 +889,16 @@ impl Vault {
             });
         }
 
-        let blob = hash_bytes(markdown_text.as_bytes());
+        let content_hash = hash_bytes(markdown_text.as_bytes());
         // 内容没变就不追加，免得自动保存把日志灌满
         if let Some(draft) = &state.draft {
-            if draft.blob == blob {
+            if draft.blob == content_hash {
                 return Ok(());
             }
         }
 
         let rev = next_rev(&events);
-        self.blobs.put(markdown_text.as_bytes())?;
+        let blob = self.blobs.put(markdown_text.as_bytes())?;
         self.append(
             &id,
             &Event::Auto {
@@ -745,6 +906,10 @@ impl Vault {
                 rev,
                 blob,
                 bytes: markdown_text.len() as u64,
+                // 草稿整份存：它们随时会被提交取代、被清理，不值得为增量链操心
+                encoding: "full".to_string(),
+                base_rev: None,
+                content_hash,
                 mime: DEFAULT_MIME.to_string(),
                 on: base_rev,
             },
@@ -1244,6 +1409,130 @@ mod tests {
             .lines
             .iter()
             .any(|line| line.kind == "insert" && line.text == "改"));
+    }
+
+    /// 小改动应当真的用上增量，而且回放必须逐字节还原
+    #[test]
+    fn small_edits_are_stored_as_deltas() {
+        let temp = TempVault::new();
+        temp.vault.create("增量").unwrap();
+        let first = "一\n二\n三\n四\n五\n六\n七\n八\n九\n十\n";
+        temp.vault.commit("增量", first, None, 0).unwrap();
+
+        let second = first.replace("五", "改过的五");
+        let note = temp.vault.commit("增量", &second, None, 1).unwrap();
+        assert_eq!(note.markdown, second, "增量回放必须逐字节还原");
+
+        let events = temp.vault.events_for("增量").unwrap();
+        let encodings: Vec<String> = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Rev { encoding, .. } => Some(encoding.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(encodings, vec!["full", "delta"], "第二版应当用增量");
+
+        let history = temp.vault.history("增量").unwrap();
+        assert_eq!(history[2].encoding, "delta");
+        assert_eq!(
+            history[2].bytes as usize,
+            second.len(),
+            "bytes 记的是完整内容的大小，不是补丁大小"
+        );
+    }
+
+    /// 大改动时补丁反而更大，必须退回整份快照（规则一）
+    #[test]
+    fn heavy_rewrites_fall_back_to_full_snapshots() {
+        let temp = TempVault::new();
+        temp.vault.create("重写").unwrap();
+        temp.vault.commit("重写", "甲\n", None, 0).unwrap();
+
+        let mut target = String::new();
+        for index in 0..200 {
+            target.push_str(&format!("全新的第 {index} 行内容\n"));
+        }
+        let note = temp.vault.commit("重写", &target, None, 1).unwrap();
+        assert_eq!(note.markdown, target);
+
+        let encoding = temp
+            .vault
+            .events_for("重写")
+            .unwrap()
+            .iter()
+            .find_map(|event| match event {
+                Event::Rev { rev: 2, encoding, .. } => Some(encoding.clone()),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(encoding, "full", "大改动应当存整份");
+    }
+
+    /// 增量链到上限后必须再落一次整份快照，且每版都还要能还原（规则二）
+    #[test]
+    fn chain_length_is_capped() {
+        let temp = TempVault::new();
+        temp.vault.create("链长").unwrap();
+
+        let mut text = String::from("第一版\n");
+        temp.vault.commit("链长", &text, None, 0).unwrap();
+        for round in 0..34 {
+            text.push_str(&format!("第 {round} 次追加\n"));
+            temp.vault
+                .commit("链长", &text, None, (round + 1) as u64)
+                .unwrap();
+        }
+
+        let encodings: Vec<String> = temp
+            .vault
+            .events_for("链长")
+            .unwrap()
+            .iter()
+            .filter_map(|event| match event {
+                Event::Rev { encoding, .. } => Some(encoding.clone()),
+                _ => None,
+            })
+            .collect();
+        let fulls = encodings.iter().filter(|item| item.as_str() == "full").count();
+        assert!(fulls >= 2, "链到上限后应当再落一次整份快照：{encodings:?}");
+
+        // 最新一版与中间某一版都要能正确回放
+        assert_eq!(temp.vault.load("链长").unwrap().markdown, text);
+        let mut fifth = String::from("第一版\n");
+        for round in 0..4 {
+            fifth.push_str(&format!("第 {round} 次追加\n"));
+        }
+        assert_eq!(temp.vault.revision("链长", 5).unwrap().markdown, fifth);
+    }
+
+    /// 提交的基准只能是提交，绝不能是草稿（规则三）
+    #[test]
+    fn commits_never_depend_on_drafts() {
+        let temp = TempVault::new();
+        temp.vault.create("依赖").unwrap();
+        temp.vault.commit("依赖", "v1", None, 0).unwrap();
+        temp.vault.save_draft("依赖", "草稿", 1).unwrap();
+        temp.vault.commit("依赖", "v2", None, 1).unwrap();
+
+        let bases: Vec<Option<u64>> = temp
+            .vault
+            .events_for("依赖")
+            .unwrap()
+            .iter()
+            .filter_map(|event| match event {
+                Event::Rev { base_rev, .. } => Some(*base_rev),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            bases.iter().all(|base| *base != Some(2)),
+            "提交的基准不能指向草稿（版本 2）：{bases:?}"
+        );
+
+        // 草稿被清理之后内容仍然读得出来 —— 这正是这条规则要保证的
+        temp.vault.prune("依赖").unwrap();
+        assert_eq!(temp.vault.load("依赖").unwrap().markdown, "v2");
     }
 
     #[test]

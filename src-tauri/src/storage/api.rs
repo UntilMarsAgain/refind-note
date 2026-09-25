@@ -60,6 +60,8 @@ pub struct RevisionSummary {
     pub bytes: u64,
     /// 相对上一条记录的字节增减，便于一眼看出改了多少
     pub delta: i64,
+    /// `full` 或 `delta`：这一版内容是怎么存的
+    pub encoding: String,
     /// 本次提交取代了哪些草稿节点（只有 commit 才有）
     pub supersedes: Vec<u64>,
     pub summary: Option<String>,
