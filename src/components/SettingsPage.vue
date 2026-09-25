@@ -101,11 +101,16 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
       外观存在 <code>{{ settings.root }}</code> 下的 <code>preferences.json</code>，
       存储相关的存在同目录的 <code>vault.json</code>
     </p>
+    <p class="settings__where">
+      每一项的 id 可直接用作地址锚点，例如 <code>special:settings#accent</code>
+      会跳到主题色并高亮。
+    </p>
 
     <h2 class="settings__section">外观</h2>
 
     <div id="theme" class="row" :class="{ 'row--target': isFocused('theme') }">
       <span class="row__label">主题</span>
+      <code class="row__id">#theme</code>
       <div class="seg">
         <button
           v-for="theme in THEMES"
@@ -122,6 +127,7 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
 
     <div id="accent" class="row" :class="{ 'row--target': isFocused('accent') }">
       <span class="row__label">主题色</span>
+      <code class="row__id">#accent</code>
       <div class="swatches">
         <button
           v-for="accent in ACCENTS"
@@ -151,6 +157,7 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
       :class="{ 'row--target': isFocused('reading-width') }"
     >
       <span class="row__label">正文限宽</span>
+      <code class="row__id">#reading-width</code>
       <input
         class="num"
         type="number"
@@ -171,6 +178,7 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
       :class="{ 'row--target': isFocused('delta-chain-limit') }"
     >
       <span class="row__label">最多连续修改节点</span>
+      <code class="row__id">#delta-chain-limit</code>
       <input
         class="num"
         type="number"
@@ -231,6 +239,15 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
 .row__label {
   min-width: 132px;
   font-size: 13px;
+}
+
+.row__id {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--code-bg);
+  color: var(--text-dim);
+  font-family: var(--mono-font);
+  font-size: 11px;
 }
 
 .row__unit {
