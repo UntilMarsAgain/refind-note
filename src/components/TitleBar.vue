@@ -21,9 +21,7 @@ import {
 } from "@lucide/vue";
 import {
   cycleThemeMode,
-  nextThemeMode,
   themeMode,
-  themeOptions,
   type ThemeMode,
 } from "../theme";
 
@@ -65,7 +63,7 @@ watch(
   { immediate: true },
 );
 
-/** 循环切换按钮显示当前模式，点一下按 themeOptions 的顺序换到下一个 */
+/** 循环切换按钮显示当前模式，点一下换到下一个 */
 const themeIcons: Record<ThemeMode, Component> = {
   system: Monitor,
   light: Sun,
@@ -73,12 +71,6 @@ const themeIcons: Record<ThemeMode, Component> = {
 };
 
 const themeIcon = computed(() => themeIcons[themeMode.value]);
-
-const themeTip = computed(() => {
-  const current = themeOptions.find((item) => item.value === themeMode.value);
-  const next = themeOptions.find((item) => item.value === nextThemeMode.value);
-  return `外观：${current?.label ?? ""}（点击切到 ${next?.label ?? ""}）`;
-});
 
 let unlistenResized: (() => void) | undefined;
 
@@ -129,7 +121,6 @@ function onBlur() {
       <button
         class="tbtn"
         type="button"
-        title="搜索"
         aria-label="搜索"
         @click="emit('search')"
       >
@@ -140,7 +131,6 @@ function onBlur() {
       <button
         class="tbtn"
         type="button"
-        title="菜单"
         aria-label="菜单"
         @click="emit('menu')"
       >
@@ -165,7 +155,6 @@ function onBlur() {
     <button
       class="tbtn tbtn--theme"
       type="button"
-      :title="themeTip"
       aria-label="切换外观"
       @click="cycleThemeMode()"
     >
@@ -176,7 +165,6 @@ function onBlur() {
       <button
         class="wbtn"
         type="button"
-        title="最小化"
         aria-label="最小化"
         @click="appWindow.minimize()"
       >
@@ -185,7 +173,6 @@ function onBlur() {
       <button
         class="wbtn"
         type="button"
-        :title="isMaximized ? '向下还原' : '最大化'"
         :aria-label="isMaximized ? '向下还原' : '最大化'"
         @click="appWindow.toggleMaximize()"
       >
@@ -195,7 +182,6 @@ function onBlur() {
       <button
         class="wbtn wbtn--close"
         type="button"
-        title="关闭"
         aria-label="关闭"
         @click="appWindow.close()"
       >

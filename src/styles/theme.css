@@ -130,3 +130,16 @@ button {
 ::selection {
   background: var(--selection-bg);
 }
+
+/* 系统默认的焦点圈是亮蓝色，和主题不搭；统一换成主题色。
+   做法是：非 focus-visible 的聚焦不画圈（鼠标点击不该留痕），
+   键盘聚焦时由下面这条给出可见提示——不能直接 outline:none 了事。 */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+:focus-visible {
+  /* 往内收，避免贴边的按钮（如标题栏窗口按钮）把圈画到窗口外 */
+  outline: 2px solid var(--accent-soft);
+  outline-offset: -2px;
+}

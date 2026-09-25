@@ -93,7 +93,9 @@ const actions: {
   margin: 0;
   font-size: 2.15em;
   font-weight: 600;
-  line-height: 1.3;
+  /* 不能低于 ~1.5：CJK 字体 ascent+descent 约 1.48em，
+     而这里配了 overflow:hidden 做省略号，行盒不够高会把字的底部裁掉 */
+  line-height: 1.5;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -122,7 +124,8 @@ const actions: {
   background: transparent;
   color: var(--text-dim);
   font-size: 13.5px;
-  line-height: 1;
+  /* 同理：1 会让 CJK 的墨迹溢出行盒，图标与文字看着就不在一条中线上 */
+  line-height: 1.4;
   white-space: nowrap;
   cursor: default;
   transition: background-color 120ms ease, color 120ms ease;
