@@ -242,6 +242,9 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
 }
 
 .row__id {
+  /* 覆盖应用级的 user-select: none —— 这个标签的用途就是让用户复制它 */
+  -webkit-user-select: text;
+  user-select: text;
   padding: 1px 6px;
   border-radius: 4px;
   background: var(--code-bg);

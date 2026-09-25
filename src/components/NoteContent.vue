@@ -131,6 +131,22 @@ function onContextMenu(event: MouseEvent) {
   }
 }
 
+/**
+ * 行内代码：点一下复制。
+ *
+ * 代码块自带复制按钮（按钮能明确表达"这是可点的"），行内代码没有按钮的位置，
+ * 就整段当热区；反馈用一次短暂高亮，不弹提示 —— 正文里不该冒出对话框。
+ */
+async function copyInlineCode(el: Element, text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    return;
+  }
+  el.classList.add("code--copied");
+  window.setTimeout(() => el.classList.remove("code--copied"), 600);
+}
+
 function onClick(event: MouseEvent) {
   const target = event.target;
   if (!(target instanceof Element)) {
@@ -160,6 +176,8 @@ function onClick(event: MouseEvent) {
 
   const anchor = target.closest("a[href]");
   if (!anchor) {
+    // 没落到链接上：再看是不是行内代码（点一下复制）
+    onClickCode(event);
     return;
   }
 
@@ -187,6 +205,22 @@ function onClick(event: MouseEvent) {
   }
 
   void openUrl(normalizeUrl(href));
+}
+
+// 放在最后：链接优先。行内代码（`pre` 之外的 code）点一下就是复制。
+function onClickCode(event: MouseEvent) {
+  const target = event.target;
+  if (!(target instanceof Element)) {
+    return;
+  }
+  const code = target.closest("code");
+  if (!code || code.closest("pre")) {
+    return;
+  }
+  const text = code.textContent ?? "";
+  if (text) {
+    void copyInlineCode(code, text);
+  }
 }
 </script>
 

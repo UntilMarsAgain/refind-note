@@ -356,3 +356,18 @@
   -webkit-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M9.5 3H13v3.5'/><path d='M13 3 7.5 8.5'/><path d='M12 10.5V13a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 2 13V4a.5.5 0 0 1 .5-.5H5'/></svg>") center / contain no-repeat;
   mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M9.5 3H13v3.5'/><path d='M13 3 7.5 8.5'/><path d='M12 10.5V13a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 2 13V4a.5.5 0 0 1 .5-.5H5'/></svg>") center / contain no-repeat;
 }
+
+/*
+ * 行内代码可点击复制。
+ *
+ * 代码块里的 code 由它自己的复制按钮负责，所以这里用 :not(pre) > code 限定为行内代码。
+ * 反馈只改一次背景色，600ms 后由 JS 摘掉 —— 不插入元素、不弹提示。
+ */
+.note-body :not(pre) > code {
+  cursor: pointer;
+}
+
+.note-body :not(pre) > code.code--copied {
+  background: var(--accent);
+  color: #fff;
+}
