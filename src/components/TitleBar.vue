@@ -125,8 +125,50 @@ function onBlur() {
        输入框与按钮属于 Tauri 的 CLICKABLE_TAGS，会自动阻断拖动，所以不必逐个排除。 -->
   <header class="titlebar" data-tauri-drag-region="deep">
     <div class="titlebar__start">
-      <!-- 先放占位图标，之后再换成真正的应用图标 -->
-      <img class="logo" src="/tauri.svg" alt="" draggable="false" />
+      <!--
+        应用图标：用 currentColor 填色、靠 mask 抠出书形，
+        所以浅色/深色主题只要给它不同的 color 就自动适配（见 .logo 的 color）。
+        内联而不是 <img> —— 只有内联的 SVG 才吃得到 currentColor。
+      -->
+      <svg
+        class="logo"
+        xmlns="http://www.w3.org/2000/svg"
+        width="128"
+        height="128"
+        viewBox="0 0 128 128"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <defs>
+          <mask id="refindKnock">
+            <rect x="8" y="8" width="112" height="112" rx="26" fill="#fff" />
+            <path
+              d="M76 93H52A17 17 0 0 1 35 76V52A17 17 0 0 1 52 35h24A17 17 0 0 1 93 52v24"
+              fill="none"
+              stroke="#000"
+              stroke-width="9"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M56.5 47h15a4.5 4.5 0 0 1 4.5 4.5v29L64 72.8 52 80.5v-29A4.5 4.5 0 0 1 56.5 47Z"
+              fill="#000"
+              stroke="#000"
+              stroke-width="2.5"
+              stroke-linejoin="round"
+            />
+          </mask>
+        </defs>
+        <rect
+          x="8"
+          y="8"
+          width="112"
+          height="112"
+          rx="26"
+          fill="currentColor"
+          mask="url(#refindKnock)"
+        />
+      </svg>
       <span class="divider" />
 
       <button
@@ -344,5 +386,9 @@ function onBlur() {
 .wbtn--close:active {
   background: var(--accent);
   color: #fff;
+}
+/* 图标颜色跟随主题正文色：浅色主题下是深色方块、深色主题下是浅色方块 */
+.logo {
+  color: var(--text);
 }
 </style>
