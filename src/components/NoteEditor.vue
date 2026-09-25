@@ -406,18 +406,17 @@ function submit() {
 
 <style scoped>
 /*
- * 根**绝对定位**撑满正文容器。
+ * 根撑满父级高度。
  *
- * 为什么不用 `height: 100%`：编辑器外面还有包装层（阅读栏那一类），`100%` 到那里就断了
- * ——父级高度是 auto，百分比等于没写。结果两栏高度由内容撑开，再被容器的 overflow:hidden
- * 裁掉，于是"既不显示滚动条、也滚不动"。绝对定位跳过这一层：容器只要 position: relative，
- * 编辑器就以它的内边距盒为基准，中间有几层包装都无所谓。
+ * 这里**不能用绝对定位**：编辑器外面还有一层阅读栏（它同时提供宽度限制，并且是高度链的
+ * 一环），绝对定位会把它整个绕过 —— 既丢掉宽度限制，也丢掉高度传递，两栏就退回"和页面
+ * 共用一个滚动条"。正确做法是让那一层参与进来，高度沿链逐级传（规则在 App.vue 里，用
+ * :has(.editor) 只对编辑页生效）。
  */
 .editor {
-  position: absolute;
-  inset: 0;
   display: flex;
   flex-direction: column;
+  height: 100%;
   min-height: 0;
   padding-top: 18px;
 }

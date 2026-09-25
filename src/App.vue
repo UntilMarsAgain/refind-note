@@ -1393,8 +1393,6 @@ function onAction(name: string) {
 }
 
 .app__body {
-  /* 编辑页的编辑器以它为定位参照（绝对定位撑满），所以这里必须是定位元素 */
-  position: relative;
   flex: 1 1 auto;
   /* 同理，允许它被 TabRail 挤窄 */
   min-width: 0;
@@ -1691,6 +1689,28 @@ function onAction(name: string) {
 
 .linkmenu button:hover {
   background: var(--hover);
+}
+</style>
+
+<!--
+  全局规则（非 scoped）：编辑页的高度必须**沿链逐级传**。
+  两个条件同时成立才有独立滚动条 —— 正文容器不再整体滚动，且它到编辑器之间每一层
+  （通常是一层阅读栏，它也负责宽度限制）都成为可收缩的 flex 项、并允许被压缩。
+  用 :has(.editor) 限定，阅读 / 历史页面的滚动与版心都不受影响。
+-->
+<style>
+.app__body:has(.editor) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 只作用直接子层：它可能是阅读栏，也可能直接就是编辑器 —— 不必知道类名 */
+.app__body:has(.editor) > * {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
 }
 </style>
 
