@@ -100,6 +100,17 @@ pub struct DiffResult {
     pub inserted: usize,
     pub deleted: usize,
 }
+/// 一次回收的结果
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct GcReport {
+    /// 回收掉的悬置 blob 数
+    pub removed_blobs: usize,
+    /// 释放的字节数
+    pub freed_bytes: u64,
+    /// 清掉的、已被取代的草稿节点数
+    pub removed_drafts: usize,
+}
+
 /// 仓库级设置。**界面偏好不在这里**——那属于这台机器，不属于数据，留在前端。
 #[derive(Debug, Clone, Serialize)]
 pub struct VaultSettings {

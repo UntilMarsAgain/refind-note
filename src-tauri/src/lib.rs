@@ -9,8 +9,8 @@ mod title;
 
 use std::sync::{Mutex, MutexGuard};
 use storage::{
-    DiffResult, Draft, LoadOutcome, Note, NoteSummary, RevisionContent, RevisionSummary, Vault,
-    VaultSettings,
+    DiffResult, Draft, GcReport, LoadOutcome, Note, NoteSummary, RevisionContent, RevisionSummary,
+    Vault, VaultSettings,
 };
 use tauri::Manager;
 
@@ -147,6 +147,15 @@ fn delete_note(title: String) -> Result<(), String> {
     open()?.delete(&title).map_err(|error| error.to_string())
 }
 
+/// 回收。两个开关各自可选，默认都不动 —— 破坏性操作，宁可手动触发。
+#[tauri::command]
+fn gc(orphan_blobs: bool, superseded_drafts: bool) -> Result<GcReport, String> {
+    let _guard = write_guard();
+    open()?
+        .gc(orphan_blobs, superseded_drafts)
+        .map_err(|error| error.to_string())
+}
+
 // ---------------------------------------------------------------- 历史
 
 /// 版本历史。只回元信息（大小、摘要、类型），正文用 `note_revision` 按需取。
@@ -221,7 +230,8 @@ pub fn run() {
             delete_note,
             note_history,
             note_revision,
-            compare_revisions
+            compare_revisions,
+            gc
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -26,7 +26,7 @@ mod error;
 mod event;
 
 pub use api::{
-    DiffResult, Draft, LoadOutcome, Note, NoteSummary, RevisionContent, RevisionSummary,
+    DiffResult, Draft, GcReport, LoadOutcome, Note, NoteSummary, RevisionContent, RevisionSummary,
     VaultSettings,
 };
 pub use config::VaultConfig;
@@ -971,6 +971,127 @@ impl Vault {
         Ok(removed)
     }
 
+    // ------------------------------------------------------------ 回收
+
+    /// 仓库里全部笔记文件（含 trash/）
+    fn log_files(&self) -> Result<Vec<(String, PathBuf)>, VaultError> {
+        let mut out = Vec::new();
+
+        for dir in [self.notes_dir(), self.trash_dir()] {
+            let namespaces = match fs::read_dir(&dir) {
+                Ok(entries) => entries,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.into()),
+            };
+
+            for namespace_entry in namespaces {
+                let namespace_path = namespace_entry?.path();
+                if !namespace_path.is_dir() {
+                    continue;
+                }
+
+                for entry in fs::read_dir(&namespace_path)? {
+                    let path = entry?.path();
+                    if path.extension().and_then(|ext| ext.to_str()) != Some(LOG_EXT) {
+                        continue;
+                    }
+                    let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+                        continue;
+                    };
+                    out.push((stem.to_string(), path));
+                }
+            }
+        }
+
+        Ok(out)
+    }
+
+    /// 回收。**两个开关各自可选，默认都不动**（这是破坏性操作，宁可手动触发）：
+    /// - `orphan_blobs`：没有任何日志引用的 blob（悬置的正文或补丁）；
+    /// - `superseded_drafts`：夹在两次提交之间、已经被取代的草稿节点。
+    ///
+    /// 只回收 blob 是安全的：基准是用**版本号**引用的，不是哈希，所以不必理解增量链。
+    pub fn gc(&self, orphan_blobs: bool, superseded_drafts: bool) -> Result<GcReport, VaultError> {
+        let mut report = GcReport::default();
+        let files = self.log_files()?;
+
+        if superseded_drafts {
+            for (_, path) in &files {
+                let events = self.read_events_at(path)?;
+                let superseded = fold(&events).superseded;
+                if superseded.is_empty() {
+                    continue;
+                }
+
+                let kept: Vec<&Event> = events
+                    .iter()
+                    .filter(|event| {
+                        !matches!(event, Event::Auto { rev, .. } if superseded.contains(rev))
+                    })
+                    .collect();
+                report.removed_drafts += events.len() - kept.len();
+
+                let mut body = String::new();
+                for event in kept {
+                    body.push_str(&serde_json::to_string(event)?);
+                    body.push('\n');
+                }
+                write_atomic(path, body.as_bytes())?;
+            }
+        }
+
+        if orphan_blobs {
+            // 清理过草稿之后要重新读一遍，引用集合才是准的
+            let mut referenced: HashSet<String> = HashSet::new();
+            for (_, path) in &files {
+                for event in self.read_events_at(path)? {
+                    match &event {
+                        Event::Rev { blob, .. } | Event::Auto { blob, .. } => {
+                            referenced.insert(blob.clone());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            let blobs_dir = self.root.join("blobs");
+            let prefixes = match fs::read_dir(&blobs_dir) {
+                Ok(entries) => entries,
+                Err(_) => return Ok(report),
+            };
+
+            for prefix_entry in prefixes {
+                let prefix_path = prefix_entry?.path();
+                if !prefix_path.is_dir() {
+                    continue;
+                }
+
+                for entry in fs::read_dir(&prefix_path)? {
+                    let path = entry?.path();
+                    let Some(hash) = path.file_name().and_then(|name| name.to_str()) else {
+                        continue;
+                    };
+
+                    // 原子写留下的中间文件
+                    if hash.ends_with(".tmp") {
+                        let _ = fs::remove_file(&path);
+                        continue;
+                    }
+                    if referenced.contains(hash) {
+                        continue;
+                    }
+
+                    let size = fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0);
+                    fs::remove_file(&path)?;
+                    report.removed_blobs += 1;
+                    report.freed_bytes += size;
+                }
+            }
+        }
+
+        Ok(report)
+    }
+
     // ------------------------------------------------------------ 首次运行
 
     /// 仓库里一篇笔记都没有时，用给定内容建一篇（保证首次启动有东西可看）
@@ -1339,6 +1460,65 @@ mod tests {
         }
 
         let _ = fs::remove_dir_all(&base);
+    }
+
+    fn count_blobs(root: &std::path::Path) -> usize {
+        let mut count = 0;
+        if let Ok(prefixes) = fs::read_dir(root.join("blobs")) {
+            for prefix in prefixes.flatten() {
+                if let Ok(entries) = fs::read_dir(prefix.path()) {
+                    count += entries.flatten().count();
+                }
+            }
+        }
+        count
+    }
+
+    /// GC 的两个开关各自可控，而且只回收该回收的
+    #[test]
+    fn gc_switches_are_independent() {
+        let temp = TempVault::new();
+        temp.vault.create("回收").unwrap();
+        temp.vault.commit("回收", "v1", None, 0).unwrap();
+        temp.vault.save_draft("回收", "草稿甲", 1).unwrap();
+        temp.vault.commit("回收", "v2", None, 1).unwrap();
+
+        // 只开草稿那一项：blob 一个都不该动
+        let before = count_blobs(&temp.root);
+        let report = temp.vault.gc(false, true).unwrap();
+        assert_eq!(report.removed_drafts, 1, "那条草稿已被提交取代");
+        assert_eq!(report.removed_blobs, 0, "没开就不动 blob");
+        assert_eq!(report.freed_bytes, 0);
+        assert_eq!(count_blobs(&temp.root), before);
+
+        // 再开 blob 那一项：草稿的正文已无引用，应当被回收
+        let report = temp.vault.gc(true, false).unwrap();
+        assert!(report.removed_blobs >= 1, "草稿正文已经没人引用了");
+        assert!(report.freed_bytes > 0);
+        assert_eq!(report.removed_drafts, 0, "没开就不动草稿");
+
+        // 回收之后内容照样读得出来
+        assert_eq!(temp.vault.load("回收").unwrap().markdown, "v2");
+    }
+
+    /// 被删除的笔记也要参与引用统计，否则它的正文会被误回收
+    #[test]
+    fn gc_keeps_blobs_referenced_by_trashed_notes() {
+        let temp = TempVault::new();
+        temp.vault.create("待删").unwrap();
+        temp.vault.commit("待删", "要被保留的正文", None, 0).unwrap();
+        temp.vault.delete("待删").unwrap();
+
+        let report = temp.vault.gc(true, true).unwrap();
+        assert_eq!(report.removed_blobs, 0, "trash 里的笔记还在引用它");
+
+        let id = crate::title::encode_for_path("待删");
+        let state = fold(&temp.vault.read_events_at(&temp.vault.trashed_path(&id)).unwrap());
+        let blob = state.blob.expect("应当还有内容引用");
+        assert_eq!(
+            String::from_utf8(temp.vault.blobs.get(&blob).unwrap()).unwrap(),
+            "要被保留的正文"
+        );
     }
 
     #[test]
