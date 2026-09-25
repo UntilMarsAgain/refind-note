@@ -2050,6 +2050,43 @@ mod tests {
         assert!(temp.vault.parse_address("模型@view-abcde").is_err());
     }
 
+    /// 端到端：界面按地址驱动的三条流程 —— 看某一版、回退确认、删除确认
+    #[test]
+    fn address_driven_flows_end_to_end() {
+        let temp = TempVault::new();
+        temp.vault.create("流程").unwrap();
+        temp.vault.commit("流程", "第一版", None, 0).unwrap();
+        temp.vault.commit("流程", "第二版", None, 1).unwrap();
+
+        // 看某一版：地址给出 rev，界面据此取内容
+        let rev = match temp.vault.parse_address("流程@view-1").unwrap() {
+            Address::ViewVersion { rev, .. } => rev,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(rev, 1);
+        assert_eq!(temp.vault.revision("流程", rev).unwrap().markdown, "第一版");
+
+        // 回退确认页 → 用户确认 → 真的回退（界面调 revert_note，这里是它的等价动作）
+        let (title, rev) = match temp.vault.parse_address("流程@rollback-1").unwrap() {
+            Address::RollbackConfirm { title, rev, .. } => (title, rev),
+            other => panic!("{other:?}"),
+        };
+        let old = temp.vault.revision(&title, rev).unwrap().markdown;
+        temp.vault.commit(&title, &old, Some("回退"), 2).unwrap();
+        assert_eq!(temp.vault.load("流程").unwrap().markdown, "第一版");
+        assert_eq!(temp.vault.load("流程").unwrap().rev, 3, "回退是一次新提交");
+
+        // 删除确认页 → 用户确认 → 文件进 trash/，再解析同一地址就是「不存在」
+        match temp.vault.parse_address("流程@delete").unwrap() {
+            Address::Delete { title, .. } => temp.vault.delete(&title).unwrap(),
+            other => panic!("{other:?}"),
+        }
+        match temp.vault.parse_address("流程@delete").unwrap() {
+            Address::Missing { title, .. } => assert_eq!(title, "流程"),
+            other => panic!("{other:?}"),
+        }
+    }
+
     #[test]
     fn default_root_is_under_home() {
         let root = default_root().expect("应当能定位到主目录");
