@@ -1599,7 +1599,7 @@ fn strip_prefix_ci<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
 }
 
 /// 现有的特殊页面。不在这里面的 `special:` 地址直接报「不存在」。
-const SPECIAL_PAGES: [&str; 1] = ["newtab"];
+const SPECIAL_PAGES: [&str; 2] = ["newtab", "settings"];
 
 /// 规范地址拼装：`NAME[@STATE][#章节]`。
 ///

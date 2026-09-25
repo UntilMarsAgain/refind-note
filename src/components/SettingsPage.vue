@@ -1,0 +1,284 @@
+<script setup lang="ts">
+/**
+ * 设置页（`special:settings`）。
+ *
+ * 它只做一件事：把 `~/.refind-note/vault.json` 里的设置集中到一个界面。
+ * 改了**立刻落盘**，没有「保存」按钮 —— 这些值改错也不会有损失，多一个按钮只会
+ * 多一次忘记点。
+ */
+import { ref, watch } from "vue";
+
+interface Settings {
+  root: string;
+  format: number;
+  capital_links: boolean;
+  max_title_bytes: number;
+  delta_chain_limit: number;
+  theme: string;
+  accent: string;
+  reading_width: number;
+}
+
+const props = defineProps<{ settings: Settings }>();
+const emit = defineEmits<{ (e: "update", patch: Record<string, unknown>): void }>();
+
+const THEMES = [
+  { value: "system", label: "跟随系统" },
+  { value: "light", label: "浅色" },
+  { value: "dark", label: "深色" },
+];
+
+/** 几个预设；第一个与默认主题色一致 */
+const ACCENTS = [
+  { label: "蓝", value: "#5b8dd6" },
+  { label: "靛", value: "#7b6ee0" },
+  { label: "青", value: "#3f9e9e" },
+  { label: "绿", value: "#5aa469" },
+  { label: "橙", value: "#c98a45" },
+  { label: "红", value: "#c0575a" },
+  { label: "紫", value: "#a45fbf" },
+];
+
+/** 主题色输入框的草稿：只有在它成为合法的 #rrggbb 时才提交 */
+const accentDraft = ref(props.settings.accent);
+watch(
+  () => props.settings.accent,
+  (value) => {
+    accentDraft.value = value;
+  },
+);
+
+function submitAccent() {
+  const value = accentDraft.value.trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(value)) {
+    emit("update", { accent: value.toLowerCase() });
+  } else {
+    accentDraft.value = props.settings.accent;
+  }
+}
+
+function submitNumber(key: string, event: Event, min: number, max: number) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) {
+    return;
+  }
+  const value = Number.parseInt(target.value, 10);
+  if (!Number.isFinite(value)) {
+    return;
+  }
+  emit("update", { [key]: Math.min(max, Math.max(min, value)) });
+}
+</script>
+
+<template>
+  <section class="settings">
+    <h1 class="settings__title">设置</h1>
+    <p class="settings__where">
+      全部保存在 <code>{{ settings.root }}</code> 下的 <code>vault.json</code>
+    </p>
+
+    <h2 class="settings__section">外观</h2>
+
+    <div class="row">
+      <span class="row__label">主题</span>
+      <div class="seg">
+        <button
+          v-for="theme in THEMES"
+          :key="theme.value"
+          type="button"
+          class="seg__item"
+          :class="{ 'seg__item--on': settings.theme === theme.value }"
+          @click="emit('update', { theme: theme.value })"
+        >
+          {{ theme.label }}
+        </button>
+      </div>
+    </div>
+
+    <div class="row">
+      <span class="row__label">主题色</span>
+      <div class="swatches">
+        <button
+          v-for="accent in ACCENTS"
+          :key="accent.value"
+          type="button"
+          class="swatch"
+          :class="{ 'swatch--on': settings.accent === accent.value }"
+          :style="{ background: accent.value }"
+          :title="accent.label"
+          :aria-label="accent.label"
+          @click="emit('update', { accent: accent.value })"
+        />
+        <input
+          v-model="accentDraft"
+          class="swatches__hex"
+          type="text"
+          spellcheck="false"
+          @change="submitAccent"
+          @keydown.enter="submitAccent"
+        />
+      </div>
+    </div>
+
+    <div class="row">
+      <span class="row__label">正文限宽</span>
+      <input
+        class="num"
+        type="number"
+        min="480"
+        max="2000"
+        step="20"
+        :value="settings.reading_width"
+        @change="submitNumber('readingWidth', $event, 480, 2000)"
+      />
+      <span class="row__unit">px</span>
+    </div>
+
+    <h2 class="settings__section">存储</h2>
+
+    <div class="row">
+      <span class="row__label">最多连续修改节点</span>
+      <input
+        class="num"
+        type="number"
+        min="1"
+        max="256"
+        :value="settings.delta_chain_limit"
+        @change="submitNumber('deltaChainLimit', $event, 1, 256)"
+      />
+    </div>
+    <p class="settings__hint">
+      一条改动链超过这个长度后，下一版就改存整份快照 —— 避免读取时一路回放增量。
+      调大省空间、读取慢；调小读取快、占空间。默认 32。
+    </p>
+  </section>
+</template>
+
+<style scoped>
+.settings {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 28px 20px 64px;
+}
+
+.settings__title {
+  margin: 0 0 6px;
+  font-size: 22px;
+}
+
+.settings__where {
+  margin: 0 0 24px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.settings__where code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--code-bg);
+  font-size: 12px;
+}
+
+.settings__section {
+  margin: 26px 0 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 10px 0;
+}
+
+.row__label {
+  min-width: 132px;
+  font-size: 13px;
+}
+
+.row__unit {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.seg {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  gap: 2px;
+}
+
+.seg__item {
+  appearance: none;
+  padding: 4px 12px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.seg__item:hover {
+  background: var(--hover);
+}
+
+.seg__item--on {
+  background: var(--accent);
+  color: #fff;
+}
+
+.swatches {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.swatch {
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.swatch--on {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+.swatches__hex {
+  width: 92px;
+  margin-left: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--field-bg);
+  color: var(--text);
+  font-size: 12px;
+  font-family: var(--mono-font);
+}
+
+.num {
+  width: 92px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--field-bg);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.settings__hint {
+  margin: 6px 0 0;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.6;
+}
+</style>

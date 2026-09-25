@@ -5,6 +5,7 @@ import FloatingTools from "./components/FloatingTools.vue";
 import HistoryView from "./components/HistoryView.vue";
 import MissingNote from "./components/MissingNote.vue";
 import NewTab from "./components/NewTab.vue";
+import SettingsPage from "./components/SettingsPage.vue";
 import NoteContent from "./components/NoteContent.vue";
 import NoteEditor from "./components/NoteEditor.vue";
 import PageHeader from "./components/PageHeader.vue";
@@ -52,6 +53,12 @@ interface VaultSettings {
   format: number;
   capital_links: boolean;
   max_title_bytes: number;
+  delta_chain_limit: number;
+  /** "system" | "light" | "dark" */
+  theme: string;
+  /** 主题色 #rrggbb */
+  accent: string;
+  reading_width: number;
 }
 
 /** 与 Rust 端 `RevisionContent` 对应（历史里某一版的正文） */
@@ -169,6 +176,15 @@ const tabs = ref<
   }[]
 >([]);
 const activeTab = ref(0);
+/** 仓库设置（含外观）：唯一来源是后端的 vault.json */
+const vaultSettings = ref<VaultSettings | null>(null);
+
+/** 当前特殊页的页面名（模板里据此分派；用计算属性避免在模板里碰联合类型） */
+const specialPage = computed(() => {
+  // 先取到局部变量，联合类型才收窄得动
+  const address = route.value;
+  return address && address.kind === "special" ? address.page : "";
+});
 /** 内部链接的右键菜单（坐标来自鼠标事件） */
 const linkMenu = ref<{ title: string; x: number; y: number } | null>(null);
 
@@ -541,6 +557,8 @@ watch(draftText, () => {
 onMounted(async () => {
   try {
     const settings = await invoke<VaultSettings>("get_settings");
+    vaultSettings.value = settings;
+    applyAppearance();
     vaultRoot.value = settings.root;
   } catch (error) {
     console.debug("读取仓库设置失败:", error);
@@ -652,7 +670,52 @@ const canGoForward = computed(() => {
 });
 
 function onMenu() {
-  // TODO: 展开菜单（展开内容之后再接）
+  // 菜单键现在有了去处：设置页
+  void navigate("special:settings");
+}
+
+/**
+ * 把外观设置套到文档上。
+ *
+ * - 主题：`system` 由 JS 解析成实际值（CSS 里刻意没有 prefers-color-scheme 媒体查询，
+ *   深色是默认态），所以这里要监听系统变化；
+ * - 主题色：覆盖 `--accent` / `--accent-soft` 两个 token，其余（选中色等）保持主题默认；
+ * - 限宽：覆盖 `--reading-width`。
+ */
+function applyAppearance() {
+  const appearance = vaultSettings.value;
+  if (!appearance) {
+    return;
+  }
+
+  const prefersLight = window.matchMedia("(prefers-color-scheme: light)").matches;
+  const theme =
+    appearance.theme === "system"
+      ? prefersLight
+        ? "light"
+        : "dark"
+      : appearance.theme;
+
+  if (theme === "light") {
+    document.documentElement.dataset.theme = "light";
+  } else {
+    delete document.documentElement.dataset.theme;
+  }
+
+  const root = document.documentElement.style;
+  root.setProperty("--accent", appearance.accent);
+  root.setProperty("--accent-soft", appearance.accent);
+  root.setProperty("--reading-width", `${appearance.reading_width}px`);
+}
+
+/** 设置页改了哪一项就只传哪一项（后端是补丁式更新） */
+async function updateSettings(patch: Record<string, unknown>) {
+  try {
+    vaultSettings.value = await invoke<VaultSettings>("update_settings", patch);
+    applyAppearance();
+  } catch (error) {
+    addressError.value = String(error);
+  }
 }
 
 /** 阅读页只显示最新提交；有草稿就提示一下，点按钮才进编辑器看 */
@@ -1076,7 +1139,15 @@ function onAction(name: string) {
       >
         <div class="app__column" :class="{ 'app__column--wide': !limitWidth }">
           <!-- 特殊页面：由前端渲染（后端只负责把地址解析成 Special） -->
-          <NewTab v-if="mode === 'special'" @open="onSubmit" />
+          <NewTab
+        v-if="mode === 'special' && specialPage === 'newtab'"
+        @open="onSubmit"
+      />
+      <SettingsPage
+        v-else-if="mode === 'special' && specialPage === 'settings' && vaultSettings"
+        :settings="vaultSettings"
+        @update="updateSettings"
+      />
 
           <!-- 编辑中：不显示页头，操作都在编辑器自己那一行里 -->
           <NoteEditor
