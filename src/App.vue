@@ -705,6 +705,7 @@ function applyAppearance() {
   const root = document.documentElement.style;
   root.setProperty("--accent", appearance.accent);
   root.setProperty("--accent-soft", appearance.accent);
+  root.setProperty("--accent-tint", tintOf(appearance.accent));
   root.setProperty("--reading-width", `${appearance.reading_width}px`);
 }
 
@@ -745,6 +746,21 @@ const settingsFocus = computed(() => {
 /** 列表里点一条（special:all 等）：算「跳转」，进历史 —— 与正文内部链接一致 */
 function openFromList(address: string) {
   void navigate(address);
+}
+
+/**
+ * `#rrggbb` → 低透明度版本。
+ *
+ * 主题色在设置里是**不透明** hex，而"表头底色"这类淡染需要透明版本；CSS 里没法对
+ * 运行时设的变量做混色（且不能假定支持 color-mix），所以在 JS 里算好一个变量。
+ */
+function tintOf(hex: string): string {
+  const match = /^#([0-9a-fA-F]{6})$/.exec(hex.trim());
+  if (!match) {
+    return hex;
+  }
+  const value = Number.parseInt(match[1]!, 16);
+  return `rgba(${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}, 0.16)`;
 }
 
 /** 标签栏底部的设置入口 */

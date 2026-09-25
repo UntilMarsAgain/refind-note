@@ -31,6 +31,8 @@
   --icon: #dcdcdc;
   --accent: #5b8dd6;
   --accent-soft: #a8c6ef;
+  /* 主题色的低透明度版本：给"底色淡染"用（主题色本身不透明，直接当底色会与文字撞） */
+  --accent-tint: rgba(91, 141, 214, 0.16);
   /* 指向尚未建立的笔记的内部链接（MediaWiki 意义上的「红链」） */
   --link-missing: #e2645c;
   /* 版本对比里增删行的底色 */
@@ -82,6 +84,7 @@
   --icon: #3a3434;
   --accent: #2f6fc4;
   --accent-soft: #5f93d8;
+  --accent-tint: rgba(47, 111, 196, 0.14);
   --link-missing: #b02a2a;
   --diff-add-bg: rgba(60, 160, 90, 0.16);
   --diff-del-bg: rgba(200, 70, 70, 0.12);
