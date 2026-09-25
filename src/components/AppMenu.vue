@@ -7,7 +7,7 @@
  * 这里就有哪些；显示名与图标从 `special.ts` 取，没登记的会以 `special:<名字>`
  * 出现在「其它」里，不会因为忘了登记而消失。
  */
-import { computed } from "vue";
+import { computed, onBeforeUnmount, onMounted } from "vue";
 import { FALLBACK_GROUP, metaOf, SPECIAL_GROUPS } from "../special";
 import { logoSrc } from "../theme";
 
@@ -23,6 +23,16 @@ const emit = defineEmits<{
   (e: "close"): void;
 }>();
 
+// Esc 关闭：这一版菜单不压暗页面，键盘出口要留一个
+function onKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape") {
+    emit("close");
+  }
+}
+
+onMounted(() => window.addEventListener("keydown", onKeydown));
+onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
+
 /** 按分组归拢；顺序由 SPECIAL_GROUPS 决定，空分组不显示 */
 const groups = computed(() =>
   [...SPECIAL_GROUPS, FALLBACK_GROUP]
@@ -36,7 +46,7 @@ const groups = computed(() =>
 </script>
 
 <template>
-  <!-- 点面板外面收起；面板本身在标题栏下方整幅铺开 -->
+  <!-- 点面板外面收起；面板贴在标题栏左下角，是**下拉菜单**而不是整幅铺开 -->
   <div class="menu-backdrop" @click.self="emit('close')">
     <section class="menu">
       <header class="menu__head">
@@ -70,28 +80,43 @@ const groups = computed(() =>
 </template>
 
 <style scoped>
+/*
+ * 版式对照参考图：**下拉面板**，不是整幅铺开。
+ *
+ * - 贴着菜单键正下方、左边齐平；上边不圆角（接着标题栏），下边圆角；
+ * - 页面**不压暗**：菜单是"在页面之上开一张表"，不是模态框；
+ * - 内容多了在面板内滚动，不把整页撑长。
+ */
 .menu-backdrop {
   position: fixed;
   inset: 0;
   z-index: 54;
-  /* 压暗后面的页面，让面板成为注意力的中心（与参考一致） */
-  background: rgb(0 0 0 / 35%);
+  /* 只负责"点外面关掉"，背景保持透明，页面照旧可见 */
+  background: transparent;
 }
 
 .menu {
-  padding: 18px 26px 26px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg);
-  box-shadow: 0 18px 44px rgb(0 0 0 / 40%);
-  max-height: calc(100vh - 40px);
+  position: absolute;
+  top: var(--titlebar-height);
+  left: 0;
+  width: min(520px, calc(100vw - 16px));
+  max-height: calc(100vh - var(--titlebar-height) - 12px);
   overflow-y: auto;
+  padding: 14px 20px 20px;
+  border: 1px solid var(--border);
+  border-top: 0;
+  border-radius: 0 0 10px 0;
+  background: var(--bg);
+  box-shadow: 0 18px 40px rgb(0 0 0 / 45%);
 }
 
 .menu__head {
   display: flex;
   align-items: center;
+  /* 参考图里站点名是居中的 */
+  justify-content: center;
   gap: 10px;
-  margin-bottom: 18px;
+  margin-bottom: 16px;
 }
 
 .menu__logo {
@@ -107,8 +132,8 @@ const groups = computed(() =>
 
 .menu__columns {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 18px 32px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px 24px;
 }
 
 .menu__group-title {
