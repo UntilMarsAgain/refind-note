@@ -12,7 +12,6 @@ import TabRail from "./components/TabRail.vue";
 import TitleBar from "./components/TitleBar.vue";
 import WindowResizeHandles from "./components/WindowResizeHandles.vue";
 import { PREFERENCE_KEYS, readFlag, writeFlag } from "./settings";
-import { splitTitleAndVersion } from "./title";
 
 /** 与 Rust 端 `NoteSummary` 对应（标签栏用，不含正文） */
 interface NoteSummary {
@@ -64,6 +63,13 @@ interface RevisionContent {
 
 type Mode = "read" | "edit" | "missing" | "history";
 
+/** 与 Rust 端 `Address` 对应：地址栏那一行的解析结果（后端解析到底） */
+type Address =
+  | { kind: "empty" }
+  | { kind: "note"; title: string }
+  | { kind: "revision"; title: string; rev: number; id: string; short_id: string }
+  | { kind: "missing"; title: string };
+
 /** 自动保存：停手三秒后写一条草稿到链上 */
 const AUTOSAVE_DELAY_MS = 3000;
 
@@ -94,8 +100,10 @@ const draftExists = ref(false);
 const confirmDelete = ref(false);
 /** 删除时顺手回收悬置数据 */
 const deleteWithGc = ref(false);
-/** 地址栏写了「标题@版本」时带进历史页 */
+/** 地址栏写了「标题@引用」时带进历史页 */
 const historyRev = ref<number | null>(null);
+/** 地址栏解析出的错误（比如缩写写错了）；以前这类错误被悄悄吞掉了 */
+const addressError = ref("");
 let autosaveTimer: number | undefined;
 
 async function refreshNotes() {
@@ -422,21 +430,48 @@ const parentTitle = computed(() => {
 });
 
 /**
- * 地址栏提交 = 按标题打开，支持「标题@版本」指定版本。
- * 标题里不允许 @（后端也拦），所以这个语法不会和标题打架。
+ * 地址栏提交。
+ *
+ * **解析全在后端**（`parse_address`）：标题合法性、目标是否存在、`@` 后面那串缩写
+ * 对应哪一版，这些知识都在后端；前端只按返回的 `kind` 分发 —— 加新语法时改后端、
+ * 这里补一个分支即可，不必再实现一套解析。
  */
-function onSubmit(value: string) {
-  const { title, version } = splitTitleAndVersion(value);
-  if (!title) {
+async function onSubmit(value: string) {
+  addressError.value = "";
+
+  let address: Address;
+  try {
+    // 参数名是 camelCase（Tauri v2 默认转换）
+    address = await invoke<Address>("parse_address", {
+      input: value,
+      current: note.value?.title ?? null,
+    });
+  } catch (error) {
+    // 写错了要让人看见，不能像以前那样静默
+    addressError.value = String(error);
+    console.debug("地址栏解析失败:", error);
     return;
   }
 
-  historyRev.value = version;
-  void openNote(title).then(() => {
-    if (version && note.value) {
-      mode.value = "history";
-    }
-  });
+  switch (address.kind) {
+    case "note":
+      historyRev.value = null;
+      await openNote(address.title);
+      return;
+    case "revision":
+      // 后端已经解析成具体版本号，界面照旧带着它进历史页
+      historyRev.value = address.rev;
+      await openNote(address.title);
+      if (note.value) {
+        mode.value = "history";
+      }
+      return;
+    case "missing":
+      showMissing(address.title);
+      return;
+    default:
+      return;
+  }
 }
 
 /** 删除：写删除标记 + 把文件挪进 trash/，历史不丢；可勾选顺手回收 */
