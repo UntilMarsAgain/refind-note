@@ -1093,10 +1093,10 @@ impl Vault {
         let reference = reference.trim();
 
         if reference.is_empty() {
-            return Err(VaultError::RevisionNotFound {
-                title: parsed.title.clone(),
-                rev: 0,
-            });
+            return Err(VaultError::BadAddress(format!(
+                "《{}》的版本引用是空的",
+                parsed.title
+            )));
         }
 
         let digits = reference.chars().all(|ch| ch.is_ascii_digit());
@@ -1104,12 +1104,12 @@ impl Vault {
         // 不足 5 位：只能当版本号。缩写按约定至少 5 位，太短给明确提示。
         if reference.len() < MIN_SHORT_ID {
             if digits {
-                return reference
-                    .parse::<u64>()
-                    .map_err(|_| VaultError::RevisionNotFound {
-                        title: parsed.title.clone(),
-                        rev: 0,
-                    });
+                return reference.parse::<u64>().map_err(|_| {
+                    VaultError::BadAddress(format!(
+                        "《{}》没有版本「{reference}」（数字已超出范围）",
+                        parsed.title
+                    ))
+                });
             }
             return Err(VaultError::BadAddress(format!(
                 "commit ID 缩写至少要写 {MIN_SHORT_ID} 位"
@@ -2575,6 +2575,21 @@ mod tests {
 
         assert_eq!(temp.vault.preferences().theme, "light");
         assert_eq!(temp.vault.settings_view().accent, "#123456");
+    }
+
+    /// 引用解析不出来时，提示里不能出现"没有版本 0"
+    /// （0 是"给不出版本号"的内部占位，不是真实版本）
+    #[test]
+    fn unresolvable_reference_does_not_report_version_zero() {
+        let temp = TempVault::new();
+        temp.vault.create("引用").unwrap();
+        temp.vault.commit("引用", "正文", None, 0).unwrap();
+
+        // 5 位以上、既不是任何 commit 的前缀，也不是数字
+        let error = temp.vault.resolve_revision("引用", "zzzzz").unwrap_err();
+        let text = error.to_string();
+        assert!(!text.contains("版本 0"), "不该打出占位用的 0：{text}");
+        assert!(text.contains("没有这个版本"), "{text}");
     }
 
     #[test]
