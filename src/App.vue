@@ -52,6 +52,10 @@ function onSearch() {
   // TODO: 打开搜索面板
 }
 
+function onMenu() {
+  // TODO: 展开菜单（展开内容之后再接）
+}
+
 function onSubmit(value: string) {
   // TODO: 按标题打开对应的笔记
   console.debug("open note:", value);
@@ -70,6 +74,7 @@ function onAction(name: string) {
     <TitleBar
       :title="note?.title ?? ''"
       @search="onSearch"
+      @menu="onMenu"
       @submit="onSubmit"
     />
 

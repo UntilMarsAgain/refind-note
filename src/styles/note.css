@@ -37,10 +37,13 @@
   margin: 1.6em 0 0.6em;
   font-weight: 600;
   line-height: 1.35;
+  /* 页头是 sticky 的：跳转到某个标题时要给它让出位置，否则标题会被盖住 */
+  scroll-margin-top: 64px;
 }
 
+/* 刻意比页头那个页面标题（2.15em）小一档，正文里的 H1 不该压过页面标题 */
 .note-body h1 {
-  font-size: 1.7em;
+  font-size: 1.55em;
 }
 
 .note-body h2 {
@@ -151,15 +154,21 @@
   border-radius: 8px;
   background: var(--code-bg);
   overflow: auto;
+  /* 字号与行高必须设在 pre 上，不能只设在 code 上：
+     行盒高度取「块自身 strut」与内联盒的较大值，而 pre 继承的是 .note-body 的
+     15px/1.75 = 26.25px strut，比 code 的 13.2px/1.6 = 21.1px 更大，
+     于是每行被撑到 26px —— 表现出来就是选中的那一条明显比文字高出一截。 */
+  font-size: 0.88em;
+  line-height: 1.5;
 }
 
-/* 代码块里的 code 不该再套一层内边距和底色 */
+/* 代码块里的 code 继承 pre 的字号与行高，并去掉二次内边距和底色 */
 .note-body pre code {
   padding: 0;
   border-radius: 0;
   background: none;
-  font-size: 0.88em;
-  line-height: 1.6;
+  font-size: inherit;
+  line-height: inherit;
 }
 
 /* ---------- 表格 ---------- */
@@ -200,4 +209,114 @@
   max-width: 100%;
   height: auto;
   border-radius: 8px;
+}
+
+/* ---------- 代码块容器与复制按钮 ---------- */
+
+/* 按钮放在 <pre> 外面而不是里面，两个原因：
+   1. pre 有 overflow:auto，按钮放里面会跟着横向滚动被裁掉；
+   2. 放外面，选中或复制代码时不会把按钮本身算进去。 */
+.code-frame {
+  position: relative;
+  margin: 1em 0;
+}
+
+/* 外边距已交给容器，避免两层间距叠加 */
+.code-frame pre {
+  margin: 0;
+}
+
+.code-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  /* 不透明，免得盖住底下的代码 */
+  background: var(--bg);
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: default;
+  /* 按钮不该被选中，也不要混进复制内容 */
+  user-select: none;
+  -webkit-user-select: none;
+  opacity: 0.65;
+  transition: opacity 120ms ease, color 120ms ease, background-color 120ms ease;
+}
+
+.code-frame:hover .code-copy,
+.code-copy:focus-visible {
+  opacity: 1;
+}
+
+.code-copy:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* ---------- 代码高亮 ----------
+ * highlight.js 只负责分词（给 <span class="hljs-xxx">），配色由上面的
+ * --syntax-* 变量决定，因此浅色/深色会自动跟随。这也是刻意不引入
+ * highlight.js 自带主题 CSS 的原因：那些是写死的固定配色。
+ */
+
+.note-body .hljs-comment,
+.note-body .hljs-quote {
+  color: var(--syntax-comment);
+  font-style: italic;
+}
+
+.note-body .hljs-keyword,
+.note-body .hljs-literal,
+.note-body .hljs-symbol,
+.note-body .hljs-bullet,
+.note-body .hljs-meta,
+.note-body .hljs-meta .hljs-keyword {
+  color: var(--syntax-keyword);
+}
+
+.note-body .hljs-string,
+.note-body .hljs-regexp,
+.note-body .hljs-addition,
+.note-body .hljs-meta .hljs-string {
+  color: var(--syntax-string);
+}
+
+.note-body .hljs-number {
+  color: var(--syntax-number);
+}
+
+.note-body .hljs-title,
+.note-body .hljs-section,
+.note-body .hljs-name {
+  color: var(--syntax-title);
+}
+
+.note-body .hljs-type,
+.note-body .hljs-built_in,
+.note-body .hljs-attr,
+.note-body .hljs-attribute,
+.note-body .hljs-variable,
+.note-body .hljs-template-variable,
+.note-body .hljs-tag,
+.note-body .hljs-selector-tag,
+.note-body .hljs-selector-id,
+.note-body .hljs-selector-class,
+.note-body .hljs-title.class_ {
+  color: var(--syntax-type);
+}
+
+.note-body .hljs-deletion,
+.note-body .hljs-subst {
+  color: var(--syntax-deleted);
+}
+
+.note-body .hljs-emphasis {
+  font-style: italic;
+}
+
+.note-body .hljs-strong {
+  font-weight: 600;
 }

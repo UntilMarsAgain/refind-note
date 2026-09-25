@@ -34,6 +34,20 @@
   --hover: rgba(255, 255, 255, 0.12);
   --press: rgba(255, 255, 255, 0.2);
 
+  /* 代码高亮配色。highlight.js 只负责分词，颜色由我们自己给，
+     这样才能跟随浅色/深色 —— 这也是当初关掉 syntect 的原因。 */
+  --syntax-comment: #7f8c8d;
+  --syntax-keyword: #c678dd;
+  --syntax-string: #98c379;
+  --syntax-number: #d19a66;
+  --syntax-title: #61afef;
+  --syntax-type: #e5c07b;
+  --syntax-deleted: #e06c75;
+
+  /* 选中文本的底色。系统默认那抹蓝在深色下过于刺眼，
+     而且和上面的语法配色打架，所以自己给一个。 */
+  --selection-bg: rgba(159, 83, 84, 0.5);
+
   /* 等宽字体栈，供笔记正文的代码样式使用；与主题无关，浅色下沿用同一份 */
   --mono-font: "JetBrains Mono", "Cascadia Code", "Noto Sans Mono CJK SC",
     ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -65,6 +79,16 @@
   --accent-soft: #8a4748;
   --hover: rgba(0, 0, 0, 0.06);
   --press: rgba(0, 0, 0, 0.12);
+
+  --syntax-comment: #6a737d;
+  --syntax-keyword: #a626a4;
+  --syntax-string: #50a14f;
+  --syntax-number: #986801;
+  --syntax-title: #4078f2;
+  --syntax-type: #c18401;
+  --syntax-deleted: #e45649;
+
+  --selection-bg: rgba(159, 83, 84, 0.22);
 }
 
 *,
@@ -101,4 +125,8 @@ textarea,
 button {
   font: inherit;
   color: inherit;
+}
+
+::selection {
+  background: var(--selection-bg);
 }

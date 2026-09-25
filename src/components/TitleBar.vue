@@ -9,7 +9,6 @@ import {
 } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
-  Check,
   Copy,
   Menu,
   Minus,
@@ -23,7 +22,6 @@ import {
 import {
   cycleThemeMode,
   nextThemeMode,
-  setThemeMode,
   themeMode,
   themeOptions,
   type ThemeMode,
@@ -41,6 +39,7 @@ const props = defineProps<{ title: string }>();
 
 const emit = defineEmits<{
   (e: "search"): void;
+  (e: "menu"): void;
   (e: "submit", value: string): void;
 }>();
 
@@ -66,9 +65,6 @@ watch(
   { immediate: true },
 );
 
-const menuEl = ref<HTMLElement | null>(null);
-const menuOpen = ref(false);
-
 /** 循环切换按钮显示当前模式，点一下按 themeOptions 的顺序换到下一个 */
 const themeIcons: Record<ThemeMode, Component> = {
   system: Monitor,
@@ -93,14 +89,9 @@ onMounted(async () => {
   unlistenResized = await appWindow.onResized(async () => {
     isMaximized.value = await appWindow.isMaximized();
   });
-
-  document.addEventListener("pointerdown", onPointerDown);
 });
 
-onUnmounted(() => {
-  unlistenResized?.();
-  document.removeEventListener("pointerdown", onPointerDown);
-});
+onUnmounted(() => unlistenResized?.());
 
 function onFocus() {
   // 地址栏惯例：一点就全选
@@ -124,22 +115,6 @@ function onBlur() {
     draft.value = committed;
   }
 }
-
-/** 点菜单面板以外的地方就收起它 */
-function onPointerDown(event: PointerEvent) {
-  if (!menuOpen.value) {
-    return;
-  }
-  const target = event.target;
-  if (target instanceof Node && !menuEl.value?.contains(target)) {
-    menuOpen.value = false;
-  }
-}
-
-function chooseTheme(next: ThemeMode) {
-  setThemeMode(next);
-  menuOpen.value = false;
-}
 </script>
 
 <template>
@@ -161,46 +136,16 @@ function chooseTheme(next: ThemeMode) {
         <Search :size="16" :stroke-width="1.75" />
       </button>
 
-      <div ref="menuEl" class="menu">
-        <button
-          class="tbtn"
-          type="button"
-          title="菜单"
-          aria-label="菜单"
-          aria-haspopup="menu"
-          :aria-expanded="menuOpen"
-          @click="menuOpen = !menuOpen"
-        >
-          <Menu :size="16" :stroke-width="1.75" />
-        </button>
-
-        <!-- "false" = 面板内不留拖动区，否则点标题或空白会把窗口拖走 -->
-        <div
-          v-if="menuOpen"
-          class="menu__panel"
-          role="menu"
-          data-tauri-drag-region="false"
-        >
-          <p class="menu__title">外观</p>
-          <button
-            v-for="option in themeOptions"
-            :key="option.value"
-            class="menu__item"
-            type="button"
-            role="menuitemradio"
-            :aria-checked="themeMode === option.value"
-            @click="chooseTheme(option.value)"
-          >
-            <Check
-              v-if="themeMode === option.value"
-              class="menu__check"
-              :size="14"
-            />
-            <span v-else class="menu__check" />
-            {{ option.label }}
-          </button>
-        </div>
-      </div>
+      <!-- 菜单按钮留作占位：展开内容之后再接 -->
+      <button
+        class="tbtn"
+        type="button"
+        title="菜单"
+        aria-label="菜单"
+        @click="emit('menu')"
+      >
+        <Menu :size="16" :stroke-width="1.75" />
+      </button>
     </div>
 
     <div class="titlebar__center">
@@ -362,56 +307,6 @@ function chooseTheme(next: ThemeMode) {
    免得被误认成最小化/最大化那一组 */
 .tbtn--theme {
   margin-right: 6px;
-}
-
-.menu {
-  position: relative;
-}
-
-.menu__panel {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 20;
-  min-width: 136px;
-  padding: 6px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-}
-
-.menu__title {
-  margin: 2px 8px 6px;
-  color: var(--text-dim);
-  font-size: 12px;
-}
-
-.menu__item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text);
-  font-size: 13.5px;
-  text-align: left;
-  cursor: default;
-}
-
-.menu__item:hover {
-  background: var(--hover);
-}
-
-/* 选中态与占位用同一个宽度，避免三行的文字左右错位 */
-.menu__check {
-  display: inline-flex;
-  flex: 0 0 auto;
-  width: 14px;
-  color: var(--accent-soft);
 }
 
 .wbtn {

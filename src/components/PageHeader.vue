@@ -85,11 +85,13 @@ const actions: {
   border-bottom-color: var(--border);
 }
 
+/* 刻意比正文里的 H1（1.55em）大出一档：页面标题是这一页的主标题，
+   正文的 H1 不该压过它 */
 .page-title {
   flex: 1 1 auto;
   min-width: 0;
   margin: 0;
-  font-size: 1.85em;
+  font-size: 2.15em;
   font-weight: 600;
   line-height: 1.3;
   white-space: nowrap;
