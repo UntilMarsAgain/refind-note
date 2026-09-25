@@ -1,11 +1,16 @@
 <script setup lang="ts">
-import { Plus, X } from "@lucide/vue";
+import { ref } from "vue";
+import { PanelLeftClose, PanelLeftOpen, Plus, X } from "@lucide/vue";
+import { PREFERENCE_KEYS, readFlag, writeFlag } from "../settings";
 
 /**
- * 真正的标签栏：只列**打开着的**标签页。
+ * 垂直标签栏：只列**打开着的**标签页。
  *
- * 以前这里列的是仓库里的全部笔记 —— 那是「浏览全部文档」，暂时不做（入口改为
- * `special:newtab`）。现在每个标签页背后是一个地址，点它就是切过去并重新解析。
+ * 以前这里列仓库里的全部笔记（那是「浏览全部文档」，暂时不做 —— 入口改为
+ * `special:newtab`）。现在每个标签页背后就是一个**地址**，点它就是切过去并重新解析。
+ *
+ * 最顶部是展开 / 收起与新建标签页：收起时只留一个首字（没有图标可用时至少还能分辨），
+ * 展开状态记进界面偏好，下次打开保持原样。
  */
 defineProps<{
   tabs: { address: string; title: string }[];
@@ -17,13 +22,50 @@ const emit = defineEmits<{
   (e: "close", index: number): void;
   (e: "new-tab"): void;
 }>();
+
+/** 默认收起；展开状态记进界面偏好，下次打开保持原样 */
+const collapsed = ref(readFlag(PREFERENCE_KEYS.railCollapsed, true));
+
+function toggle() {
+  collapsed.value = !collapsed.value;
+  writeFlag(PREFERENCE_KEYS.railCollapsed, collapsed.value);
+}
+
+/** 收起时显示的首字。用 Array.from 取，免得多字节/代理对只取到半个。 */
+function initialOf(tab: { address: string; title: string }) {
+  const source = tab.title || tab.address;
+  return Array.from(source)[0] ?? "•";
+}
 </script>
 
 <template>
-  <aside class="rail">
-    <button class="rail__new" type="button" title="新建标签页" @click="emit('new-tab')">
-      <Plus :size="14" :stroke-width="2" />
-    </button>
+  <aside class="rail" :class="{ 'rail--collapsed': collapsed }">
+    <div class="rail__head">
+      <button
+        class="rail__icon"
+        type="button"
+        :data-tip="collapsed ? '展开标签栏' : null"
+        :aria-label="collapsed ? '展开标签栏' : '收起标签栏'"
+        :aria-expanded="!collapsed"
+        @click="toggle"
+      >
+        <component
+          :is="collapsed ? PanelLeftOpen : PanelLeftClose"
+          :size="14"
+          :stroke-width="1.9"
+        />
+      </button>
+
+      <button
+        class="rail__icon"
+        type="button"
+        :data-tip="collapsed ? '新建标签页' : null"
+        aria-label="新建标签页"
+        @click="emit('new-tab')"
+      >
+        <Plus :size="14" :stroke-width="2" />
+      </button>
+    </div>
 
     <ol class="rail__list">
       <li v-for="(tab, index) in tabs" :key="`${index}-${tab.address}`">
@@ -34,12 +76,14 @@ const emit = defineEmits<{
             :title="tab.address"
             @click="emit('select', index)"
           >
-            {{ tab.title || tab.address }}
+            <span class="rail__initial">{{ initialOf(tab) }}</span>
+            <span class="rail__text">{{ tab.title || tab.address }}</span>
           </button>
           <button
             class="rail__close"
             type="button"
-            title="关闭"
+            :data-tip="collapsed ? '关闭' : null"
+            aria-label="关闭"
             @click="emit('close', index)"
           >
             <X :size="12" :stroke-width="2" />
@@ -62,7 +106,21 @@ const emit = defineEmits<{
   overflow-y: auto;
 }
 
-.rail__new {
+.rail--collapsed {
+  width: 46px;
+}
+
+.rail__head {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.rail--collapsed .rail__head {
+  flex-direction: column;
+}
+
+.rail__icon {
   appearance: none;
   display: inline-flex;
   align-items: center;
@@ -76,7 +134,7 @@ const emit = defineEmits<{
   cursor: pointer;
 }
 
-.rail__new:hover {
+.rail__icon:hover {
   background: var(--hover);
   color: var(--text);
 }
@@ -93,17 +151,17 @@ const emit = defineEmits<{
   border-radius: 6px;
 }
 
-.rail__item:hover {
-  background: var(--hover);
-}
-
+.rail__item:hover,
 .rail__item--active {
   background: var(--hover);
 }
 
 .rail__pick {
   appearance: none;
+  display: flex;
   flex: 1 1 auto;
+  gap: 8px;
+  align-items: center;
   min-width: 0;
   padding: 6px 8px;
   border: 0;
@@ -112,14 +170,42 @@ const emit = defineEmits<{
   font-size: 13px;
   line-height: 1.6;
   text-align: left;
-  text-overflow: ellipsis;
-  overflow: hidden;
-  white-space: nowrap;
   cursor: pointer;
 }
 
 .rail__item--active .rail__pick {
   color: var(--text);
+}
+
+.rail__initial {
+  display: none;
+  flex: 0 0 auto;
+  color: var(--accent-soft);
+  font-size: 13px;
+}
+
+.rail__text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail--collapsed .rail__initial {
+  display: block;
+}
+
+.rail--collapsed .rail__text {
+  display: none;
+}
+
+.rail--collapsed .rail__pick {
+  justify-content: center;
+  padding: 6px 0;
+}
+
+.rail--collapsed .rail__close {
+  display: none;
 }
 
 .rail__close {
