@@ -69,16 +69,47 @@ type Mode = "read" | "edit" | "missing" | "history";
 /** 与 Rust 端 `Address` 对应：地址栏那一行的解析结果（后端解析到底） */
 type Address =
   | { kind: "empty" }
-  | { kind: "note"; title: string }
-  | { kind: "revision"; title: string; rev: number; id: string; short_id: string }
-  | { kind: "missing"; title: string };
+  | { kind: "note"; title: string; address: string }
+  | {
+      kind: "revision";
+      title: string;
+      rev: number;
+      id: string;
+      short_id: string;
+      address: string;
+    }
+  | { kind: "edit"; title: string; address: string }
+  | { kind: "history"; title: string; address: string }
+  | { kind: "missing"; title: string; address: string };
 
 /** 自动保存：停手三秒后写一条草稿到链上 */
 const AUTOSAVE_DELAY_MS = 3000;
 
 const notes = ref<NoteSummary[]>([]);
 const note = ref<Note | null>(null);
-const mode = ref<Mode>("read");
+
+/**
+ * 当前地址的解析结果 —— **界面状态的权威副本**。
+ *
+ * 别的 ref（note / revisionView / missingTitle / draftExists …）都只是它派生出来的
+ * 缓存，而且**只有 navigate() 会写它们**。「界面现在在哪、是什么状态」只有一份真相：
+ * 后端对地址的解析结果。想改变它，唯一办法就是改地址。
+ */
+const route = ref<Address | null>(null);
+
+/** 模式由权威副本推导 —— 自己不持有状态，就不可能和地址说法不一致 */
+const mode = computed<Mode>(() => {
+  switch (route.value?.kind) {
+    case "edit":
+      return "edit";
+    case "history":
+      return "history";
+    case "missing":
+      return "missing";
+    default:
+      return "read";
+  }
+});
 /** 「不存在」视图里请求的标题（创建按钮用它） */
 const missingTitle = ref("");
 const loadError = ref("");
@@ -103,8 +134,6 @@ const draftExists = ref(false);
 const confirmDelete = ref(false);
 /** 删除时顺手回收悬置数据 */
 const deleteWithGc = ref(false);
-/** 地址栏写了「标题@引用」时带进历史页 */
-const historyRev = ref<number | null>(null);
 /** 地址栏解析出的错误（比如缩写写错了）；以前这类错误被悄悄吞掉了 */
 const addressError = ref("");
 let autosaveTimer: number | undefined;
@@ -113,20 +142,20 @@ async function refreshNotes() {
   notes.value = await invoke<NoteSummary[]>("list_notes");
 }
 
-/** 切到「不存在」视图。红链与地址栏输入新标题都会走到这里。 */
+/** 「不存在」视图的装载：模式由权威副本推导，这里只管标题 */
 function showMissing(title: string) {
   note.value = null;
   missingTitle.value = title;
-  mode.value = "missing";
 }
 
 /**
- * 打开一篇笔记。
+ * 装载一篇笔记的内容。
  *
- * `load_note` 把「目标不存在」当成正常结果返回（而不是错误），因为那需要界面配合：
- * 显示「还没有这篇笔记」和一个创建按钮。
+ * `load_note` 把「目标不存在」当成正常结果返回（而不是错误），因为那需要界面配合。
+ * 但走到这里时地址解析已经确认它存在，所以正常不会缺内容；万一缺了就退回「不存在」
+ * 视图 —— 仍然不改模式，模式只认权威副本。
  */
-async function openNote(title: string) {
+async function loadNote(title: string) {
   try {
     const outcome = await invoke<LoadOutcome>("load_note", { title });
     if (!outcome.note) {
@@ -136,13 +165,12 @@ async function openNote(title: string) {
 
     note.value = outcome.note;
     missingTitle.value = "";
-    mode.value = "read";
     loadError.value = "";
     scrolled.value = false;
     scrollEl.value?.scrollTo({ top: 0 });
     void refreshDraftHint(outcome.note.title);
   } catch (error) {
-    console.debug("打开笔记失败:", title, error);
+    console.debug("装载笔记失败:", title, error);
     // 只有在还没有任何笔记可看时，才让错误占满正文
     if (!note.value) {
       loadError.value = String(error);
@@ -159,12 +187,12 @@ async function createNote(title: string) {
 
   busy.value = true;
   try {
-    const created = await invoke<Note>("create_note", { title: trimmed });
-    note.value = created;
+    await invoke<Note>("create_note", { title: trimmed });
     missingTitle.value = "";
     loadError.value = "";
     await refreshNotes();
-    await beginEditing();
+    // 建完进编辑器：同样通过改地址（`$edit`）
+    await navigate(`${trimmed}$edit`);
   } catch (error) {
     loadError.value = String(error);
   } finally {
@@ -180,7 +208,6 @@ async function beginEditing() {
 
   draftText.value = current.markdown;
   editorStatus.value = "";
-  mode.value = "edit";
   scrolled.value = false;
 
   // 上次没提交的草稿要恢复出来，否则自动保存就白做了
@@ -233,12 +260,12 @@ async function commitEditing(summary: string) {
       baseRev: current.rev,
     });
 
-    note.value = committed;
-    mode.value = "read";
     editorStatus.value = "";
     await refreshNotes();
     scrolled.value = false;
     scrollEl.value?.scrollTo({ top: 0 });
+    // 提交之后回到「阅读最新提交」这个地址 —— 状态变化同样只走地址
+    await navigate(committed.title);
   } catch (error) {
     // 提交冲突会走到这里：不动用户正在编辑的内容，只把原因写在状态行
     editorStatus.value = `提交失败：${String(error)}`;
@@ -266,18 +293,28 @@ async function discardDraft() {
   }
 }
 
-/** 退出编辑但**保留**草稿（与「放弃草稿」区分开） */
+/** 退出编辑但**保留**草稿（与「放弃草稿」区分开）：回到阅读地址 */
 function leaveEditor() {
-  mode.value = "read";
   editorStatus.value = "";
+  const title = note.value?.title;
+  if (title) {
+    void navigate(title);
+  }
 }
 
+/** 看版本历史：同样是改地址（`$history`） */
 function openHistory() {
-  mode.value = "history";
+  const title = note.value?.title;
+  if (title) {
+    void navigate(`${title}$history`);
+  }
 }
 
 function closeHistory() {
-  mode.value = "read";
+  const title = note.value?.title;
+  if (title) {
+    void navigate(title);
+  }
 }
 
 /**
@@ -329,7 +366,7 @@ onMounted(async () => {
     await refreshNotes();
     const first = notes.value[0];
     if (first) {
-      await openNote(first.title);
+      await navigate(first.title);
     } else {
       loadError.value = "仓库里还没有笔记";
     }
@@ -375,11 +412,11 @@ function scrollToBottom() {
   }
 }
 
-/** 历史页要求导航到某一版：拼成「标题@缩写」再交给统一的地址解析 */
+/** 历史页要求导航到某一版：拼成「标题@缩写」交给统一的地址解析 */
 function onOpenRevision(reference: string) {
-  const current = note.value;
-  if (current) {
-    void onSubmit(`${current.title}@${reference}`);
+  const title = note.value?.title;
+  if (title) {
+    void navigate(`${title}@${reference}`);
   }
 }
 
@@ -389,7 +426,7 @@ function onNoteSelected(title: string) {
   if (mode.value === "edit") {
     void saveDraft();
   }
-  void openNote(title);
+  void navigate(title);
 }
 
 /** 标签栏里的「新建笔记」：取一个没被占用的名字再建 */
@@ -421,58 +458,74 @@ async function refreshDraftHint(title: string) {
   }
 }
 
-/** 正在只读查看的历史版本；null 表示在看最新提交 */
-const revView = ref<{ rev: number; shortId: string; html: string } | null>(null);
+/** 只读查看的那一版内容；只有 navigate() 会写它 */
+const revisionView = ref<{ rev: number; shortId: string; html: string } | null>(null);
 
 /**
- * 地址栏显示什么。
+ * 章节是**唯一允许前端自己确定**的部分：正文里的定位属于界面自己的事，
+ * 改章节不必再问后端。其余成分一律以后端给的规范地址为准。
+ */
+const localSection = ref("");
+
+/**
+ * 地址栏显示的文本。
  *
- * 语法糖跳转之后要回显**规范全称**：看某一版时是「名称@缩写」，否则就是当前标题。
+ * 直接用解析结果里的 `address`（后端已按标准顺序排好），前端不自己拼字符串 ——
+ * 于是「语法糖跳转后回显全称」只有一处实现。唯一例外是章节：本地章节叠加上去。
  */
 const addressText = computed(() => {
-  const current = note.value;
-  if (revView.value && current) {
-    return `${current.title}@${revView.value.shortId}`;
+  const address = route.value;
+  if (!address || address.kind === "empty") {
+    return "";
   }
-  return current?.title ?? missingTitle.value;
+  if (!localSection.value) {
+    return address.address;
+  }
+
+  // `#` 与 `$` 都不允许出现在标题里，所以这里按它们切分是安全的
+  const withoutSection = address.address.split("#")[0]!;
+  const at = address.address.indexOf("$");
+  const state = at >= 0 ? address.address.slice(at) : "";
+  const base = withoutSection.includes("$")
+    ? withoutSection.slice(0, withoutSection.indexOf("$"))
+    : withoutSection;
+  return `${base}#${localSection.value}${state}`;
 });
 
-/** 打开某一版（只读）。引用可以是数字版本号，也可以是 commit ID 缩写。 */
-async function openRevision(title: string, reference: string) {
-  try {
-    const rev = await invoke<number>("resolve_revision", { title, reference });
-    const content = await invoke<RevisionContent>("note_revision", { title, rev });
-
-    // 顺带拿到这一版的缩写，用于地址栏回显
-    const history = await invoke<{ rev: number; short_id: string }[]>("note_history", {
-      title,
-    });
-    const entry = history.find((item) => item.rev === rev);
-
-    // 只读看历史版本时不动编辑器状态：退出查看即回到最新
-    addressError.value = "";
-    if (mode.value !== "edit") {
-      note.value = null;
-    }
-    await openNote(title);
-    revView.value = { rev, shortId: entry?.short_id ?? reference, html: content.html };
-  } catch (error) {
-    addressError.value = String(error);
+/** 回到最新提交 */
+function leaveRevision() {
+  const title = note.value?.title;
+  if (title) {
+    void navigate(title);
   }
 }
 
-/** 草稿预览：走同一条地址通道（草稿也是链上的一版） */
+/** 只读查看某一版：地址解析已经确认它存在，这里只取内容 */
+async function openRevision(title: string, reference: string) {
+  const rev = await invoke<number>("resolve_revision", { title, reference });
+  const content = await invoke<RevisionContent>("note_revision", { title, rev });
+
+  // 顺带拿到这一版的缩写（地址栏回显由后端给，这里只是兜底）
+  const history = await invoke<{ rev: number; short_id: string }[]>("note_history", {
+    title,
+  });
+  const entry = history.find((item) => item.rev === rev);
+
+  await loadNote(title);
+  revisionView.value = { rev, shortId: entry?.short_id ?? reference, html: content.html };
+}
+
+/** 草稿预览：草稿也是链上的一版，所以走同一条地址通道 */
 async function openDraftPreview() {
-  const current = note.value;
-  if (!current) {
+  const title = note.value?.title;
+  if (!title) {
     return;
   }
   try {
-    const draft = await invoke<Draft | null>("load_draft", { title: current.title });
-    if (!draft) {
-      return;
+    const draft = await invoke<Draft | null>("load_draft", { title });
+    if (draft) {
+      await navigate(`${title}@${draft.short_id}`);
     }
-    await openRevision(current.title, draft.short_id);
   } catch (error) {
     addressError.value = String(error);
   }
@@ -486,32 +539,61 @@ const parentTitle = computed(() => {
 });
 
 /**
- * 地址栏提交。
+ * 记录本地章节。
  *
- * **解析全在后端**（`parse_address`）：标题合法性、目标是否存在、`@` 后面那串缩写
- * 对应哪一版，这些知识都在后端；前端只按返回的 `kind` 分发 —— 加新语法时改后端、
- * 这里补一个分支即可，不必再实现一套解析。
+ * 只有章节允许前端自己确定（正文里定位到哪一节属于界面自己的事），其余成分一律以
+ * 后端对地址的解析为准 —— 所以这里只动 localSection，不重新解析地址。
+ */
+function setSection(id: string) {
+  localSection.value = id;
+}
+
+/**
+ * 地址栏提交 = 导航。语法全在后端，这里不做任何解析。
  */
 async function onSubmit(value: string) {
+  await navigate(value);
+}
+
+/**
+ * **唯一的导航入口**：改地址 →（后端）重新解析 → 全量重新加载。
+ *
+ * 不做局部状态拼接 —— 界面上「在哪」的所有变化（标签栏、内部链接、页头按钮、历史页
+ * 导航、草稿预览、创建、退出编辑…）都必须走这里。
+ *
+ * 解析失败时**不动地址栏**：用户写错了版本引用（`@` 没找到对应版本）时，应当看见自己
+ * 输入的内容，而不是被换成他并没有输入的规范地址。
+ */
+async function navigate(input: string) {
   addressError.value = "";
 
   let address: Address;
   try {
-    address = await invoke<Address>("parse_address", { input: value });
+    address = await invoke<Address>("parse_address", { input });
   } catch (error) {
-    // 写错了要让人看见，不能像以前那样静默
     addressError.value = String(error);
-    console.debug("地址栏解析失败:", error);
+    console.debug("地址解析失败:", error);
     return;
   }
 
+  // 权威副本先落地，其余派生状态都由它决定
+  route.value = address;
+  revisionView.value = null;
+  localSection.value = "";
+  confirmDelete.value = false;
+
   switch (address.kind) {
     case "note":
-      historyRev.value = null;
-      await openNote(address.title);
+      await loadNote(address.title);
+      return;
+    case "edit":
+      await loadNote(address.title);
+      await beginEditing();
+      return;
+    case "history":
+      await loadNote(address.title);
       return;
     case "revision":
-      // 后端已经解析到具体版本，直接只读查看它
       await openRevision(address.title, address.short_id);
       return;
     case "missing":
@@ -542,9 +624,11 @@ async function doDelete() {
 
     const first = notes.value[0];
     if (first) {
-      await openNote(first.title);
+      await navigate(first.title);
     } else {
-      mode.value = "read";
+      // 仓库空了：没有地址可去，收掉权威副本
+      route.value = null;
+      revisionView.value = null;
       loadError.value = "仓库里还没有笔记";
     }
   } catch (error) {
@@ -563,15 +647,15 @@ async function onRevert(rev: number) {
 
   busy.value = true;
   try {
-    note.value = await invoke<Note>("revert_note", {
+    await invoke<Note>("revert_note", {
       title: current.title,
       rev,
       summary: null,
     });
-    // 清掉「指定版本」，历史页重新挂载后回到最新一版
-    historyRev.value = null;
     draftExists.value = false;
     await refreshNotes();
+    // 回退产生了一个新提交：回到该笔记的阅读地址
+    await navigate(current.title);
   } catch (error) {
     console.debug("回退失败:", error);
   } finally {
@@ -580,22 +664,21 @@ async function onRevert(rev: number) {
 }
 
 /**
- * 内部链接。
- *
- * 存在与否是后端渲染时判定的（`data-missing`）：红链直接切到「不存在」视图，
- * 省一次往返；蓝链才真去读。
+ * 内部链接也走地址解析：是红链还是蓝链，由后端重新判定，前端不自己下结论。
  */
 function onWikiLink(payload: { title: string; missing: boolean }) {
-  if (payload.missing) {
-    showMissing(payload.title);
-    return;
-  }
-  void openNote(payload.title);
+  void payload.missing;
+  void navigate(payload.title);
 }
 
 function onAction(name: string) {
+  const title = note.value?.title;
+  if (!title) {
+    return;
+  }
+
   if (name === "edit") {
-    void beginEditing();
+    void navigate(`${title}$edit`);
     return;
   }
   if (name === "history") {
@@ -665,10 +748,9 @@ function onAction(name: string) {
 
           <HistoryView
             v-else-if="mode === 'history' && note"
-            :key="`${note.key}:${historyRev ?? 0}:${note.rev}`"
+            :key="`${note.key}:${note.rev}`"
             :title="note.title"
             :current-rev="note.rev"
-            :initial-rev="historyRev"
             @close="closeHistory"
             @revert="onRevert"
             @open-revision="onOpenRevision"
@@ -678,22 +760,22 @@ function onAction(name: string) {
             <p v-if="addressError" class="app__error">{{ addressError }}</p>
 
             <!-- 不是最新提交：明确提示，并给一个回最新的出口 -->
-            <p v-if="revView" class="app__rev">
+            <p v-if="revisionView" class="app__rev">
               正在查看历史版本
-              <code>{{ note.title }}@{{ revView.shortId }}</code>
-              （第 {{ revView.rev }} 版，不是最新提交）。
-              <button type="button" @click="revView = null">回到最新版本</button>
+              <code>{{ note.title }}@{{ revisionView.shortId }}</code>
+              （第 {{ revisionView.rev }} 版，不是最新提交）。
+              <button type="button" @click="leaveRevision">回到最新版本</button>
             </p>
 
             <!-- 未提交的草稿：两个选项 —— 预览（走地址跳转）或直接编辑 -->
-            <p v-if="!revView && draftExists" class="app__draft">
+            <p v-if="!revisionView && draftExists" class="app__draft">
               这篇笔记有未提交的草稿（当前显示的是最新提交）。
               <button type="button" @click="openDraftPreview">预览</button>
-              <button type="button" @click="beginEditing">编辑</button>
+              <button type="button" @click="onAction('edit')">编辑</button>
             </p>
 
             <PageHeader
-              v-if="!revView"
+              v-if="!revisionView"
               :title="note.title"
               :parent="parentTitle"
               :collapsed="scrolled"
@@ -712,12 +794,18 @@ function onAction(name: string) {
             </p>
 
             <NoteContent
-              v-if="!revView"
+              v-if="!revisionView"
               :html="note.html"
               @wikilink="onWikiLink"
+              @section="setSection"
             />
 
-            <NoteContent v-if="revView" :html="revView.html" @wikilink="onWikiLink" />
+            <NoteContent
+              v-if="revisionView"
+              :html="revisionView.html"
+              @wikilink="onWikiLink"
+              @section="setSection"
+            />
           </template>
 
           <p v-else-if="loadError" class="app__error">{{ loadError }}</p>

@@ -7,6 +7,8 @@ import hljs from "highlight.js/lib/common";
 const props = defineProps<{ html: string }>();
 
 const emit = defineEmits<{
+  /** 点了页内锚点：章节由前端自己确定（地址里其余成分都以后端解析为准） */
+  (e: "section", id: string): void;
   (e: "wikilink", payload: { title: string; missing: boolean }): void;
 }>();
 
@@ -137,6 +139,8 @@ function onClick(event: MouseEvent) {
     }
 
     document.getElementById(id)?.scrollIntoView({ block: "start" });
+    // 章节是唯一允许前端自己确定的部分：报给上层，让它叠进地址栏
+    emit("section", id);
     return;
   }
 
