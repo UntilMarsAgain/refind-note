@@ -162,6 +162,8 @@ const tabs = ref<
   { address: string; title: string; history: string[]; cursor: number }[]
 >([]);
 const activeTab = ref(0);
+/** 内部链接的右键菜单（坐标来自鼠标事件） */
+const linkMenu = ref<{ title: string; x: number; y: number } | null>(null);
 
 /** 标签页上显示什么名字 */
 function tabTitleOf(address: Address): string {
@@ -204,6 +206,40 @@ function openNewTab() {
   });
   activeTab.value = tabs.value.length - 1;
   void navigate("special:newtab");
+}
+
+/**
+ * 在新标签页打开某个地址（内部链接的 Ctrl/Cmd+点击）。
+ *
+ * 标题先占位成地址，navigate 之后由解析结果回填 —— 与其它标签页一致。
+ */
+function openTabWith(address: string) {
+  tabs.value.push({
+    address,
+    title: address,
+    history: [address],
+    cursor: 0,
+  });
+  activeTab.value = tabs.value.length - 1;
+  void navigate(address);
+}
+
+/** 右键菜单：在新标签页打开 */
+function openLinkMenuTarget() {
+  const target = linkMenu.value;
+  linkMenu.value = null;
+  if (target) {
+    openTabWith(target.title);
+  }
+}
+
+/** 右键菜单：复制链接目标（地址栏里能直接粘贴这个写法） */
+function copyLinkTarget() {
+  const target = linkMenu.value;
+  linkMenu.value = null;
+  if (target) {
+    void navigator.clipboard?.writeText(target.title);
+  }
 }
 
 /** 切到某个标签页：它带着自己的地址，重新解析一遍（全量重载） */
@@ -797,6 +833,7 @@ async function navigate(input: string, movement: "replace" | "push" | "history" 
   rollbackTarget.value = null;
   localSection.value = "";
   draftHintDismissed.value = false;
+  linkMenu.value = null;
   syncActiveTab(address);
 
   // 记进当前标签页的浏览历史：内部链接＝跳转（推一条，并丢掉原来的前进部分）；
@@ -1098,6 +1135,8 @@ function onAction(name: string) {
               v-if="!revisionView"
               :html="note.html"
               @wikilink="onWikiLink"
+              @wikilink-new="openTabWith"
+              @wikilink-menu="linkMenu = $event"
               @section="setSection"
             />
 
@@ -1105,6 +1144,8 @@ function onAction(name: string) {
               v-if="revisionView"
               :html="revisionView.html"
               @wikilink="onWikiLink"
+              @wikilink-new="openTabWith"
+              @wikilink-menu="linkMenu = $event"
               @section="setSection"
             />
           </template>
@@ -1121,6 +1162,15 @@ function onAction(name: string) {
     @scroll-top="scrollToTop"
     @scroll-bottom="scrollToBottom"
   />
+
+  <!-- 内部链接的右键菜单：点空白处即关掉 -->
+  <div v-if="linkMenu" class="linkmenu-backdrop" @click.self="linkMenu = null">
+    <div class="linkmenu" :style="{ left: `${linkMenu.x}px`, top: `${linkMenu.y}px` }">
+      <p class="linkmenu__target">{{ linkMenu.title }}</p>
+      <button type="button" @click="openLinkMenuTarget">在新标签页打开</button>
+      <button type="button" @click="copyLinkTarget">复制链接目标</button>
+    </div>
+  </div>
 
   <!-- 错误：整页覆盖（这一类必须被看到，点空白处关掉） -->
   <div v-if="errorNotice" class="error-cover" @click.self="dismissNotices">
@@ -1410,5 +1460,49 @@ function onAction(name: string) {
 .confirm__danger {
   border-color: var(--link-missing);
   color: var(--link-missing);
+}
+/* 内部链接的右键菜单 */
+.linkmenu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 58;
+}
+
+.linkmenu {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  min-width: 168px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 28%);
+}
+
+.linkmenu__target {
+  margin: 0 0 4px;
+  padding: 4px 8px;
+  color: var(--text-dim);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.linkmenu button {
+  appearance: none;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.linkmenu button:hover {
+  background: var(--hover);
 }
 </style>

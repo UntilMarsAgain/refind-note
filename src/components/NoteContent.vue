@@ -9,6 +9,10 @@ const props = defineProps<{ html: string }>();
 const emit = defineEmits<{
   /** 点了页内锚点：章节由前端自己确定（地址里其余成分都以后端解析为准） */
   (e: "section", id: string): void;
+  /** Ctrl/Cmd+点击内部链接：在新标签页打开 */
+  (e: "wikilink-new", title: string): void;
+  /** 右键内部链接：请求上层弹上下文菜单（带上坐标） */
+  (e: "wikilink-menu", payload: { title: string; x: number; y: number }): void;
   (e: "wikilink", payload: { title: string; missing: boolean }): void;
 }>();
 
@@ -105,6 +109,28 @@ function normalizeUrl(value: string): string {
   return /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed) ? trimmed : `https://${trimmed}`;
 }
 
+/**
+ * 右键内部链接：请求上层弹菜单。外链的右键交给系统（浏览器的
+ * 「在新窗口打开 / 复制链接」更完整），这里只管内部链接。
+ */
+function onContextMenu(event: MouseEvent) {
+  const target = event.target;
+  if (!(target instanceof Element)) {
+    return;
+  }
+  const wikiLink = target.closest("a.wikilink");
+  if (!wikiLink) {
+    return;
+  }
+
+  event.preventDefault();
+  const title =
+    wikiLink.getAttribute("data-title") ?? wikiLink.getAttribute("data-doc");
+  if (title) {
+    emit("wikilink-menu", { title, x: event.clientX, y: event.clientY });
+  }
+}
+
 function onClick(event: MouseEvent) {
   const target = event.target;
   if (!(target instanceof Element)) {
@@ -119,6 +145,11 @@ function onClick(event: MouseEvent) {
     const title =
       wikiLink.getAttribute("data-title") ?? wikiLink.getAttribute("data-doc");
     if (title) {
+      // Ctrl/Cmd + 点击＝在新标签页打开（与浏览器一致）
+      if (event.ctrlKey || event.metaKey) {
+        emit("wikilink-new", title);
+        return;
+      }
       emit("wikilink", {
         title,
         missing: wikiLink.getAttribute("data-missing") === "true",
@@ -160,5 +191,11 @@ function onClick(event: MouseEvent) {
 </script>
 
 <template>
-  <article ref="rootEl" class="note-body" v-html="html" @click="onClick" />
+  <article
+    ref="rootEl"
+    class="note-body"
+    v-html="html"
+    @click="onClick"
+    @contextmenu="onContextMenu"
+  />
 </template>
