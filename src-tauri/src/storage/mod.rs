@@ -982,6 +982,15 @@ impl Vault {
                 )));
             }
 
+            // `special:random` 不是"一页"，而是**一次跳转**：随机落到主命名空间的某一篇。
+            // 与 RANDOM_REDIRECT 共用 `random_title`，两条路的行为不会分家。
+            if page == "random" {
+                self.guard_hops(&format!("special:{page}"), hops)?;
+                // 没有"当前页"要排除，传空串即可（没有笔记会叫这个名字）
+                let target = self.random_title(None, "")?;
+                return self.parse_address_at(&target, hops + 1);
+            }
+
             return Ok(Address::Special {
                 address: compose_address(&format!("special:{page}"), None, section),
                 page,
@@ -1841,7 +1850,7 @@ fn strip_prefix_ci<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
 }
 
 /// 现有的特殊页面。不在这里面的 `special:` 地址直接报「不存在」。
-pub(crate) const SPECIAL_PAGES: [&str; 3] = ["newtab", "settings", "all"];
+pub(crate) const SPECIAL_PAGES: [&str; 5] = ["newtab", "settings", "all", "random", "gc"];
 
 /// 重定向最多跟几跳。超过就报错，而不是让 A→B→A 这类环无限递归。
 ///
@@ -3071,6 +3080,24 @@ mod tests {
             .commit("别的空间", "$$COMMAND$$\nRANDOM_REDIRECT: 7\n", None, 0)
             .unwrap();
         let error = empty_ns.vault.parse_address("别的空间").unwrap_err();
+        assert!(error.to_string().contains("随机不到"), "{error}");
+    }
+
+    /// `special:random` 等同于随机重定向：落到主命名空间的某一篇
+    #[test]
+    fn special_random_jumps_to_a_page() {
+        let temp = TempVault::new();
+        temp.vault.create("唯一页").unwrap();
+        temp.vault.commit("唯一页", "正文", None, 0).unwrap();
+
+        match temp.vault.parse_address("special:random").unwrap() {
+            Address::Note { title, .. } => assert_eq!(title, "唯一页"),
+            other => panic!("{other:?}"),
+        }
+
+        // 一篇都没有 → 明确报错，而不是给一页空白
+        let empty = TempVault::new();
+        let error = empty.vault.parse_address("special:random").unwrap_err();
         assert!(error.to_string().contains("随机不到"), "{error}");
     }
 
