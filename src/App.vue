@@ -685,8 +685,8 @@ async function onRevert(rev: number) {
     });
     draftExists.value = false;
     await refreshNotes();
-    // 回退产生了一个新提交：回到该笔记的阅读地址
-    await navigate(current.title);
+    // 回退产生了一个新提交：留在历史页（地址同样说明位置），并让列表刷新出来
+    await navigate(`${current.title}$history`);
   } catch (error) {
     console.debug("回退失败:", error);
   } finally {
