@@ -30,7 +30,7 @@ function submit() {
         v-model="typed"
         class="newtab__input"
         type="text"
-        placeholder="笔记名，例如 平陆运河"
+        placeholder="笔记名"
         @keydown.enter.prevent="submit"
       />
       <button class="newtab__go" type="button" @click="submit">打开</button>
