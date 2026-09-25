@@ -205,6 +205,13 @@
 }
 
 .note-body th {
+  /*
+   * 表头跟主题色走：文字与下边框用 --accent。
+   * 主题色可在设置页更改（运行时覆盖 --accent），所以必须用变量、不能写死颜色。
+   * 底色仍用中性的 --surface：--accent-soft 在深色主题下是浅色，当底色会读不清。
+   */
+  color: var(--accent);
+  border-bottom: 2px solid var(--accent);
   background: var(--surface);
   font-weight: 600;
 }
