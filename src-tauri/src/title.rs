@@ -1,8 +1,12 @@
 //! 标题与命名空间。
 //!
 //! 沿用 MediaWiki 的约定：`命名空间:标题`。命名空间**以英文为规范名**，允许挂其它
-//! 语言的别名；解析规则也与 MediaWiki 一致——**冒号前的部分不是已知命名空间时，
-//! 整个字符串（含冒号）就是主命名空间里的标题**。
+//! 语言的别名。
+//!
+//! 但有两处**刻意与 MediaWiki 不同**：
+//! - 冒号前缀不是已知命名空间时，MediaWiki 会把整串（含冒号）当作主命名空间的标题；
+//!   这里直接判非法——冒号在文件系统路径里是麻烦字符，而目录结构是按标题直查的。
+//! - 标题里不允许 `@`：地址栏用 `标题@版本` 表达版本。
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -11,8 +15,9 @@ use std::sync::Arc;
 /// MediaWiki 的标题长度上限
 pub const MAX_TITLE_BYTES: usize = 255;
 
-/// MediaWiki 的非法标题字符集
-const ILLEGAL_CHARS: &[char] = &['#', '<', '>', '[', ']', '|', '{', '}'];
+/// MediaWiki 的非法标题字符集，外加本项目自己的两条限制
+/// （`:` 是命名空间分隔符，永远不属于标题本身；`@` 被地址栏的 `标题@版本` 占用）
+const ILLEGAL_CHARS: &[char] = &['#', '<', '>', '[', ']', '|', '{', '}', ':', '@'];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Namespace {
@@ -118,8 +123,10 @@ impl NamespaceTable {
             Some((prefix, rest)) => match self.lookup(prefix) {
                 // 命名空间命中：冒号归命名空间
                 Some(item) if item.storable => (item.id, rest.trim().to_string()),
-                // 未命中（或命中虚拟空间）：整串都是主命名空间的标题
-                _ => (0, normalized.clone()),
+                // **与 MediaWiki 明确不同**：冒号前缀不是已知命名空间时不再退回主命名空间，
+                // 而是直接判非法。两条理由：冒号在文件系统路径里是麻烦字符；
+                // 地址栏还要用「标题@版本」表达版本，需要一个干净的标题字符集。
+                _ => return Err(TitleError::Illegal(':')),
             },
             None => (0, normalized.clone()),
         };
@@ -334,11 +341,21 @@ mod tests {
     }
 
     #[test]
-    fn unknown_prefix_stays_in_main_namespace() {
-        // 冒号前的部分不是已知命名空间 → 整串（含冒号）都是主命名空间的标题
-        let parsed = table().parse("随便什么:内容", true).unwrap();
-        assert_eq!(parsed.ns, 0);
-        assert_eq!(parsed.title, "随便什么:内容");
+    fn unknown_prefix_is_rejected_instead_of_falling_back() {
+        // 与 MediaWiki 明确不同：冒号后不是已知命名空间时直接判非法，
+        // 而不是把整串当主命名空间的标题
+        assert_eq!(
+            table().parse("随便什么:内容", true),
+            Err(TitleError::Illegal(':'))
+        );
+        // 命中命名空间之后，标题里也不允许再出现冒号
+        assert_eq!(table().parse("Help:A:B", true), Err(TitleError::Illegal(':')));
+    }
+
+    #[test]
+    fn at_sign_is_rejected() {
+        // 地址栏用「标题@版本」表达版本，所以标题里不能有 @
+        assert_eq!(table().parse("笔记@2", true), Err(TitleError::Illegal('@')));
     }
 
     #[test]
