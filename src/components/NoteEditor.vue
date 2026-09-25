@@ -480,12 +480,17 @@ function submit() {
   background: var(--surface);
 }
 
-/* CodeMirror 撑满左栏 */
-.editor__source .cm-editor {
+/*
+ * CodeMirror 撑满左栏。
+ *
+ * `.cm-*` 是它自己用 JS 插进来的元素，**不带本组件的 scoped 属性**，所以普通后代选择器
+ * 选不到（之前那两条其实一直没生效）。要穿透作用域，必须用 :deep()。
+ */
+.editor__source :deep(.cm-editor) {
   height: 100%;
 }
 
-.editor__source .cm-scroller {
+.editor__source :deep(.cm-scroller) {
   font-family: var(--mono-font);
   font-size: 13px;
   line-height: 1.7;
@@ -501,13 +506,26 @@ function submit() {
   display: none;
 }
 
-/* 左源码 / 右预览：两栏并排。重申一次，避免被其它规则覆盖成上下排列 */
+/*
+ * 左源码 / 右预览：**先把宽度对半分给两栏，再让各栏在自己的栏内排版**。
+ *
+ * 这里用 flex 而不是 grid，是为了把"先分栏"这件事写死：
+ * `flex: 1 1 0` 让两栏各占一半（基准是 0，不是内容宽度）；
+ * `min-width: 0` 才允许它们被压到半屏以下 —— 少了它，宽表格或长代码行的**固有宽度**
+ * 会把栏顶开，布局就退化成上下排列（这正是"自己去占据空间"）。
+ */
 .editor__panes {
-  display: grid;
+  display: flex;
+  flex-direction: row;
   width: 100%;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   align-items: stretch;
   gap: 12px;
+}
+
+.editor__source,
+.editor__preview {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 /* [[内部链接]] 的高亮（视图层装饰，不改文档） */
