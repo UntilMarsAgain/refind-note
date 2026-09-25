@@ -87,7 +87,10 @@ const MIN_SHORT_ID: usize = 5;
 pub struct Vault {
     root: PathBuf,
     table: Arc<NamespaceTable>,
+    /// 仓库级设置（`vault.json`）：影响数据语义
     config: VaultConfig,
+    /// 界面偏好（`preferences.json`）：不影响数据语义，同步时整体排除
+    preferences: crate::storage::config::Appearance,
     blobs: BlobStore,
 }
 
@@ -118,6 +121,18 @@ impl Vault {
             }
         };
 
+        // 界面偏好单独一个文件；不存在就写一份默认的
+        let preferences_path = root.join("preferences.json");
+        let preferences: crate::storage::config::Appearance =
+            match fs::read_to_string(&preferences_path) {
+                Ok(text) => serde_json::from_str(&text)?,
+                Err(_) => {
+                    let preferences = crate::storage::config::Appearance::default();
+                    write_atomic(&preferences_path, &serde_json::to_vec_pretty(&preferences)?)?;
+                    preferences
+                }
+            };
+
         let namespaces_path = root.join("namespaces.json");
         let table: NamespaceTable = match fs::read_to_string(&namespaces_path) {
             Ok(text) => serde_json::from_str(&text)?,
@@ -133,7 +148,8 @@ impl Vault {
             root,
             table: Arc::new(table),
             config,
-        })
+                    preferences,
+})
     }
 
     /// 默认仓库：`~/.refind-note`
@@ -428,15 +444,16 @@ impl Vault {
 
     /// 仓库级设置（影响数据语义的那些）
     pub fn settings_view(&self) -> VaultSettings {
+        let appearance = self.preferences();
         VaultSettings {
             root: self.root.display().to_string(),
             format: self.config.format,
             capital_links: self.config.capital_links,
             max_title_bytes: self.config.max_title_bytes,
             delta_chain_limit: self.config.delta_chain_limit,
-            theme: self.config.appearance.theme.clone(),
-            accent: self.config.appearance.accent.clone(),
-            reading_width: self.config.appearance.reading_width,
+            theme: appearance.theme.clone(),
+            accent: appearance.accent.clone(),
+            reading_width: appearance.reading_width,
         }
     }
 
@@ -461,21 +478,36 @@ impl Vault {
             self.config.delta_chain_limit = value.max(1);
         }
         if let Some(value) = theme {
-            self.config.appearance.theme = value;
+            self.preferences.theme = value;
         }
         if let Some(value) = accent {
-            self.config.appearance.accent = value;
+            self.preferences.accent = value;
         }
         if let Some(value) = reading_width {
-            self.config.appearance.reading_width = value;
+            self.preferences.reading_width = value;
         }
-        self.save_config()
+
+        // 两条落盘路径，各写各的文件：数据语义进 vault.json、界面偏好进 preferences.json
+        self.save_config()?;
+        self.save_preferences()
     }
 
-    /// 设置一律落在 `~/.refind-note/vault.json`（仓库根下）——只有这一处，没有第二份
+    /// 界面偏好（主题、主题色、限宽）
+    pub fn preferences(&self) -> &crate::storage::config::Appearance {
+        &self.preferences
+    }
+
+    /// 数据语义设置：`~/.refind-note/vault.json`
     fn save_config(&self) -> Result<(), VaultError> {
         let path = self.root.join("vault.json");
         write_atomic(&path, &serde_json::to_vec_pretty(&self.config)?)?;
+        Ok(())
+    }
+
+    /// 界面偏好：`~/.refind-note/preferences.json`（同步/备份时整体排除）
+    fn save_preferences(&self) -> Result<(), VaultError> {
+        let path = self.root.join("preferences.json");
+        write_atomic(&path, &serde_json::to_vec_pretty(&self.preferences)?)?;
         Ok(())
     }
 
@@ -2511,6 +2543,29 @@ mod tests {
 
         // 空页面名仍然是另一种错误
         assert!(temp.vault.parse_address("special:").is_err());
+    }
+
+    /// 界面偏好住在 preferences.json，且**不会**把仓库设置文件写脏
+    #[test]
+    fn appearance_lives_in_its_own_file() {
+        let mut temp = TempVault::new();
+        let before = fs::read_to_string(temp.root.join("vault.json")).unwrap();
+
+        temp.vault
+            .update_settings(None, None, None, Some("light".to_string()), Some("#123456".to_string()), Some(900))
+            .unwrap();
+
+        let preferences = fs::read_to_string(temp.root.join("preferences.json")).unwrap();
+        assert!(preferences.contains("\"light\""), "{preferences}");
+        assert!(preferences.contains("#123456"), "{preferences}");
+        assert!(preferences.contains("900"), "{preferences}");
+
+        let after = fs::read_to_string(temp.root.join("vault.json")).unwrap();
+        assert_eq!(before, after, "改外观不该动 vault.json");
+        assert!(!after.contains("appearance"), "vault.json 里不该再有 appearance：{after}");
+
+        assert_eq!(temp.vault.preferences().theme, "light");
+        assert_eq!(temp.vault.settings_view().accent, "#123456");
     }
 
     #[test]
