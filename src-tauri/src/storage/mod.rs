@@ -756,7 +756,29 @@ impl Vault {
             return Ok(Address::Empty);
         }
 
-        // 切分：NAME 之外的成分各自由保留字符开头，所以顺序天然自由
+        // 虚拟命名空间 `special:`：不对应笔记文件，交给前端渲染特殊页面。
+        // 优先于笔记形态判断；标题里不允许冒号，所以不可能有笔记叫这个名字。
+        if raw.len() >= 8 && raw[..8].eq_ignore_ascii_case("special:") {
+            let rest = &raw[8..];
+            let page = match rest.find('#') {
+                Some(index) => &rest[..index],
+                None => rest,
+            };
+            let page = page.trim().to_ascii_lowercase();
+
+            if page.is_empty() {
+                return Err(VaultError::BadAddress(
+                    "special: 后面要写页面名，例如 special:newtab".to_string(),
+                ));
+            }
+
+            return Ok(Address::Special {
+                address: format!("special:{page}"),
+                page,
+            });
+        }
+
+        // 切分：NAME 之外的成分各由保留字符开头，所以顺序天然自由
         let name_end = raw
             .char_indices()
             .find(|(_, ch)| matches!(ch, '@' | '#'))
@@ -2085,6 +2107,41 @@ mod tests {
             Address::Missing { title, .. } => assert_eq!(title, "流程"),
             other => panic!("{other:?}"),
         }
+    }
+
+    /// 虚拟命名空间 special:：不对应笔记，交给前端渲染；大小写不敏感
+    #[test]
+    fn special_namespace_does_not_map_to_a_note() {
+        let temp = TempVault::new();
+
+        match temp.vault.parse_address("special:newtab").unwrap() {
+            Address::Special { page, address } => {
+                assert_eq!(page, "newtab");
+                assert_eq!(address, "special:newtab");
+            }
+            other => panic!("{other:?}"),
+        }
+
+        // 大小写不敏感，回显一律小写
+        match temp.vault.parse_address("Special:NewTab").unwrap() {
+            Address::Special { page, address } => {
+                assert_eq!(page, "newtab");
+                assert_eq!(address, "special:newtab");
+            }
+            other => panic!("{other:?}"),
+        }
+
+        // 章节跟着特殊页面走（前端自己处理），不进 page 名
+        match temp.vault.parse_address("special:newtab#小节").unwrap() {
+            Address::Special { page, .. } => assert_eq!(page, "newtab"),
+            other => panic!("{other:?}"),
+        }
+
+        // 空页面名要报错
+        assert!(temp.vault.parse_address("special:").is_err());
+
+        // 笔记不可能叫这个名字：标题里禁止冒号
+        assert!(temp.vault.validate_title("special:newtab").is_err());
     }
 
     #[test]

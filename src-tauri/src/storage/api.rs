@@ -144,6 +144,9 @@ pub enum Address {
         short_id: String,
         address: String,
     },
+    /// 特殊页面：**虚拟命名空间** `special:`。它不对应任何笔记文件，
+    /// 由前端按 `page` 渲染（例如 `special:newtab`）。
+    Special { page: String, address: String },
     /// 目标还不存在，交给「不存在 + 创建」那条路
     Missing { title: String, address: String },
 }
