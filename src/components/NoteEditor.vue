@@ -463,6 +463,26 @@ function submit() {
               }
         "
       >
+        <!--
+          阅读页那一行大标题。预览的意义就是"看出这一页长什么样"，缺了标题就不像。
+          用 props 里的当前标题，而不是改名输入框里那份草稿：改名是另一次动作，
+          还没生效就不该在预览里提前显示。
+          尺寸与阅读页的 .page-title 保持一致（2.15em / 600 / 1.5）。
+        -->
+        <h1
+          class="preview-title"
+          :style="{
+            margin: '0',
+            padding: '18px 0 12px',
+            fontSize: '2.15em',
+            fontWeight: 600,
+            lineHeight: 1.5,
+            overflowWrap: 'anywhere',
+          }"
+        >
+          {{ props.title }}
+        </h1>
+
         <p v-if="previewProblem" class="editor__preview-error">
           预览渲染失败：{{ previewProblem }}
         </p>
