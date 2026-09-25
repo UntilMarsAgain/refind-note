@@ -497,11 +497,7 @@ async function onSubmit(value: string) {
 
   let address: Address;
   try {
-    // 参数名是 camelCase（Tauri v2 默认转换）
-    address = await invoke<Address>("parse_address", {
-      input: value,
-      current: note.value?.title ?? null,
-    });
+    address = await invoke<Address>("parse_address", { input: value });
   } catch (error) {
     // 写错了要让人看见，不能像以前那样静默
     addressError.value = String(error);

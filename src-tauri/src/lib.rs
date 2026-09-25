@@ -196,9 +196,9 @@ fn note_revision(title: String, rev: u64) -> Result<RevisionContent, String> {
 
 /// 解析地址栏那一行。前端只按返回的 `kind` 分发，不自己解析。
 #[tauri::command]
-fn parse_address(input: String, current: Option<String>) -> Result<Address, String> {
+fn parse_address(input: String) -> Result<Address, String> {
     open()?
-        .parse_address(&input, current.as_deref())
+        .parse_address(&input)
         .map_err(|error| error.to_string())
 }
 

@@ -195,7 +195,25 @@ impl Vault {
         self.read_events_at(&self.log_path(id))
     }
 
+    /// 写入前的碰撞防线。
+    ///
+    /// 版本 ID 由事件自身派生，理论上可能撞车（哈希被攻破、派生规则出 bug、
+    /// 时间戳精度被改写…）。所以**宁可拒绝写入**，也不要让仓库里出现两个
+    /// 「同一个 ID」的版本 —— 那样 ID 就不再是版本的身份了。
+    fn ensure_unique_id(&self, event: &Event) -> Result<(), VaultError> {
+        let id = revision_id(event);
+        for (_, path) in self.log_files()? {
+            for existing in self.read_events_at(&path)? {
+                if revision_id(&existing) == id {
+                    return Err(VaultError::IdCollision(short_revision_id(&id)));
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn append(&self, id: &str, event: &Event) -> Result<(), VaultError> {
+        self.ensure_unique_id(event)?;
         let line = serde_json::to_string(event)?;
         append_line(&self.log_path(id), &line)?;
         Ok(())
@@ -336,6 +354,18 @@ impl Vault {
     // 2. 增量可以递归依赖增量，但链太长读取会慢 —— 超过上限就退回整份快照；
     // 3. 提交的基准**只能是提交**（不能依赖草稿），草稿一律整份存；
     // 4. 二进制（非文本）一律整份存。
+
+    /// 由日志文件路径反推它属于哪篇笔记（全仓库按 ID 查找时要用）
+    fn title_of_log_path(path: &Path) -> Option<ParsedTitle> {
+        let ns = path
+            .parent()?
+            .file_name()?
+            .to_str()?
+            .parse::<i32>()
+            .ok()?;
+        let title = crate::title::decode_from_path(path.file_stem()?.to_str()?)?;
+        Some(ParsedTitle { ns, title })
+    }
 
     /// 某个版本所在的增量链有多长（从最近一次整份快照算起）
     fn chain_length(&self, events: &[Event], rev: u64) -> usize {
@@ -720,11 +750,7 @@ impl Vault {
     ///
     /// 目前唯一的语法糖是 `@引用`（引用可以是数字版本号，也可以是 commit ID 缩写）。
     /// 标题里不允许 `@`，所以按**最后一个** `@` 切是安全的。
-    pub fn parse_address(
-        &self,
-        input: &str,
-        current: Option<&str>,
-    ) -> Result<Address, VaultError> {
+    pub fn parse_address(&self, input: &str) -> Result<Address, VaultError> {
         let raw = input.trim();
         if raw.is_empty() {
             return Ok(Address::Empty);
@@ -746,18 +772,52 @@ impl Vault {
             });
         };
 
-        // 只写 `@引用` 时按当前打开的笔记理解
-        let source = if !title_part.is_empty() {
-            title_part
-        } else if let Some(current) = current {
-            current
-        } else {
-            return Err(VaultError::BadAddress(
-                "只写 @ 引用时需要先打开一篇笔记".to_string(),
-            ));
-        };
+        // 只写 `@引用`：commit ID 全局不重复，所以**扫全仓库**，是谁就跳到谁。
+        // 回显里带回那篇笔记的名称，界面直接显示「名称@缩写」。
+        if title_part.is_empty() {
+            if reference.len() < MIN_SHORT_ID {
+                return Err(VaultError::BadAddress(format!(
+                    "只写 @ 引用时要用至少 {MIN_SHORT_ID} 位的 commit ID 缩写"
+                )));
+            }
 
-        let parsed = self.table.parse(source, self.config.capital_links)?;
+            let needle = reference.to_ascii_lowercase();
+            let mut matches: Vec<Address> = Vec::new();
+            for (_, path) in self.log_files()? {
+                let events = self.read_events_at(&path)?;
+                for event in &events {
+                    let Some(rev) = revision_of(event) else {
+                        continue;
+                    };
+                    let id = revision_id(event);
+                    if !id.starts_with(&needle) {
+                        continue;
+                    }
+                    let Some(parsed) = Self::title_of_log_path(&path) else {
+                        continue;
+                    };
+                    matches.push(Address::Revision {
+                        title: parsed.display(&self.table),
+                        rev,
+                        short_id: short_revision_id(&id),
+                        id,
+                    });
+                }
+            }
+
+            return match matches.len() {
+                0 => Err(VaultError::BadAddress(format!(
+                    "没有哪个版本对得上「{reference}」这个缩写"
+                ))),
+                1 => Ok(matches.remove(0)),
+                count => Err(VaultError::AmbiguousRevision {
+                    prefix: reference.to_string(),
+                    matches: count,
+                }),
+            };
+        }
+
+        let parsed = self.table.parse(title_part, self.config.capital_links)?;
         let display = parsed.display(&self.table);
         let id = Self::id_of(&parsed);
         if !self.log_path(&id).is_file() {
@@ -801,28 +861,32 @@ impl Vault {
             });
         }
 
-        // 纯数字：直接当版本号（存在性交给调用方去查内容）
-        if reference.chars().all(|ch| ch.is_ascii_digit()) {
-            return reference.parse::<u64>().map_err(|_| VaultError::RevisionNotFound {
-                title: parsed.title.clone(),
-                rev: 0,
-            });
-        }
+        let digits = reference.chars().all(|ch| ch.is_ascii_digit());
 
-        // 缩写太短既容易撞车也难认，要求至少 5 位；纯数字版本号不受此限（上面已返回）
+        // 不足 5 位：只能当版本号。缩写按约定至少 5 位，太短给明确提示。
         if reference.len() < MIN_SHORT_ID {
+            if digits {
+                return reference
+                    .parse::<u64>()
+                    .map_err(|_| VaultError::RevisionNotFound {
+                        title: parsed.title.clone(),
+                        rev: 0,
+                    });
+            }
             return Err(VaultError::BadAddress(format!(
                 "commit ID 缩写至少要写 {MIN_SHORT_ID} 位"
             )));
         }
 
+        // 5 位以上：**先按 ID 前缀找**，找不到再退回数字版本号。
+        //
+        // 顺序很要紧：8 位十六进制缩写里约 2% 会恰好全是数字，若先按「纯数字」
+        // 判断，就会把这种缩写误当成版本号（曾经偶发把 rev 解析成八位数）。
         let needle = reference.to_ascii_lowercase();
         let mut matches: Vec<u64> = Vec::new();
         for event in &events {
-            let rev = match event {
-                Event::Rev { rev, .. } | Event::Auto { rev, .. } => *rev,
-                // 删除标记没有内容，不作为可跳转的版本
-                _ => continue,
+            let Some(rev) = revision_of(event) else {
+                continue;
             };
             if revision_id(event).starts_with(&needle) {
                 matches.push(rev);
@@ -830,11 +894,17 @@ impl Vault {
         }
 
         match matches.len() {
+            1 => Ok(matches[0]),
+            0 if digits => reference
+                .parse::<u64>()
+                .map_err(|_| VaultError::RevisionNotFound {
+                    title: parsed.title.clone(),
+                    rev: 0,
+                }),
             0 => Err(VaultError::RevisionNotFound {
                 title: parsed.title.clone(),
                 rev: 0,
             }),
-            1 => Ok(matches[0]),
             count => Err(VaultError::AmbiguousRevision {
                 prefix: reference.to_string(),
                 matches: count,
@@ -1746,7 +1816,7 @@ mod tests {
             .unwrap();
 
         // 只有标题 → 打开笔记
-        match temp.vault.parse_address("地址", None).unwrap() {
+        match temp.vault.parse_address("地址").unwrap() {
             Address::Note { title } => assert_eq!(title, "地址"),
             other => panic!("{other:?}"),
         }
@@ -1754,7 +1824,7 @@ mod tests {
         // 标题@缩写 → 解析成具体版本，并给出**规范全称**用于回显
         match temp
             .vault
-            .parse_address(&format!("地址@{}", second.short_id), None)
+            .parse_address(&format!("地址@{}", second.short_id))
             .unwrap()
         {
             Address::Revision {
@@ -1771,39 +1841,44 @@ mod tests {
         }
 
         // 标题@数字
-        match temp.vault.parse_address("地址@1", None).unwrap() {
+        match temp.vault.parse_address("地址@1").unwrap() {
             Address::Revision { rev, .. } => assert_eq!(rev, 1),
             other => panic!("{other:?}"),
         }
 
-        // 只写 @缩写 → 按当前打开的笔记理解
+        // 只写 @缩写 → ID 全局唯一，扫全仓库找到是谁，并**回显名称**
         match temp
             .vault
-            .parse_address(&format!("@{}", second.short_id), Some("地址"))
+            .parse_address(&format!("@{}", second.short_id))
             .unwrap()
         {
-            Address::Revision { rev, .. } => assert_eq!(rev, 2),
+            Address::Revision { title, rev, .. } => {
+                assert_eq!(title, "地址", "回显要带名称");
+                assert_eq!(rev, 2);
+            }
             other => panic!("{other:?}"),
         }
+
+        // 只写数字没有意义：版本号是每篇笔记各自的序号，全局无从查起
         assert!(
-            temp.vault.parse_address("@1", None).is_err(),
-            "没有当前笔记时只写 @ 引用应当报错"
+            temp.vault.parse_address("@1").is_err(),
+            "只写数字版本号应当报错"
         );
 
         // 不存在的笔记 → 交给「不存在 + 创建」
-        match temp.vault.parse_address("没建过", None).unwrap() {
+        match temp.vault.parse_address("没建过").unwrap() {
             Address::Missing { title } => assert_eq!(title, "没建过"),
             other => panic!("{other:?}"),
         }
 
         // 空输入
         assert!(matches!(
-            temp.vault.parse_address("   ", None).unwrap(),
+            temp.vault.parse_address("   ").unwrap(),
             Address::Empty
         ));
 
         // 对不上的缩写必须是错误，不许猜
-        assert!(temp.vault.parse_address("地址@zzzz", None).is_err());
+        assert!(temp.vault.parse_address("地址@zzzz").is_err());
     }
 
     /// 缩写下限：太短要明确报错（纯数字版本号不受限）
@@ -1843,6 +1918,73 @@ mod tests {
         let rev = temp.vault.resolve_revision("草稿号", &draft.short_id).unwrap();
         assert_eq!(rev, 2);
         assert_eq!(temp.vault.revision("草稿号", rev).unwrap().markdown, "草稿内容");
+    }
+
+    /// 回归：8 位十六进制缩写里约 2% 会**恰好全是数字**，
+    /// 以前先按「纯数字」判断，会把这种缩写误当版本号（偶发把 rev 解析成八位数）。
+    #[test]
+    fn all_digit_short_ids_still_resolve() {
+        let temp = TempVault::new();
+        temp.vault.create("回归").unwrap();
+
+        let mut text = String::from("起始\n");
+        temp.vault.commit("回归", &text, None, 0).unwrap();
+        for round in 0..200 {
+            text.push_str(&format!("第 {round} 行\n"));
+            temp.vault
+                .commit("回归", &text, None, (round + 1) as u64)
+                .unwrap();
+        }
+
+        let history = temp.vault.history("回归").unwrap();
+        assert_eq!(history.len(), 202, "1 条创建 + 201 次提交");
+
+        // 每一版的缩写都必须解析回**它自己**（全数字的那些也一样）
+        let mut all_digit = 0;
+        for item in history.iter().filter(|item| item.rev > 0) {
+            if item.short_id.chars().all(|ch| ch.is_ascii_digit()) {
+                all_digit += 1;
+            }
+            assert_eq!(
+                temp.vault.resolve_revision("回归", &item.short_id).unwrap(),
+                item.rev,
+                "缩写 {} 应当解析回版本 {}",
+                item.short_id,
+                item.rev
+            );
+        }
+        println!("200 个缩写里有 {all_digit} 个恰好全是数字");
+    }
+
+    /// 碰撞防线：宁可拒绝写入，也不要留下两个同一个 ID 的版本
+    #[test]
+    fn id_collisions_are_rejected() {
+        let temp = TempVault::new();
+        temp.vault.create("撞车").unwrap();
+        temp.vault.commit("撞车", "正文", None, 0).unwrap();
+
+        let (parsed, _) = temp.vault.locate("撞车").unwrap();
+        let id = Vault::id_of(&parsed);
+        let events = temp.vault.events_for("撞车").unwrap();
+        let duplicate = events
+            .iter()
+            .find(|event| matches!(event, Event::Rev { .. }))
+            .expect("有提交事件")
+            .clone();
+
+        // 把同一个事件再写一次：派生出的 ID 必然相同
+        let error = temp.vault.append(&id, &duplicate).unwrap_err();
+        assert!(
+            matches!(error, VaultError::IdCollision(_)),
+            "重复 ID 应当被拒绝：{error}"
+        );
+
+        // 拒绝之后日志没有被改动
+        assert_eq!(
+            temp.vault.read_events(&id).unwrap().len(),
+            events.len(),
+            "拒绝写入时不该落下任何东西"
+        );
     }
 
     #[test]
