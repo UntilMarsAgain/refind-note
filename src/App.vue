@@ -1002,6 +1002,11 @@ async function navigate(
   localSection.value = "";
   draftHintDismissed.value = false;
   linkMenu.value = null;
+
+  // 草稿提示是**上一条笔记**的状态，每次地址解析后先归零：
+  // 否则切到 special:newtab 之类的地方，上一条笔记的"有未提交草稿"会跟着飘过来。
+  // 需要它的分支（阅读）随后会用 refreshDraftHint 重新判定。
+  draftExists.value = false;
   syncActiveTab(address);
 
   // 记进当前标签页的浏览历史：内部链接＝跳转（推一条，并丢掉原来的前进部分）；
