@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowDown, ArrowLeftRight, ArrowUp, Scan } from "@lucide/vue";
+import { ArrowDown, ArrowLeftRight, ArrowUp, Pencil, Scan } from "@lucide/vue";
 
 /**
  * 悬浮在右下角的一组页面工具。
@@ -14,9 +14,17 @@ import { ArrowDown, ArrowLeftRight, ArrowUp, Scan } from "@lucide/vue";
 defineProps<{
   /** 正文是否限制为阅读栏宽度 */
   limited: boolean;
+  /**
+   * 当前页是否有一篇可编辑的笔记。
+   *
+   * 由上层判定：特殊页面、还不存在的页面、以及正在编辑时都为 false ——
+   * 组件不该自己去看地址。
+   */
+  canEdit: boolean;
 }>();
 
 const emit = defineEmits<{
+  (e: "edit"): void;
   (e: "toggle-width"): void;
   (e: "scroll-top"): void;
   (e: "scroll-bottom"): void;
@@ -26,6 +34,21 @@ const emit = defineEmits<{
 <template>
   <!-- 不用原生 title：说明由 data-tip 自绘，两套同时出现会重影 -->
   <div class="floating-tools">
+    <!--
+      「编辑」放在最下面（离角落最近）：它是这组里最常用的动作，
+      而这一组是贴着右下角往上堆的。非特殊页面都会出现，由 canEdit 决定。
+    -->
+    <button
+      v-if="canEdit"
+      class="tool tip--left"
+      type="button"
+      data-tip="编辑这篇"
+      aria-label="编辑这篇"
+      @click="emit('edit')"
+    >
+      <Pencil :size="16" :stroke-width="1.9" />
+    </button>
+
     <button
       class="tool tip--left"
       type="button"

@@ -5,7 +5,7 @@
  * 「有哪些特殊页面」**以后端为准**（`special_pages` 命令），前端只决定怎么显示它们；
  * 否则每加一个特殊页面都要在前端再登记一次，那就成了两个真相。
  */
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 
 interface NoteSummary {
@@ -14,6 +14,14 @@ interface NoteSummary {
   /** 指令页面的短名；普通页面是 null */
   command: string | null;
 }
+
+/**
+ * 每页最多显示多少篇。
+ *
+ * 所有页面共用"一篇一行"的列表，所以这一个数就是分页的全部依据；
+ * 页号是**地址的一部分**（`special:all#3`），因此刷新、前进后退、分享地址都能落到同一页。
+ */
+const PAGE_SIZE = 50;
 
 /** 指令页面的标记文案；没登记的退回短名本身 */
 const COMMAND_LABELS: Record<string, string> = {
@@ -25,6 +33,7 @@ const COMMAND_LABELS: Record<string, string> = {
 const emit = defineEmits<{
   (e: "open", address: string): void;
   (e: "open-new", address: string): void;
+  (e: "page", page: number): void;
 }>();
 
 /** 特殊页面的显示名；没登记的退回 `special:<页面名>` */
@@ -38,6 +47,16 @@ function labelOf(page: string): string {
   return PAGE_LABELS[page] ?? `special:${page}`;
 }
 
+const props = defineProps<{
+  /**
+   * 地址里的 `#…`。
+   *
+   * 对 `special:all` 来说它只有一个含义：**页号**（`special:all#3` 是第 3 页）。
+   * 别的特殊页面（如设置页）把这个位置用作条目锚点，那是各自的约定。
+   */
+  pageSection?: string;
+}>();
+
 const notes = ref<NoteSummary[]>([]);
 const pages = ref<string[]>([]);
 const error = ref("");
@@ -50,6 +69,40 @@ function go(address: string, event: MouseEvent) {
     return;
   }
   emit("open", address);
+}
+
+/** 当前页号：地址里没写、或写了不是正整数的东西，都当第 1 页 */
+const page = computed(() => {
+  const parsed = Number.parseInt(props.pageSection ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+});
+
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil(notes.value.length / PAGE_SIZE)),
+);
+
+/**
+ * 页号越界时**只夹住显示**，不去改地址。
+ *
+ * 地址是权威，改地址属于导航（由上层决定）；组件擅自替换地址，
+ * 就会出现"看着在第 3 页、地址却是 #9"这种两个真相。
+ */
+const safePage = computed(() => Math.min(page.value, totalPages.value));
+
+const pageNotes = computed(() =>
+  notes.value.slice((safePage.value - 1) * PAGE_SIZE, safePage.value * PAGE_SIZE),
+);
+
+/** 跳页输入框的草稿：回车或点「跳转」才生效 */
+const pageDraft = ref("");
+
+function jumpToPage() {
+  const parsed = Number.parseInt(pageDraft.value, 10);
+  if (!Number.isFinite(parsed)) {
+    return;
+  }
+  pageDraft.value = "";
+  emit("page", Math.min(Math.max(1, parsed), totalPages.value));
 }
 
 onMounted(async () => {
@@ -79,7 +132,7 @@ onMounted(async () => {
         还没有笔记。可在 <code>special:newtab</code> 新建。
       </p>
       <ul v-else class="all__list">
-        <li v-for="note in notes" :key="note.key">
+        <li v-for="note in pageNotes" :key="note.key">
           <button
             class="all__link"
             type="button"
@@ -95,6 +148,46 @@ onMounted(async () => {
           </button>
         </li>
       </ul>
+
+      <!-- 分页：页号就是地址里的 #，所以翻页也是一次导航（进历史，可后退） -->
+      <nav v-if="notes.length > 0" class="all__pager">
+        <button
+          class="all__page"
+          type="button"
+          :disabled="safePage <= 1"
+          @click="emit('page', safePage - 1)"
+        >
+          上一页
+        </button>
+
+        <span class="all__page-state">
+          第
+          <input
+            v-model="pageDraft"
+            class="all__page-input"
+            type="text"
+            inputmode="numeric"
+            :placeholder="String(safePage)"
+            @keydown.enter.prevent="jumpToPage"
+          />
+          / {{ totalPages }} 页
+        </span>
+
+        <button class="all__page" type="button" @click="jumpToPage">跳转</button>
+
+        <button
+          class="all__page"
+          type="button"
+          :disabled="safePage >= totalPages"
+          @click="emit('page', safePage + 1)"
+        >
+          下一页
+        </button>
+
+        <span class="all__page-total">
+          共 {{ notes.length }} 篇，每页 {{ PAGE_SIZE }} 篇
+        </span>
+      </nav>
 
       <h2 class="all__section">
         特殊页面 <span class="all__count">{{ pages.length }}</span>
@@ -209,6 +302,63 @@ onMounted(async () => {
   color: var(--text-dim);
   font-size: 12px;
   font-family: var(--mono-font);
+}
+
+/* ---------- 分页 ---------- */
+
+.all__pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.all__page {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background-color: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.all__page:hover:not(:disabled) {
+  background-color: var(--hover);
+  color: var(--text);
+}
+
+.all__page:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.all__page-state {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.all__page-input {
+  width: 52px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--field-bg);
+  color: var(--text);
+  font-size: 12px;
+  text-align: center;
+}
+
+.all__page-total {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 12px;
 }
 
 .all__hint {

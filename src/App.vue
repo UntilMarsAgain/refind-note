@@ -760,6 +760,61 @@ watch(themeMode, (mode) => {
   }
 });
 
+/**
+ * 当前地址指向的笔记标题；特殊页面、还不存在的页面、空地址都是 null。
+ *
+ * 用计算属性集中判断，免得每个用到它的地方各写一遍 switch。
+ */
+const currentTitle = computed(() => {
+  const address = route.value;
+  if (!address) {
+    return null;
+  }
+  switch (address.kind) {
+    case "note":
+    case "edit":
+    case "history":
+    case "delete":
+    case "view-version":
+    case "rollback-confirm":
+      return address.title;
+    default:
+      return null;
+  }
+});
+
+/**
+ * 是否显示「编辑」按钮：有这篇笔记、且不在编辑中。
+ *
+ * 「编辑」永远编辑**最新提交**（编辑器只有一份当前内容），所以看历史版本时它也指同一件事。
+ * 还不存在的页面不给这个按钮 —— `@edit` 对它没有意义（那条路要先建它）。
+ */
+const canEdit = computed(() => Boolean(currentTitle.value) && mode.value !== "edit");
+
+/** 直接进入编辑：仍然是"改地址"，不是直接切状态 */
+function beginEditingNow() {
+  const title = currentTitle.value;
+  if (title) {
+    void navigate(`${title}@edit`);
+  }
+}
+
+/** `special:all` 的页号（地址里的 `#`） */
+const allPagesSection = computed(() => {
+  const address = route.value;
+  return address && address.kind === "special" && address.page === "all"
+    ? sectionOf(address)
+    : "";
+});
+
+/**
+ * 翻到某一页：**第 1 页回到不带 `#` 的形式**（能省则省），其余写进地址。
+ * 默认是按「跳转」入历史，所以翻页可以后退回去。
+ */
+function goToAllPage(page: number) {
+  void navigate(page > 1 ? `special:all#${page}` : "special:all");
+}
+
 /** 地址正指向设置页里的哪一项（`special:settings#accent`） */
 const settingsFocus = computed(() => {
   const address = route.value;
@@ -1268,8 +1323,10 @@ function onAction(name: string) {
       />
       <AllPages
         v-else-if="mode === 'special' && specialPage === 'all'"
+        :page-section="allPagesSection"
         @open="openFromList"
         @open-new="openTabWith"
+        @page="goToAllPage"
       />
       <SettingsPage
         v-else-if="mode === 'special' && specialPage === 'settings' && vaultSettings"
@@ -1414,6 +1471,8 @@ function onAction(name: string) {
 
   <FloatingTools
     :limited="limitWidth"
+    :can-edit="canEdit"
+    @edit="beginEditingNow"
     @toggle-width="toggleWidth"
     @scroll-top="scrollToTop"
     @scroll-bottom="scrollToBottom"
