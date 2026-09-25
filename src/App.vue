@@ -7,6 +7,8 @@ import MissingNote from "./components/MissingNote.vue";
 import NewTab from "./components/NewTab.vue";
 import SettingsPage from "./components/SettingsPage.vue";
 import AllPages from "./components/AllPages.vue";
+import AppMenu from "./components/AppMenu.vue";
+import { labelOf } from "./special";
 import { setThemeMode, themeMode, type ThemeMode } from "./theme";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -66,6 +68,9 @@ interface VaultSettings {
   /** 界面缩放（1.0 = 100%），Ctrl + 滚轮调整 */
   zoom: number;
 }
+
+/** 站点名：顶栏菜单顶上那一行（纯显示，不参与地址） */
+const APP_NAME = "重逢笔记";
 
 /** 与 Rust 端 `RevisionContent` 对应（历史里某一版的正文） */
 interface RevisionContent {
@@ -191,12 +196,11 @@ const activeTab = ref(0);
 /** 仓库设置（含外观）：唯一来源是后端的 vault.json */
 const vaultSettings = ref<VaultSettings | null>(null);
 
-/** 特殊页面的显示名（新增页面在这里补一行） */
-const SPECIAL_TITLES: Record<string, string> = {
-  all: "全部页面",
-  newtab: "新标签页",
-  settings: "设置",
-};
+/** 顶栏菜单是否展开 */
+const menuOpen = ref(false);
+
+/** 菜单要列的特殊页面：**每次打开都问后端**，所以后端加页面不必重启前端 */
+const specialPages = ref<string[]>([]);
 
 /** 当前特殊页的页面名（模板里据此分派；用计算属性避免在模板里碰联合类型） */
 const specialPage = computed(() => {
@@ -213,7 +217,7 @@ function tabTitleOf(address: Address): string {
     case "empty":
       return "";
     case "special":
-      return SPECIAL_TITLES[address.page] ?? `special:${address.page}`;
+      return labelOf(address.page);
     default:
       return address.title;
   }
@@ -700,8 +704,23 @@ const canGoForward = computed(() => {
   return Boolean(tab && tab.cursor < tab.history.length - 1);
 });
 
-function onMenu() {
-  // TODO: 菜单键另有作用（设置入口已经挪到标签栏底部）
+async function onMenu() {
+  menuOpen.value = !menuOpen.value;
+  if (!menuOpen.value) {
+    return;
+  }
+  // 展开时才问一次：菜单里的条目永远与后端一致
+  try {
+    specialPages.value = await invoke<string[]>("special_pages");
+  } catch {
+    specialPages.value = [];
+  }
+}
+
+/** 菜单里点一项：跳过去（进历史）并收起菜单 */
+function openFromMenu(address: string) {
+  menuOpen.value = false;
+  void navigate(address);
 }
 
 /**
@@ -1468,6 +1487,14 @@ function onAction(name: string) {
       </main>
     </div>
   </div>
+
+  <AppMenu
+    v-if="menuOpen"
+    :pages="specialPages"
+    :title="APP_NAME"
+    @open="openFromMenu"
+    @close="menuOpen = false"
+  />
 
   <FloatingTools
     :limited="limitWidth"

@@ -22,6 +22,7 @@ import {
 } from "@lucide/vue";
 import {
   cycleThemeMode,
+  logoSrc,
   themeMode,
   type ThemeMode,
 } from "../theme";
@@ -88,18 +89,6 @@ const themeIcon = computed(() => themeIcons[themeMode.value]);
  * （浅色笔画）与浅色主题（深色笔画）各一张。`themeMode` 是响应式的，设置页改主题会立刻换图；
  * "跟随系统"时另听 media query，这样系统切换也跟得上。
  */
-const prefersLight = window.matchMedia("(prefers-color-scheme: light)");
-const systemPrefersLight = ref(prefersLight.matches);
-prefersLight.addEventListener("change", (event) => {
-  systemPrefersLight.value = event.matches;
-});
-
-const logoSrc = computed(() => {
-  const mode = themeMode.value;
-  const light = mode === "light" || (mode === "system" && systemPrefersLight.value);
-  return light ? "/logo-light.svg" : "/logo.svg";
-});
-
 let unlistenResized: (() => void) | undefined;
 
 onMounted(async () => {

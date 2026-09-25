@@ -6,6 +6,7 @@
  * 否则每加一个特殊页面都要在前端再登记一次，那就成了两个真相。
  */
 import { computed, onMounted, ref } from "vue";
+import { labelOf } from "../special";
 import { invoke } from "@tauri-apps/api/core";
 
 interface NoteSummary {
@@ -35,17 +36,6 @@ const emit = defineEmits<{
   (e: "open-new", address: string): void;
   (e: "page", page: number): void;
 }>();
-
-/** 特殊页面的显示名；没登记的退回 `special:<页面名>` */
-const PAGE_LABELS: Record<string, string> = {
-  all: "全部页面（当前页）",
-  newtab: "新标签页",
-  settings: "设置",
-};
-
-function labelOf(page: string): string {
-  return PAGE_LABELS[page] ?? `special:${page}`;
-}
 
 const props = defineProps<{
   /**
