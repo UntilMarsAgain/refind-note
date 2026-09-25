@@ -1,160 +1,128 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import TitleBar from "./components/TitleBar.vue";
+import WindowResizeHandles from "./components/WindowResizeHandles.vue";
 
 const greetMsg = ref("");
 const name = ref("");
 
 async function greet() {
-  // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
   greetMsg.value = await invoke("greet", { name: name.value });
+}
+
+// 标题栏上的三个入口目前都是占位，先在代码里留痕，
+// 避免以后看代码时误以为「点了没反应」是 bug。
+function onSearch() {
+  // TODO: 打开搜索面板
+}
+
+function onMenu() {
+  // TODO: 展开侧边菜单
+}
+
+function onSubmit(value: string) {
+  // TODO: 地址栏提交（跳转 / 搜索）
+  console.debug("titlebar submit:", value);
 }
 </script>
 
 <template>
-  <main class="container">
-    <h1>Welcome to Tauri + Vue</h1>
+  <WindowResizeHandles />
 
-    <div class="row">
-      <a href="https://vite.dev" target="_blank">
-        <img src="/vite.svg" class="logo vite" alt="Vite logo" />
-      </a>
-      <a href="https://tauri.app" target="_blank">
-        <img src="/tauri.svg" class="logo tauri" alt="Tauri logo" />
-      </a>
-      <a href="https://vuejs.org/" target="_blank">
-        <img src="./assets/vue.svg" class="logo vue" alt="Vue logo" />
-      </a>
-    </div>
-    <p>Click on the Tauri, Vite, and Vue logos to learn more.</p>
+  <div class="app">
+    <TitleBar @search="onSearch" @menu="onMenu" @submit="onSubmit" />
 
-    <form class="row" @submit.prevent="greet">
-      <input id="greet-input" v-model="name" placeholder="Enter a name..." />
-      <button type="submit">Greet</button>
-    </form>
-    <p>{{ greetMsg }}</p>
-  </main>
+    <main class="app__body">
+      <section class="card">
+        <h1 class="card__title">标题栏已替换为自绘</h1>
+        <p class="card__desc">
+          左侧是占位图标、搜索与菜单，中间可直接输入并回车提交，
+          右侧为最小化 / 最大化 / 关闭。拖动标题栏可移动窗口，双击可最大化。
+        </p>
+
+        <form class="probe" @submit.prevent="greet">
+          <input
+            v-model="name"
+            class="probe__input"
+            placeholder="输入内容，验证 Rust 端 IPC 是否正常"
+          />
+          <button class="probe__btn" type="submit">调用 greet</button>
+        </form>
+        <p class="probe__out selectable">{{ greetMsg || "—" }}</p>
+      </section>
+    </main>
+  </div>
 </template>
 
 <style scoped>
-.logo.vite:hover {
-  filter: drop-shadow(0 0 2em #747bff);
-}
-
-.logo.vue:hover {
-  filter: drop-shadow(0 0 2em #249b73);
-}
-
-</style>
-<style>
-:root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 400;
-
-  color: #0f0f0f;
-  background-color: #f6f6f6;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
-}
-
-.container {
-  margin: 0;
-  padding-top: 10vh;
+.app {
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  text-align: center;
+  height: 100vh;
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: 0.75s;
+.app__body {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 24px;
 }
 
-.logo.tauri:hover {
-  filter: drop-shadow(0 0 2em #24c8db);
+.card {
+  max-width: 720px;
+  padding: 20px 24px;
+  border-radius: 12px;
+  background: var(--surface);
 }
 
-.row {
+.card__title {
+  margin: 0 0 6px;
+  font-size: 19px;
+  font-weight: 600;
+}
+
+.card__desc {
+  margin: 0 0 18px;
+  color: var(--text-dim);
+  font-size: 14px;
+}
+
+.probe {
   display: flex;
-  justify-content: center;
+  gap: 8px;
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-
-a:hover {
-  color: #535bf2;
-}
-
-h1 {
-  text-align: center;
-}
-
-input,
-button {
+.probe__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
   border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
-  transition: border-color 0.25s;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-}
-
-button {
-  cursor: pointer;
-}
-
-button:hover {
-  border-color: #396cd8;
-}
-button:active {
-  border-color: #396cd8;
-  background-color: #e8e8e8;
-}
-
-input,
-button {
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--text);
   outline: none;
 }
 
-#greet-input {
-  margin-right: 5px;
+.probe__input:focus {
+  border-color: var(--accent-soft);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f6f6f6;
-    background-color: #2f2f2f;
-  }
-
-  a:hover {
-    color: #24c8db;
-  }
-
-  input,
-  button {
-    color: #ffffff;
-    background-color: #0f0f0f98;
-  }
-  button:active {
-    background-color: #0f0f0f69;
-  }
+.probe__btn {
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
 }
 
+.probe__btn:hover {
+  background: #b05f60;
+}
+
+.probe__out {
+  margin: 12px 0 0;
+  color: var(--accent-soft);
+  font-size: 14px;
+}
 </style>

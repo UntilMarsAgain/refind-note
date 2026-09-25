@@ -1,0 +1,65 @@
+:root {
+  /* 标题栏高度对齐浏览器：Firefox / Chrome 的工具栏基本都在 36~40px */
+  --titlebar-height: 36px;
+  /* 右侧三个窗口按钮的总宽，顶部缩放热区要避开它们 */
+  --window-controls-width: 132px;
+
+  --bg: #1e1e1e;
+  --surface: #372728;
+  --titlebar-bg: #000201;
+  --border: rgba(255, 255, 255, 0.14);
+  --text: #e8e8e8;
+  --text-dim: #a8a2a2;
+  --icon: #dcdcdc;
+  --accent: #9f5354;
+  --accent-soft: #c68e8c;
+  --hover: rgba(255, 255, 255, 0.12);
+  --press: rgba(255, 255, 255, 0.2);
+
+  font-family: "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei",
+    Inter, system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text);
+  background-color: var(--bg);
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg);
+  /* 无边框窗口里整页都是「应用」，不是可选中的文档 */
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 表单控件要能正常选中和编辑；.selectable 用于内容区需要复制的文本 */
+input,
+textarea,
+.selectable {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}

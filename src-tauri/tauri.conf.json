@@ -13,8 +13,12 @@
     "windows": [
       {
         "title": "refind-note",
-        "width": 800,
-        "height": 600
+        "width": 1100,
+        "height": 760,
+        "minWidth": 720,
+        "minHeight": 480,
+        "resizable": true,
+        "decorations": false
       }
     ],
     "security": {
