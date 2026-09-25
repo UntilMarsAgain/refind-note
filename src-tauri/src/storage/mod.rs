@@ -824,6 +824,39 @@ impl Vault {
             out
         };
 
+        /// 把状态叠到「某一版」上：不写状态＝只读查看，`$edit`＝从这一版开始编写，
+        /// `$history`＝进历史页并选中它。
+        fn apply_state(
+            state: Option<&str>,
+            title: String,
+            rev: u64,
+            id: String,
+            short: String,
+            address: String,
+        ) -> Address {
+            match state {
+                Some("edit") => Address::Edit {
+                    title,
+                    address,
+                    rev: Some(rev),
+                    short_id: Some(short),
+                },
+                Some("history") => Address::History {
+                    title,
+                    address,
+                    rev: Some(rev),
+                    short_id: Some(short),
+                },
+                _ => Address::Revision {
+                    title,
+                    address,
+                    rev,
+                    id,
+                    short_id: short,
+                },
+            }
+        }
+
         let Some(reference) = reference else {
             // 没有 @版本：NAME 决定一切
             let parsed = self.table.parse(name_part, self.config.capital_links)?;
@@ -841,10 +874,14 @@ impl Vault {
                 Some("edit") => Address::Edit {
                     title: display,
                     address,
+                    rev: None,
+                    short_id: None,
                 },
                 Some("history") => Address::History {
                     title: display,
                     address,
+                    rev: None,
+                    short_id: None,
                 },
                 _ => Address::Note {
                     title: display,
@@ -862,7 +899,8 @@ impl Vault {
             }
 
             let needle = reference.to_ascii_lowercase();
-            let mut matches: Vec<Address> = Vec::new();
+            // (标题, 版本, 完整 ID, 缩写)
+            let mut matches: Vec<(String, u64, String, String)> = Vec::new();
             for (_, path) in self.log_files()? {
                 let events = self.read_events_at(&path)?;
                 for event in &events {
@@ -876,28 +914,39 @@ impl Vault {
                     let Some(parsed) = Self::title_of_log_path(&path) else {
                         continue;
                     };
-                    let display = parsed.display(&self.table);
-                    let short = short_revision_id(&id);
-                    matches.push(Address::Revision {
-                        address: compose(&display, Some(&short)),
-                        title: display,
+                    matches.push((
+                        parsed.display(&self.table),
                         rev,
-                        short_id: short,
-                        id,
-                    });
+                        id.clone(),
+                        short_revision_id(&id),
+                    ));
                 }
             }
 
-            return match matches.len() {
-                0 => Err(VaultError::BadAddress(format!(
-                    "没有哪个版本对得上「{reference}」这个缩写"
-                ))),
-                1 => Ok(matches.remove(0)),
-                count => Err(VaultError::AmbiguousRevision {
-                    prefix: reference,
-                    matches: count,
-                }),
+            let (title, rev, id, short) = match matches.len() {
+                0 => {
+                    return Err(VaultError::BadAddress(format!(
+                        "没有哪个版本对得上「{reference}」这个缩写"
+                    )))
+                }
+                1 => matches.remove(0),
+                count => {
+                    return Err(VaultError::AmbiguousRevision {
+                        prefix: reference,
+                        matches: count,
+                    })
+                }
             };
+
+            let address = compose(&title, Some(&short));
+            return Ok(apply_state(
+                state,
+                title,
+                rev,
+                id,
+                short,
+                address,
+            ));
         }
 
         let parsed = self.table.parse(name_part, self.config.capital_links)?;
@@ -922,14 +971,16 @@ impl Vault {
             })?;
         let full_id = revision_id(event);
         let short = short_revision_id(&full_id);
+        let address = compose(&display, Some(&short));
 
-        Ok(Address::Revision {
-            address: compose(&display, Some(&short)),
-            title: display,
+        Ok(apply_state(
+            state,
+            display,
             rev,
-            id: full_id,
-            short_id: short,
-        })
+            full_id,
+            short,
+            address,
+        ))
     }
 
     /// 把「版本引用」解析成版本号。
@@ -2083,7 +2134,12 @@ mod tests {
         temp.vault.commit("模式", "正文", None, 0).unwrap();
 
         match temp.vault.parse_address("模式$edit").unwrap() {
-            Address::Edit { title, address } => {
+            Address::Edit {
+                title,
+                address,
+                rev: None,
+                ..
+            } => {
                 assert_eq!(title, "模式");
                 assert_eq!(address, "模式$edit", "回显用标准顺序");
             }
@@ -2126,9 +2182,14 @@ mod tests {
             .parse_address(&format!("顺序@{}#小节$history", second.short_id))
             .unwrap()
         {
-            Address::Revision { address, title, rev, .. } => {
+            // 带 $history：现在返回 History 并带回版本 —— 状态与版本是**组合**关系
+            Address::History {
+                address,
+                title,
+                rev: Some(2),
+                ..
+            } => {
                 assert_eq!(title, "顺序");
-                assert_eq!(rev, 2);
                 assert_eq!(address, format!("顺序@{}#小节$history", second.short_id));
             }
             other => panic!("{other:?}"),
@@ -2155,6 +2216,77 @@ mod tests {
             temp.vault.parse_address("顺序$edit").unwrap(),
             Address::Edit { .. }
         ));
+    }
+
+    /// `@版本$编辑` ＝ 从这一版开始编写；`@版本$历史` ＝ 进历史页并选中它
+    #[test]
+    fn version_and_state_combine() {
+        let temp = TempVault::new();
+        temp.vault.create("分支").unwrap();
+        temp.vault.commit("分支", "第一版", None, 0).unwrap();
+        temp.vault.commit("分支", "第二版", None, 1).unwrap();
+
+        let first = temp
+            .vault
+            .history("分支")
+            .unwrap()
+            .into_iter()
+            .find(|item| item.rev == 1)
+            .unwrap();
+
+        // 不带状态：只读查看那一版
+        assert!(matches!(
+            temp.vault
+                .parse_address(&format!("分支@{}", first.short_id))
+                .unwrap(),
+            Address::Revision { rev: 1, .. }
+        ));
+
+        // 带 $edit：从那一版开始编写
+        match temp
+            .vault
+            .parse_address(&format!("分支@{}#小节$edit", first.short_id))
+            .unwrap()
+        {
+            Address::Edit {
+                rev: Some(1),
+                short_id: Some(short),
+                address,
+                ..
+            } => {
+                assert_eq!(short, first.short_id);
+                assert_eq!(address, format!("分支@{}#小节$edit", first.short_id));
+            }
+            other => panic!("{other:?}"),
+        }
+
+        // 带 $history：进历史页并选中那一版
+        match temp
+            .vault
+            .parse_address(&format!("分支@{}$history", first.short_id))
+            .unwrap()
+        {
+            Address::History {
+                rev: Some(1),
+                address,
+                ..
+            } => assert_eq!(address, format!("分支@{}$history", first.short_id)),
+            other => panic!("{other:?}"),
+        }
+
+        // 只写 @缩写 + 状态：先全局找到是谁，再叠状态
+        match temp
+            .vault
+            .parse_address(&format!("@{}$edit", first.short_id))
+            .unwrap()
+        {
+            Address::Edit {
+                title,
+                rev: Some(1),
+                ..
+            } => assert_eq!(title, "分支"),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]

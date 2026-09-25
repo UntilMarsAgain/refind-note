@@ -130,10 +130,21 @@ pub enum Address {
         short_id: String,
         address: String,
     },
-    /// 编辑一篇笔记
-    Edit { title: String, address: String },
-    /// 看一篇笔记的版本历史
-    History { title: String, address: String },
+    /// 编辑。带 `rev` 表示**从这一版开始编写**：编辑器以它的内容为起点，
+    /// 提交后成为链上的新版本（旧版本一条不改）。
+    Edit {
+        title: String,
+        address: String,
+        rev: Option<u64>,
+        short_id: Option<String>,
+    },
+    /// 看版本历史。带 `rev` 表示进来就选中那一版。
+    History {
+        title: String,
+        address: String,
+        rev: Option<u64>,
+        short_id: Option<String>,
+    },
     /// 目标还不存在，交给「不存在 + 创建」那条路
     Missing { title: String, address: String },
 }
