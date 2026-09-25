@@ -1,20 +1,16 @@
 <script setup lang="ts">
 import type { Component } from "vue";
-import {
-  Brackets,
-  Ellipsis,
-  History,
-  Languages,
-  MessageSquare,
-  Pencil,
-  Share2,
-} from "@lucide/vue";
+import { History, Pencil } from "@lucide/vue";
 
 /**
  * 页面标题行 + 页面操作。
  *
  * 贴顶冻结用 `position: sticky` 实现；滚下去之后收起（标题变小、操作只剩图标），
  * 收起状态由父组件通过 `collapsed` 传入。
+ *
+ * 操作只留**真能用的**：这里曾经摆过一排假按钮（分享 / 语言 / 源代码 / 讨论 /
+ * 更多），现在保留的每一个都接得到真实功能——编辑会打开编辑器，版本历史会打开
+ * 历史与对比页。等某个功能做出来了再加回对应按钮，不再用点不动的按钮占位。
  */
 
 defineProps<{
@@ -25,20 +21,14 @@ defineProps<{
 
 const emit = defineEmits<{ (e: "action", name: string): void }>();
 
-/** 先摆一排假按钮占位，功能之后再接 */
 const actions: {
   name: string;
   label: string;
   icon: Component;
   iconOnly?: boolean;
 }[] = [
-  { name: "share", label: "分享", icon: Share2, iconOnly: true },
-  { name: "language", label: "语言", icon: Languages },
-  { name: "history", label: "查看历史", icon: History },
   { name: "edit", label: "编辑", icon: Pencil },
-  { name: "source", label: "源代码", icon: Brackets },
-  { name: "discuss", label: "讨论", icon: MessageSquare },
-  { name: "more", label: "更多", icon: Ellipsis, iconOnly: true },
+  { name: "history", label: "版本历史", icon: History },
 ];
 </script>
 

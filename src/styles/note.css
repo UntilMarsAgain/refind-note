@@ -96,13 +96,19 @@
   border-bottom-color: currentColor;
 }
 
-/* 内部链接：用点状下划线跟外链区分开，也暗示它暂时还没法真正跳转 */
+/* 内部链接：用点状下划线跟外链区分开 */
 .note-body a.wikilink {
   border-bottom-style: dotted;
 }
 
 .note-body a.wikilink:hover {
   border-bottom-style: solid;
+}
+
+/* 红链：目标还没建立的内部链接。存在与否是 Rust 端渲染时判定的
+   （见 markdown/syntax/wikilink.rs），前端只负责上色。 */
+.note-body a.wikilink[data-missing="true"] {
+  color: var(--link-missing);
 }
 
 /* ---------- 列表 ---------- */

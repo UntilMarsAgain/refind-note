@@ -31,6 +31,11 @@
   --icon: #dcdcdc;
   --accent: #9f5354;
   --accent-soft: #c68e8c;
+  /* 指向尚未建立的笔记的内部链接（MediaWiki 意义上的「红链」） */
+  --link-missing: #e2645c;
+  /* 版本对比里增删行的底色 */
+  --diff-add-bg: rgba(90, 160, 110, 0.18);
+  --diff-del-bg: rgba(200, 90, 90, 0.16);
   --hover: rgba(255, 255, 255, 0.12);
   --press: rgba(255, 255, 255, 0.2);
 
@@ -77,6 +82,9 @@
   --icon: #3a3434;
   --accent: #9f5354;
   --accent-soft: #8a4748;
+  --link-missing: #b02a2a;
+  --diff-add-bg: rgba(60, 160, 90, 0.16);
+  --diff-del-bg: rgba(200, 70, 70, 0.12);
   --hover: rgba(0, 0, 0, 0.06);
   --press: rgba(0, 0, 0, 0.12);
 

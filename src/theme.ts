@@ -1,10 +1,11 @@
-import { computed, readonly, ref } from "vue";
+import { readonly, ref } from "vue";
+import { PREFERENCE_KEYS, readPreference, writePreference } from "./settings";
 
 /** 三个可选项；"system" 表示跟随操作系统 */
 export type ThemeMode = "light" | "dark" | "system";
 
-/** 与 index.html 里的防闪烁内联脚本共用同一个 key，改这里必须同步改那里 */
-export const THEME_STORAGE_KEY = "refind-note:theme";
+/** 与 index.html 里的防闪烁内联脚本共用同一个 key（见 settings.ts） */
+export const THEME_STORAGE_KEY = PREFERENCE_KEYS.theme;
 
 export const themeOptions: { value: ThemeMode; label: string }[] = [
   { value: "system", label: "跟随系统" },
@@ -17,13 +18,8 @@ function isThemeMode(value: unknown): value is ThemeMode {
 }
 
 function readStoredMode(): ThemeMode {
-  try {
-    const raw = localStorage.getItem(THEME_STORAGE_KEY);
-    return isThemeMode(raw) ? raw : "system";
-  } catch {
-    // 存储不可用（隐私模式等）时退回跟随系统
-    return "system";
-  }
+  const raw = readPreference(THEME_STORAGE_KEY);
+  return isThemeMode(raw) ? raw : "system";
 }
 
 const mode = ref<ThemeMode>(readStoredMode());
@@ -47,11 +43,7 @@ function apply() {
 
 export function setThemeMode(next: ThemeMode) {
   mode.value = next;
-  try {
-    localStorage.setItem(THEME_STORAGE_KEY, next);
-  } catch {
-    // 存不下不影响本次会话内生效
-  }
+  writePreference(THEME_STORAGE_KEY, next);
   apply();
 }
 
@@ -75,8 +67,5 @@ function nextOf(current: ThemeMode): ThemeMode {
 export function cycleThemeMode() {
   setThemeMode(nextOf(mode.value));
 }
-
-/** 给循环切换按钮做提示用：让用户能预期点下去会变成什么 */
-export const nextThemeMode = computed(() => nextOf(mode.value));
 
 export const themeMode = readonly(mode);

@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref, watch } from "vue";
-import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import hljs from "highlight.js/lib/common";
 
 const props = defineProps<{ html: string }>();
+
+const emit = defineEmits<{
+  (e: "wikilink", payload: { title: string; missing: boolean }): void;
+}>();
 
 const rootEl = ref<HTMLElement | null>(null);
 
@@ -99,10 +102,14 @@ function onClick(event: MouseEvent) {
   const wikiLink = target.closest("a.wikilink");
   if (wikiLink) {
     event.preventDefault();
-    const doc = wikiLink.getAttribute("data-doc");
-    if (doc) {
-      // 跳转还没实现，先由后端把调用打到命令行
-      void invoke("open_wikilink", { doc });
+    // 目标是否存在是后端渲染时判定的（data-missing）：红链点了也没东西可开
+    const title =
+      wikiLink.getAttribute("data-title") ?? wikiLink.getAttribute("data-doc");
+    if (title) {
+      emit("wikilink", {
+        title,
+        missing: wikiLink.getAttribute("data-missing") === "true",
+      });
     }
     return;
   }
