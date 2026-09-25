@@ -110,6 +110,19 @@ impl Vault {
         Self::open(default_root()?)
     }
 
+    // ------------------------------------------------------------ 标题校验
+
+    /// 只解析、不落盘：给前端一个权威的标题判定。
+    ///
+    /// 前端的即时检查负责手感（空、`@`、非法字符），而「冒号前缀是不是已知命名空间」
+    /// 这类判断依赖命名空间表，前端不复制一份 —— 那会变成第二个真相来源。
+    pub fn validate_title(&self, title: &str) -> Result<(), VaultError> {
+        self.table
+            .parse(title, self.config.capital_links)
+            .map(|_| ())
+            .map_err(VaultError::from)
+    }
+
     // ------------------------------------------------------------ 路径
     //
     // 目前只有主命名空间，路径是 `<root>/notes/0/<转义标题>.log`：
@@ -1519,6 +1532,17 @@ mod tests {
             String::from_utf8(temp.vault.blobs.get(&blob).unwrap()).unwrap(),
             "要被保留的正文"
         );
+    }
+
+    #[test]
+    fn validate_title_reports_the_same_rules_as_parsing() {
+        let temp = TempVault::new();
+        assert!(temp.vault.validate_title("合法标题").is_ok());
+        assert!(temp.vault.validate_title("带@符号").is_err());
+        assert!(temp.vault.validate_title("Help:目录").is_err(), "只有主命名空间");
+        assert!(temp.vault.validate_title("").is_err());
+        // 校验不该留下任何文件
+        assert!(temp.root.join("notes").read_dir().unwrap().next().is_none());
     }
 
     #[test]

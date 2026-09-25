@@ -60,6 +60,28 @@ fn update_settings(
     Ok(vault.settings_view())
 }
 
+/// 标题校验：只有解析，不落盘。前端即时检查之外的权威判定。
+#[tauri::command]
+fn validate_title(title: String) -> Result<(), String> {
+    open()?
+        .validate_title(&title)
+        .map_err(|error| error.to_string())
+}
+
+/// **回退**：把某一版的内容作为新提交写上去 —— 旧记录一条不改（回退不是撤销历史）
+#[tauri::command]
+fn revert_note(title: String, rev: u64, summary: Option<String>) -> Result<Note, String> {
+    let _guard = write_guard();
+    let vault = open()?;
+    let old = vault.revision(&title, rev).map_err(|error| error.to_string())?;
+    let current = vault.load(&title).map_err(|error| error.to_string())?;
+    let reason = summary.unwrap_or_else(|| format!("回退到版本 {rev}"));
+
+    vault
+        .commit(&title, &old.markdown, Some(&reason), current.rev)
+        .map_err(|error| error.to_string())
+}
+
 // ---------------------------------------------------------------- 笔记
 
 #[tauri::command]
@@ -231,7 +253,9 @@ pub fn run() {
             note_history,
             note_revision,
             compare_revisions,
-            gc
+            gc,
+            validate_title,
+            revert_note
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
