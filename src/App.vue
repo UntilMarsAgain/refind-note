@@ -78,8 +78,20 @@ type Address =
       short_id: string;
       address: string;
     }
-  | { kind: "edit"; title: string; address: string }
-  | { kind: "history"; title: string; address: string }
+  | {
+      kind: "edit";
+      title: string;
+      address: string;
+      rev: number | null;
+      short_id: string | null;
+    }
+  | {
+      kind: "history";
+      title: string;
+      address: string;
+      rev: number | null;
+      short_id: string | null;
+    }
   | { kind: "missing"; title: string; address: string };
 
 /** 自动保存：停手三秒后写一条草稿到链上 */
@@ -132,6 +144,8 @@ const searchOpen = ref(false);
 const draftExists = ref(false);
 /** 删除确认条 */
 const confirmDelete = ref(false);
+/** 进历史页要选中哪一版（地址里的 `@版本$history` 带来的） */
+const historyRev = ref<number | null>(null);
 /** 删除时顺手回收悬置数据 */
 const deleteWithGc = ref(false);
 /** 地址栏解析出的错误（比如缩写写错了）；以前这类错误被悄悄吞掉了 */
@@ -561,6 +575,23 @@ const parentTitle = computed(() => {
 });
 
 /**
+ * 从某一版开始编写。
+ *
+ * 内容取自那一版，但**提交仍然接在最新版本之后**：旧版本一条不改 —— 所以这是
+ * 「以某一版为起点」，不是重写历史。（草稿本身也挂在最新提交上，是链的正常一步。）
+ */
+async function beginEditingFromVersion(
+  title: string,
+  rev: number,
+  shortId: string | null,
+) {
+  const version = await invoke<RevisionContent>("note_revision", { title, rev });
+  draftText.value = version.markdown;
+  editorStatus.value = `从版本 ${rev}${shortId ? `（${shortId}）` : ""}开始编写；提交后会成为链上的新版本`;
+  scrolled.value = false;
+}
+
+/**
  * 记录本地章节。
  *
  * 只有章节允许前端自己确定（正文里定位到哪一节属于界面自己的事），其余成分一律以
@@ -611,6 +642,9 @@ async function navigate(input: string) {
   revisionView.value = null;
   localSection.value = "";
   confirmDelete.value = false;
+  if (address.kind !== "history") {
+    historyRev.value = null;
+  }
 
   switch (address.kind) {
     case "note":
@@ -618,10 +652,17 @@ async function navigate(input: string) {
       return;
     case "edit":
       await loadNote(address.title);
-      await beginEditing();
+      if (address.rev != null) {
+        // `名称@版本$edit`：从这一版开始编写
+        await beginEditingFromVersion(address.title, address.rev, address.short_id);
+      } else {
+        await beginEditing();
+      }
       return;
     case "history":
       await loadNote(address.title);
+      // `名称@版本$history`：进来就选中那一版
+      historyRev.value = address.rev;
       return;
     case "revision":
       await openRevision(address.title, address.short_id);
@@ -779,9 +820,10 @@ function onAction(name: string) {
 
           <HistoryView
             v-else-if="mode === 'history' && note"
-            :key="`${note.key}:${note.rev}`"
+            :key="`${note.key}:${note.rev}:${historyRev ?? 0}`"
             :title="note.title"
             :current-rev="note.rev"
+            :initial-rev="historyRev"
             @close="closeHistory"
             @revert="onRevert"
             @open-revision="onOpenRevision"
