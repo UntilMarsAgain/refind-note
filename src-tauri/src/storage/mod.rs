@@ -36,7 +36,8 @@ pub use event::{
 };
 
 use atomic::{append_line, hash_bytes, write_atomic, BlobStore};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -52,6 +53,22 @@ const LOG_EXT: &str = "log";
 const MAIN_NAMESPACE_DIR: &str = "0";
 
 // ---------------------------------------------------------------- 仓库
+
+/// 名字表：**文件名是 id，名字存在这里**。
+///
+/// 为什么不把标题当文件名：不同操作系统与文件系统对名字的限制、规范化方式都不一样
+/// （大小写、Unicode 规范化、保留字符、长度上限…）。id 是纯 ASCII 十六进制，哪儿都一样；
+/// 名字只存在于这个 JSON 里，**改名也就只是改这里一行**（不必搬文件）。
+///
+/// 分工：目录是「存在与否」的真相，这张表是「叫什么」的真相。两边不一致时以目录为准
+/// （表里多余的条目忽略；目录里没登记的按 id 显示 —— 至少还能打开它、给它改名）。
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct Titles {
+    /// id → 标题
+    notes: BTreeMap<String, String>,
+    /// id → 标题（已删除，文件在 trash/ 里）
+    trashed: BTreeMap<String, String>,
+}
 
 /// 一次写入的结果：选了哪种存法、落在哪个 blob 上
 struct Stored {
@@ -81,6 +98,15 @@ impl Vault {
         fs::create_dir_all(root.join("notes"))?;
         fs::create_dir_all(root.join("blobs"))?;
         fs::create_dir_all(root.join("trash"))?;
+
+        // 名字表：不存在就写一份空的
+        let titles_path = root.join("titles.json");
+        if !titles_path.exists() {
+            write_atomic(
+                &titles_path,
+                serde_json::to_string_pretty(&Titles::default())?.as_bytes(),
+            )?;
+        }
 
         let config_path = root.join("vault.json");
         let config: VaultConfig = match fs::read_to_string(&config_path) {
@@ -155,9 +181,32 @@ impl Vault {
             .join(format!("{id}.{LOG_EXT}"))
     }
 
-    /// 标题 → 文件 id
+    /// 标题 → 文件 id：纯 ASCII 十六进制。
+    ///
+    /// 这样文件名叫什么就与操作系统/文件系统无关了（大小写、Unicode 规范化、保留字符、
+    /// 长度上限都不会再影响路径）。**文件名不再承载标题** —— 名字存在 titles.json 里。
     fn id_of(parsed: &ParsedTitle) -> String {
-        crate::title::encode_for_path(&parsed.title)
+        let seed = format!("{}:{}", parsed.ns, parsed.title);
+        hash_bytes(seed.as_bytes()).chars().take(16).collect()
+    }
+
+    fn titles_path(&self) -> PathBuf {
+        self.root.join("titles.json")
+    }
+
+    /// 读名字表；文件不在就当空的（首次运行或被人删掉时都还能继续）
+    fn titles(&self) -> Result<Titles, VaultError> {
+        match fs::read_to_string(self.titles_path()) {
+            Ok(text) => Ok(serde_json::from_str(&text)?),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Titles::default()),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    fn save_titles(&self, titles: &Titles) -> Result<(), VaultError> {
+        let text = serde_json::to_string_pretty(titles)?;
+        write_atomic(&self.titles_path(), text.as_bytes())?;
+        Ok(())
     }
 
     /// 由标题直接定位，不查任何索引
@@ -246,6 +295,7 @@ impl Vault {
 
     /// 扫出一个目录下现有的笔记（只列目录，不读内容）
     fn walk(&self, base: &Path) -> Result<Vec<ParsedTitle>, VaultError> {
+        let titles = self.titles()?;
         let mut out = Vec::new();
 
         let namespaces = match fs::read_dir(base) {
@@ -276,9 +326,13 @@ impl Vault {
                 let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
                     continue;
                 };
-                let Some(title) = crate::title::decode_from_path(stem) else {
-                    continue;
-                };
+                // 文件名是 id，标题去名字表里查；没登记的按 id 显示（还能打开它、改名）
+                let title = titles
+                    .notes
+                    .get(stem)
+                    .or_else(|| titles.trashed.get(stem))
+                    .cloned()
+                    .unwrap_or_else(|| stem.to_string());
                 out.push(ParsedTitle { ns, title });
             }
         }
@@ -983,6 +1037,13 @@ impl Vault {
             return self.load(title);
         }
 
+        // 先登记名字再写事件：之后再按 id 就能找到它
+        let mut titles = self.titles()?;
+        titles
+            .notes
+            .insert(Self::id_of(&parsed), parsed.display(&self.table));
+        self.save_titles(&titles)?;
+
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -1012,6 +1073,13 @@ impl Vault {
         let events = if path.is_file() {
             self.read_events(&id)?
         } else {
+            // 第一次提交：把名字登记进名字表
+            let mut titles = self.titles()?;
+            titles
+                .notes
+                .insert(id.clone(), parsed.display(&self.table));
+            self.save_titles(&titles)?;
+
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)?;
             }
@@ -1082,6 +1150,16 @@ impl Vault {
         if let Some(parent) = target_path.parent() {
             fs::create_dir_all(parent)?;
         }
+        // 名字随文件走：旧标题删掉，新标题指向同一个 id
+        let target_id = Self::id_of(&target);
+        let mut titles = self.titles()?;
+        // 按 **id（键）** 删：按名字删会受规范化差异影响，删不掉就会留下幽灵名字
+        titles.notes.remove(&Self::id_of(&source));
+        titles
+            .notes
+            .insert(target_id.clone(), target.display(&self.table));
+        self.save_titles(&titles)?;
+
         fs::rename(&source_path, &target_path)?;
 
         let id = Self::id_of(&target);
@@ -1128,6 +1206,14 @@ impl Vault {
                 summary: None,
             },
         )?;
+
+        // 名字挪到 trashed：文件进了 trash/，名字也跟着过去
+        let mut titles = self.titles()?;
+        titles.notes.remove(&id);
+        titles
+            .trashed
+            .insert(id.clone(), parsed.display(&self.table));
+        self.save_titles(&titles)?;
 
         let trashed = self.trashed_path(&id);
         if let Some(parent) = trashed.parent() {
@@ -1818,7 +1904,7 @@ mod tests {
         let report = temp.vault.gc(true, true).unwrap();
         assert_eq!(report.removed_blobs, 0, "trash 里的笔记还在引用它");
 
-        let id = crate::title::encode_for_path("待删");
+        let id = Vault::id_of(&temp.vault.locate("待删").unwrap().0);
         let state = fold(&temp.vault.read_events_at(&temp.vault.trashed_path(&id)).unwrap());
         let blob = state.blob.expect("应当还有内容引用");
         assert_eq!(
@@ -2179,6 +2265,51 @@ mod tests {
         // 大小写不敏感的前缀判断本身也要能处理多字节
         assert!(strip_prefix_ci("Special:newtab", "special:").is_some());
         assert!(strip_prefix_ci("特殊:newtab", "special:").is_none());
+    }
+
+    /// 数据模型：**文件名是纯 ASCII id，标题只存在 titles.json 里**
+    #[test]
+    fn file_names_are_hex_ids_and_titles_live_in_json() {
+        let temp = TempVault::new();
+        temp.vault.create("标题不进文件名").unwrap();
+        temp.vault
+            .commit("标题不进文件名", "正文", None, 0)
+            .unwrap();
+
+        let ids = temp.vault.note_ids().unwrap();
+        assert_eq!(ids.len(), 1);
+        let id = ids[0].clone();
+        assert!(
+            id.chars().all(|ch| ch.is_ascii_hexdigit()),
+            "文件名应当是纯十六进制：{id}"
+        );
+        assert!(
+            temp.root
+                .join("notes")
+                .join("0")
+                .join(format!("{id}.log"))
+                .is_file(),
+            "内容应当在 notes/0/<id>.log"
+        );
+
+        let table = fs::read_to_string(temp.root.join("titles.json")).unwrap();
+        assert!(
+            table.contains("标题不进文件名"),
+            "名字应当存在 titles.json 里：{table}"
+        );
+
+        // 改名：文件跟着 id 走（换到新标题的 id），名字表里换一行，旧名字不留
+        temp.vault.rename("标题不进文件名", "换个名字").unwrap();
+        assert_eq!(temp.vault.note_ids().unwrap().len(), 1, "改名不该留下旧文件");
+        let table = fs::read_to_string(temp.root.join("titles.json")).unwrap();
+        assert!(table.contains("换个名字"), "{table}");
+        assert!(!table.contains("标题不进文件名"), "{table}");
+
+        // 删除：名字从 notes 挪到 trashed，文件进 trash/
+        temp.vault.delete("换个名字").unwrap();
+        let table = fs::read_to_string(temp.root.join("titles.json")).unwrap();
+        assert!(table.contains("trashed"), "{table}");
+        assert!(table.contains("换个名字"), "删除后名字要留在 trashed 里：{table}");
     }
 
     #[test]
