@@ -51,6 +51,9 @@ const appTheme = EditorView.theme(
   {
     "&": { color: "var(--text)", backgroundColor: "transparent", height: "100%" },
     ".cm-content": { caretColor: "var(--accent)", fontFamily: "var(--mono-font)" },
+    /* 限高加在 CM6 自己的滚动容器上：滚外层会让它的虚拟渲染算错可视范围 */
+    ".cm-editor": { height: "auto" },
+    ".cm-scroller": { maxHeight: "calc(100vh - 240px)", overflow: "auto" },
     ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--accent)" },
     "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection":
       { backgroundColor: "var(--selection-bg)" },
@@ -400,13 +403,13 @@ function submit() {
       <div
         ref="hostEl"
         class="editor__source selectable"
-        style="flex: 1 1 0; min-width: 0"
+        style="flex: 1 1 0; min-width: 0; overflow: hidden"
       />
 
       <!-- 右：渲染预览（后端同一个渲染器；.note-body 复用正文样式） -->
       <div
         class="editor__preview selectable"
-        style="flex: 1 1 0; min-width: 0"
+        style="flex: 1 1 0; min-width: 0; overflow: auto; max-height: calc(100vh - 240px)"
       >
         <p v-if="previewProblem" class="editor__preview-error">
           预览渲染失败：{{ previewProblem }}
