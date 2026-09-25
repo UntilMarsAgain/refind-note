@@ -6,6 +6,7 @@
 mod command;
 mod markdown;
 mod storage;
+mod tasks;
 mod title;
 
 use std::sync::{Mutex, MutexGuard};
@@ -123,6 +124,48 @@ fn purge_trash_entry(title: String) -> Result<(), String> {
     vault
         .purge_trash_entry(&title)
         .map_err(|error| error.to_string())
+}
+
+/// 提交一次内容块回收（后台执行；进度与结果见任务栏）
+#[tauri::command]
+fn submit_gc(orphan_blobs: bool, superseded_drafts: bool) -> u64 {
+    tasks::submit("回收内容块", move || {
+        let _guard = write_guard();
+        let vault = open()?;
+        let report = vault
+            .gc(orphan_blobs, superseded_drafts)
+            .map_err(|error| error.to_string())?;
+        Ok(format!(
+            "回收内容块 {} 个、草稿节点 {} 个，释放 {} 字节",
+            report.removed_blobs, report.removed_drafts, report.freed_bytes
+        ))
+    })
+}
+
+/// 提交一次数据库维护（到点了才有实际工作）
+#[tauri::command]
+fn submit_maintenance() -> u64 {
+    tasks::submit("数据库维护", move || {
+        let _guard = write_guard();
+        let mut vault = open()?;
+        let report = vault
+            .run_maintenance()
+            .map_err(|error| error.to_string())?;
+
+        let purged = report.purged.map(|item| item.removed).unwrap_or(0);
+        let blobs = report.gc.map(|item| item.removed_blobs).unwrap_or(0);
+        Ok(if purged == 0 && blobs == 0 {
+            "本次没有需要清理的内容".to_string()
+        } else {
+            format!("清理回收站 {purged} 条，回收内容块 {blobs} 个")
+        })
+    })
+}
+
+/// 任务表快照（底部任务栏用）
+#[tauri::command]
+fn list_tasks() -> Vec<tasks::Task> {
+    tasks::list()
 }
 
 /// 自动维护：到点了就清回收站、回收内容块。前端在启动时调一次。
@@ -365,6 +408,9 @@ pub fn run() {
             restore_note,
             purge_trash_entry,
             run_maintenance,
+            submit_gc,
+            submit_maintenance,
+            list_tasks,
             list_notes,
             load_note,
             create_note,
