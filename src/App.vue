@@ -159,7 +159,14 @@ const draftExists = ref(false);
  */
 /** 每个标签页自带浏览历史（内部链接是「跳转」，会往里推一条） */
 const tabs = ref<
-  { address: string; title: string; history: string[]; cursor: number }[]
+  {
+    address: string;
+    title: string;
+    history: string[];
+    cursor: number;
+    /** 上次在这个标签页停下的滚动位置（切回来时还原） */
+    scroll: number;
+  }[]
 >([]);
 const activeTab = ref(0);
 /** 内部链接的右键菜单（坐标来自鼠标事件） */
@@ -193,6 +200,7 @@ function syncActiveTab(address: Address) {
     title: tabTitleOf(address),
     history: [address.address],
     cursor: 0,
+    scroll: 0,
   });
 }
 
@@ -203,9 +211,10 @@ function openNewTab() {
     title: "新标签页",
     history: ["special:newtab"],
     cursor: 0,
+    scroll: 0,
   });
   activeTab.value = tabs.value.length - 1;
-  void navigate("special:newtab");
+  void navigate("special:newtab", "replace");
 }
 
 /**
@@ -219,9 +228,10 @@ function openTabWith(address: string) {
     title: address,
     history: [address],
     cursor: 0,
+    scroll: 0,
   });
   activeTab.value = tabs.value.length - 1;
-  void navigate(address);
+  void navigate(address, "replace");
 }
 
 /** 右键菜单：在新标签页打开 */
@@ -249,7 +259,8 @@ function selectTab(index: number) {
     return;
   }
   activeTab.value = index;
-  void navigate(tab.address);
+  // 切回标签页：还原它上次停的地方，**不再**执行章节跳转
+  void navigate(tab.address, "restore");
 }
 
 /** 拖放调整标签页顺序：把 from 位置的标签页挪到 to 位置，并让「当前」仍指向同一个 */
@@ -332,7 +343,6 @@ async function loadNote(title: string) {
     missingTitle.value = "";
     loadError.value = "";
     scrolled.value = false;
-    scrollEl.value?.scrollTo({ top: 0 });
     void refreshDraftHint(outcome.note.title);
   } catch (error) {
     console.debug("装载笔记失败:", title, error);
@@ -559,6 +569,13 @@ function onScroll(event: Event) {
   }
 
   const { scrollTop } = el;
+
+  // 记下当前标签页的浏览位置，切走再回来时还原
+  const tab = tabs.value[activeTab.value];
+  if (tab) {
+    tab.scroll = scrollTop;
+  }
+
   if (!scrolled.value && scrollTop > 32) {
     scrolled.value = true;
   } else if (scrolled.value && scrollTop < 12) {
@@ -733,24 +750,33 @@ function sectionOf(address: Address): string {
 }
 
 /**
- * 滚到章节处。
+ * 落到正文之后的滚动位置。
  *
- * 地址里的 `#章节` 由后端解析并原样带回，但**滚动是前端的事**（和点页内锚点一样）。
- * 必须等一次 nextTick：正文是 v-html 渲染的，此刻 DOM 里还没有那个锚点。
+ * - **切回标签页**（`restore`）：回到它上次停的地方 —— 所以 `示例笔记#代码`
+ *   每个标签页只跳一次，切走再回来保持原来的浏览位置；
+ * - 其余情况：地址里带 `#章节` 就跳过去，否则回到顶部。
  */
-async function scrollToSection(section: string) {
-  if (!section) {
+async function settleScroll(movement: string, address: Address) {
+  await nextTick();
+  const tab = tabs.value[activeTab.value];
+
+  if (movement === "restore") {
+    scrollEl.value?.scrollTo({ top: tab?.scroll ?? 0 });
     return;
   }
-  await nextTick();
 
-  let id = section;
-  try {
-    id = decodeURIComponent(section);
-  } catch {
-    // 非法转义序列就按原样找
+  const section = sectionOf(address);
+  if (section) {
+    let id = section;
+    try {
+      id = decodeURIComponent(section);
+    } catch {
+      // 非法转义序列就按原样找
+    }
+    document.getElementById(id)?.scrollIntoView({ block: "start" });
+    return;
   }
-  document.getElementById(id)?.scrollIntoView({ block: "start" });
+  scrollEl.value?.scrollTo({ top: 0 });
 }
 
 /** 回到最新提交 */
@@ -825,7 +851,8 @@ function setSection(id: string) {
  * 地址栏提交 = 导航。语法全在后端，这里不做任何解析。
  */
 async function onSubmit(value: string) {
-  await navigate(value);
+  // 地址栏输入是「替换当前这条」，不产生新的历史记录
+  await navigate(value, "replace");
 }
 
 /**
@@ -837,7 +864,10 @@ async function onSubmit(value: string) {
  * 解析失败时**不动地址栏**：用户写错了版本引用（`@` 没找到对应版本）时，应当看见自己
  * 输入的内容，而不是被换成他并没有输入的规范地址。
  */
-async function navigate(input: string, movement: "replace" | "push" | "history" = "replace") {
+async function navigate(
+  input: string,
+  movement: "push" | "replace" | "history" | "restore" = "push",
+) {
   addressError.value = "";
   rejectedAddress.value = "";
 
@@ -846,8 +876,10 @@ async function navigate(input: string, movement: "replace" | "push" | "history" 
     address = await invoke<Address>("parse_address", { input });
   } catch (error) {
     addressError.value = String(error);
-    // 例外：解析不了就保留用户写的那一行，别换成规范地址
-    rejectedAddress.value = input.trim();
+    // 只有「@ 版本没找到」那类才保留用户输入（这是规范里说的唯一例外）；
+    // 其它错误（例如 special 页面不存在）一律退回修改前的地址，免得地址栏
+    // 停在一个根本不存在的写法上。
+    rejectedAddress.value = input.includes("@") ? input.trim() : "";
     console.debug("地址解析失败:", error);
     return;
   }
@@ -883,7 +915,7 @@ async function navigate(input: string, movement: "replace" | "push" | "history" 
       return;
     case "note":
       await loadNote(address.title);
-      await scrollToSection(sectionOf(address));
+      await settleScroll(movement, address);
       return;
     case "edit":
       await loadNote(address.title);
@@ -898,7 +930,7 @@ async function navigate(input: string, movement: "replace" | "push" | "history" 
       return;
     case "view-version":
       await openRevision(address.title, address.rev, address.short_id);
-      await scrollToSection(sectionOf(address));
+      await settleScroll(movement, address);
       return;
     case "rollback-confirm":
       await loadNote(address.title);
