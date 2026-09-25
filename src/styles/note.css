@@ -1,0 +1,206 @@
+/*
+ * 笔记正文排版。
+ *
+ * 内容由 Rust 端编译成 HTML 后用 v-html 注入，所以用 .note-body 前缀做作用域，
+ * 而不是 Vue 的 scoped 样式 —— scoped 对 v-html 注入的节点不生效。
+ *
+ * 排版惯例参考 MediaWiki / Citizen 皮肤：标题下划线、引用左侧竖线、
+ * 表格带表头底色、代码块自成一块。配色一律走 theme.css 的变量，因此
+ * 浅色/深色切换自动跟随。
+ */
+
+.note-body {
+  /* body 上是 user-select:none，正文必须显式放开，否则笔记没法复制 */
+  user-select: text;
+  -webkit-user-select: text;
+
+  /* 限宽 + 居中，形成一条居中的阅读栏；缺了 margin-inline 就会靠左、右侧空出 */
+  max-width: var(--reading-width);
+  margin-inline: auto;
+
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.75;
+  overflow-wrap: break-word;
+}
+
+/* 第一块内容不要顶出多余留白 */
+.note-body > :first-child {
+  margin-top: 0;
+}
+
+/* ---------- 标题 ---------- */
+
+.note-body h1,
+.note-body h2,
+.note-body h3,
+.note-body h4,
+.note-body h5,
+.note-body h6 {
+  margin: 1.6em 0 0.6em;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.note-body h1 {
+  font-size: 1.7em;
+}
+
+.note-body h2 {
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--border);
+  font-size: 1.35em;
+}
+
+.note-body h3 {
+  font-size: 1.15em;
+}
+
+.note-body h4 {
+  font-size: 1em;
+}
+
+.note-body h5,
+.note-body h6 {
+  color: var(--text-dim);
+  font-size: 0.92em;
+}
+
+/* ---------- 段落与行内元素 ---------- */
+
+.note-body p {
+  margin: 0.9em 0;
+}
+
+.note-body strong {
+  font-weight: 600;
+}
+
+.note-body em {
+  font-style: italic;
+}
+
+.note-body s,
+.note-body del {
+  color: var(--text-dim);
+}
+
+.note-body a {
+  color: var(--accent-soft);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+}
+
+.note-body a:hover {
+  border-bottom-color: currentColor;
+}
+
+/* ---------- 列表 ---------- */
+
+.note-body ul,
+.note-body ol {
+  margin: 0.9em 0;
+  padding-left: 1.7em;
+}
+
+.note-body ul {
+  list-style: disc;
+}
+
+.note-body ul ul {
+  list-style: circle;
+}
+
+.note-body ol {
+  list-style: decimal;
+}
+
+.note-body li {
+  margin: 0.3em 0;
+}
+
+.note-body li > ul,
+.note-body li > ol {
+  margin: 0.3em 0;
+}
+
+/* ---------- 引用 ---------- */
+
+.note-body blockquote {
+  margin: 1em 0;
+  padding: 0.1em 0 0.1em 1em;
+  border-left: 3px solid var(--accent);
+  color: var(--text-dim);
+}
+
+.note-body blockquote p {
+  margin: 0.4em 0;
+}
+
+/* ---------- 代码 ---------- */
+
+.note-body code {
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  background: var(--code-bg);
+  font-family: var(--mono-font);
+  font-size: 0.9em;
+}
+
+.note-body pre {
+  margin: 1em 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--code-bg);
+  overflow: auto;
+}
+
+/* 代码块里的 code 不该再套一层内边距和底色 */
+.note-body pre code {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  font-size: 0.88em;
+  line-height: 1.6;
+}
+
+/* ---------- 表格 ---------- */
+
+.note-body table {
+  width: 100%;
+  margin: 1em 0;
+  border-collapse: collapse;
+  font-size: 0.94em;
+}
+
+.note-body th,
+.note-body td {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.note-body th {
+  background: var(--surface);
+  font-weight: 600;
+}
+
+.note-body tbody tr:nth-child(even) {
+  background: var(--hover);
+}
+
+/* ---------- 其它 ---------- */
+
+.note-body hr {
+  margin: 1.8em 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.note-body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+}

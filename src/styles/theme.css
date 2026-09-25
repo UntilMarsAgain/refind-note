@@ -13,6 +13,10 @@
      顶部缩放热区要避开这片区域，所以数值需与 TitleBar 的按钮尺寸保持一致。 */
   --titlebar-actions-width: 166px;
 
+  /* 正文阅读栏的最大宽度。笔记正文与错误提示都按它限宽并居中：
+     只限宽不居中会让内容靠左、右侧空出一大片。 */
+  --reading-width: 46rem;
+
   /* 标题栏与正文共用同一个底色。
      只留 --bg 一个变量是刻意的：这样两者之间结构上就不会出现可见分界。 */
   --bg: #000201;
@@ -20,14 +24,18 @@
   --border: rgba(255, 255, 255, 0.14);
   --divider: rgba(255, 255, 255, 0.3);
   --field-bg: rgba(0, 0, 0, 0.45);
+  --code-bg: rgba(255, 255, 255, 0.07);
   --text: #e8e8e8;
   --text-dim: #a8a2a2;
   --icon: #dcdcdc;
   --accent: #9f5354;
-  --accent-hover: #b05f60;
   --accent-soft: #c68e8c;
   --hover: rgba(255, 255, 255, 0.12);
   --press: rgba(255, 255, 255, 0.2);
+
+  /* 等宽字体栈，供笔记正文的代码样式使用；与主题无关，浅色下沿用同一份 */
+  --mono-font: "JetBrains Mono", "Cascadia Code", "Noto Sans Mono CJK SC",
+    ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   font-family: "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei",
     Inter, system-ui, -apple-system, sans-serif;
@@ -48,11 +56,11 @@
   --border: rgba(0, 0, 0, 0.14);
   --divider: rgba(0, 0, 0, 0.22);
   --field-bg: rgba(0, 0, 0, 0.05);
+  --code-bg: rgba(0, 0, 0, 0.06);
   --text: #201c1c;
   --text-dim: #6d6464;
   --icon: #3a3434;
   --accent: #9f5354;
-  --accent-hover: #8a4748;
   --accent-soft: #8a4748;
   --hover: rgba(0, 0, 0, 0.06);
   --press: rgba(0, 0, 0, 0.12);

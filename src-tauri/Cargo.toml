@@ -22,7 +22,9 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-markdown-it = "0.6"
+# default-features 里含 syntect，它把代码高亮配色以内联 style 写死，
+# 跟随不了浅色/深色切换，所以关掉，代码块交给前端 CSS。顺带少一条重依赖。
+markdown-it = { version = "0.6", default-features = false, features = ["linkify"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

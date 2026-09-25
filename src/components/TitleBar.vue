@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, type Component } from "vue";
+import {
+  computed,
+  onMounted,
+  onUnmounted,
+  ref,
+  watch,
+  type Component,
+} from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Check,
@@ -25,10 +32,12 @@ import {
 /**
  * 自绘标题栏。
  *
- * 中间是一个「地址栏式」输入框：静止时显示窗口标题，聚焦后可编辑。
- * 依赖 tauri.conf.json 的 `decorations: false`，以及 capabilities 里的
- * core:window:allow-{minimize,toggle-maximize,close,title,start-dragging}。
+ * 中间是一个「地址栏式」输入框：静止时显示当前笔记的标题（由 title 传入），
+ * 聚焦后可编辑。依赖 tauri.conf.json 的 `decorations: false`，以及
+ * capabilities 里的 core:window:allow-{minimize,toggle-maximize,close,start-dragging}。
  */
+
+const props = defineProps<{ title: string }>();
 
 const emit = defineEmits<{
   (e: "search"): void;
@@ -39,10 +48,23 @@ const appWindow = getCurrentWindow();
 const isMaximized = ref(false);
 
 const fieldEl = ref<HTMLInputElement | null>(null);
-/** 静止时是窗口标题，聚焦后可编辑 */
+/** 静止时显示笔记标题，聚焦后可编辑 */
 const draft = ref("");
 /** 最近一次提交的值，Esc 或失焦时回退到它 */
 let committed = "";
+
+// 标题由外部（当前笔记）驱动：变化时同步过来，
+// 但用户正在输入时不要抢走他编辑中的内容。
+watch(
+  () => props.title,
+  (title) => {
+    committed = title;
+    if (document.activeElement !== fieldEl.value) {
+      draft.value = title;
+    }
+  },
+  { immediate: true },
+);
 
 const menuEl = ref<HTMLElement | null>(null);
 const menuOpen = ref(false);
@@ -65,9 +87,6 @@ const themeTip = computed(() => {
 let unlistenResized: (() => void) | undefined;
 
 onMounted(async () => {
-  committed = await appWindow.title();
-  draft.value = committed;
-
   isMaximized.value = await appWindow.isMaximized();
   // 最大化状态会被拖动、双击、系统快捷键改变，必须跟着事件走，
   // 否则「最大化 / 还原」的图标会停在错误的那一个上。
