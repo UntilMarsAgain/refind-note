@@ -405,9 +405,12 @@ function submit() {
 </template>
 
 <style scoped>
+/* 根撑满可用高度：父容器（编辑页时）不再滚动，高度从它一路传下来 */
 .editor {
   display: flex;
   flex-direction: column;
+  height: 100%;
+  min-height: 0;
   padding-top: 18px;
 }
 
@@ -634,14 +637,23 @@ function submit() {
 }
 
 /*
- * 两栏**各自滚动**，而不是整页滚动 —— 前提是它们有**确定的高度**；
- * 高度由内容撑开时，页面本身就会变高，滚轮滚的就是页面。
+ * 两栏**各自滚动**，而不是整页滚动。
  *
- * 这里用视口高度减去本页固定开销（标题栏 40 + 笔记页头 + 编辑栏 + 上下留白，约 190px）。
- * 这是权宜做法：更彻底的是让编辑页的父容器不再整体滚动、把高度传下来 ——
- * 那需要改 App 侧的布局，留待后续。
+ * 关键不是加 overflow，而是**高度要有确定来源**：高度由内容撑开时，页面本身就会变高，
+ * 滚轮滚的就是页面。所以这里走 flex 链 —— 根 `.editor` 撑满父容器，两栏吃掉剩余高度，
+ * 再各自 overflow: auto。
+ *
+ * 下面那条 `:global(...)` 是降级路径：父容器不支持 `:has()` 时按视口高度兜底
+ * （旧行为：两栏各有滚动条，页面可能还能滚一点）。
  */
 .editor__panes {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+}
+
+/* 没有 :has() 的老实现环境：父容器仍在滚，只能按视口给一个固定高度兜底 */
+:global(.app__body:not(:has(.editor))) .editor__panes {
   height: calc(100vh - 190px);
   min-height: 320px;
 }

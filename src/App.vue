@@ -1691,3 +1691,13 @@ function onAction(name: string) {
   background: var(--hover);
 }
 </style>
+
+<!--
+  全局规则（非 scoped）：编辑页要让高度沿 flex 链传下去，正文容器就不能再整体滚动。
+  用 :has(.editor) 只在"里面有编辑器"时生效 —— 阅读、历史等页面照旧整体滚动。
+-->
+<style>
+.app__body:has(.editor) {
+  overflow: hidden;
+}
+</style>
