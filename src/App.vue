@@ -8,6 +8,7 @@ import NewTab from "./components/NewTab.vue";
 import SettingsPage from "./components/SettingsPage.vue";
 import AllPages from "./components/AllPages.vue";
 import AppMenu from "./components/AppMenu.vue";
+import GcPage from "./components/GcPage.vue";
 import { labelOf } from "./special";
 import { setThemeMode, themeMode, type ThemeMode } from "./theme";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -1353,6 +1354,7 @@ function onAction(name: string) {
         :focus="settingsFocus"
         @update="updateSettings"
       />
+      <GcPage v-else-if="mode === 'special' && specialPage === 'gc'" />
 
           <!-- 编辑中：不显示页头，操作都在编辑器自己那一行里 -->
           <NoteEditor
