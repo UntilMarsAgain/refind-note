@@ -171,4 +171,9 @@ pub struct VaultSettings {
     /// 标题首字母是否强制大写（对应 MediaWiki 的 $wgCapitalLinks）
     pub capital_links: bool,
     pub max_title_bytes: usize,
+    /// 增量链长度上限（0 之外的任何值都合法；界面里给个合理区间）
+    pub delta_chain_limit: usize,
+    pub theme: String,
+    pub accent: String,
+    pub reading_width: u32,
 }

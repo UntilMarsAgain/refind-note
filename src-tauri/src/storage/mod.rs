@@ -433,6 +433,10 @@ impl Vault {
             format: self.config.format,
             capital_links: self.config.capital_links,
             max_title_bytes: self.config.max_title_bytes,
+            delta_chain_limit: self.config.delta_chain_limit,
+            theme: self.config.appearance.theme.clone(),
+            accent: self.config.appearance.accent.clone(),
+            reading_width: self.config.appearance.reading_width,
         }
     }
 
@@ -441,6 +445,10 @@ impl Vault {
         &mut self,
         capital_links: Option<bool>,
         max_title_bytes: Option<usize>,
+        delta_chain_limit: Option<usize>,
+        theme: Option<String>,
+        accent: Option<String>,
+        reading_width: Option<u32>,
     ) -> Result<(), VaultError> {
         if let Some(value) = capital_links {
             self.config.capital_links = value;
@@ -448,6 +456,24 @@ impl Vault {
         if let Some(value) = max_title_bytes {
             self.config.max_title_bytes = value;
         }
+        if let Some(value) = delta_chain_limit {
+            // 下限留 1：0 会让每一版都退回整份快照（合法但没意义）
+            self.config.delta_chain_limit = value.max(1);
+        }
+        if let Some(value) = theme {
+            self.config.appearance.theme = value;
+        }
+        if let Some(value) = accent {
+            self.config.appearance.accent = value;
+        }
+        if let Some(value) = reading_width {
+            self.config.appearance.reading_width = value;
+        }
+        self.save_config()
+    }
+
+    /// 设置一律落在 `~/.refind-note/vault.json`（仓库根下）——只有这一处，没有第二份
+    fn save_config(&self) -> Result<(), VaultError> {
         let path = self.root.join("vault.json");
         write_atomic(&path, &serde_json::to_vec_pretty(&self.config)?)?;
         Ok(())

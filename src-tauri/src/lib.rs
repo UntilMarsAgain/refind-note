@@ -51,11 +51,22 @@ fn get_settings() -> Result<VaultSettings, String> {
 fn update_settings(
     capital_links: Option<bool>,
     max_title_bytes: Option<usize>,
+    delta_chain_limit: Option<usize>,
+    theme: Option<String>,
+    accent: Option<String>,
+    reading_width: Option<u32>,
 ) -> Result<VaultSettings, String> {
     let _guard = write_guard();
     let mut vault = open()?;
     vault
-        .update_settings(capital_links, max_title_bytes)
+        .update_settings(
+            capital_links,
+            max_title_bytes,
+            delta_chain_limit,
+            theme,
+            accent,
+            reading_width,
+        )
         .map_err(|error| error.to_string())?;
     Ok(vault.settings_view())
 }
