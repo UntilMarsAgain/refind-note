@@ -1,0 +1,99 @@
+/*
+ * 自绘悬停说明。
+ *
+ * 用法：元素加 `data-tip="文案"`，默认向右弹出；加 `.tip--left` 改为向左弹出。
+ * 不想显示时不要给 data-tip（空字符串也会弹出空气泡）。
+ *
+ * 注意：用了它就别再留原生 `title`，两套提示会同时出现。
+ */
+
+[data-tip] {
+  position: relative;
+}
+
+[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: 50%;
+  /* 必须高于 .page-header 的 z-index: 10，否则气泡会被 sticky 的页面标题压住。
+     取值低于 WindowResizeHandles 的 50，避免盖住窗口缩放的边缘热区。 */
+  z-index: 40;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+/* 指向元素的小三角：旋转 45° 的方块，只描朝外那两条边 */
+[data-tip]::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  z-index: 40;
+  width: 8px;
+  height: 8px;
+  background: var(--surface);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-50%) rotate(45deg);
+  transition: opacity 120ms ease;
+}
+
+/* ---------- 方向：默认向右 ---------- */
+
+[data-tip]::after {
+  left: calc(100% + 12px);
+  transform: translate(4px, -50%);
+}
+
+[data-tip]::before {
+  left: calc(100% + 8px);
+  border-top: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+}
+
+/* ---------- 方向：向左 ---------- */
+
+[data-tip].tip--left::after {
+  left: auto;
+  right: calc(100% + 12px);
+  transform: translate(-4px, -50%);
+}
+
+[data-tip].tip--left::before {
+  left: auto;
+  right: calc(100% + 8px);
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+}
+
+/* ---------- 显示 ----------
+ * 放在方向规则之后：特异性相同，靠顺序让 hover 的 transform 覆盖初始偏移。
+ */
+
+[data-tip]:hover::after,
+[data-tip]:focus-visible::after {
+  opacity: 1;
+  transform: translate(0, -50%);
+}
+
+[data-tip]:hover::before,
+[data-tip]:focus-visible::before {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-tip]::after,
+  [data-tip]::before {
+    transition: none;
+  }
+}

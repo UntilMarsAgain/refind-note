@@ -4,7 +4,9 @@ import { ArrowDown, ArrowLeftRight, ArrowUp, Scan } from "@lucide/vue";
 /**
  * 悬浮在右下角的一组页面工具。
  *
- * 造型对齐参考：贴右下角往上堆的圆形按钮，悬停时在左侧弹出说明气泡。
+ * 造型对齐参考：贴右下角往上堆的圆形按钮，悬停时在左侧弹出说明。
+ * 说明气泡用全局的 data-tip / .tip--left，不在这里重复实现。
+ *
  * 这里只做展示与派发，实际动作（限宽、滚动）由 App.vue 负责——
  * 滚动容器和限宽状态都在它手上。
  */
@@ -22,10 +24,10 @@ const emit = defineEmits<{
 </script>
 
 <template>
+  <!-- 不用原生 title：说明由 data-tip 自绘，两套同时出现会重影 -->
   <div class="floating-tools">
-    <!-- 图标不用 title：说明由 .tool::after 自绘，两套同时出现会重影 -->
     <button
-      class="tool"
+      class="tool tip--left"
       type="button"
       :data-tip="limited ? '取消宽度限制' : '限制正文宽度'"
       :aria-label="limited ? '取消宽度限制' : '限制正文宽度'"
@@ -40,7 +42,7 @@ const emit = defineEmits<{
     </button>
 
     <button
-      class="tool"
+      class="tool tip--left"
       type="button"
       data-tip="滚动至页顶"
       aria-label="滚动至页顶"
@@ -50,7 +52,7 @@ const emit = defineEmits<{
     </button>
 
     <button
-      class="tool"
+      class="tool tip--left"
       type="button"
       data-tip="滚动至页底"
       aria-label="滚动至页底"
@@ -101,55 +103,6 @@ const emit = defineEmits<{
   background: var(--press);
 }
 
-/* ---------- 悬停说明气泡 ---------- */
-
-.tool::after {
-  content: attr(data-tip);
-  position: absolute;
-  top: 50%;
-  right: calc(100% + 12px);
-  padding: 5px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 12.5px;
-  line-height: 1.4;
-  white-space: nowrap;
-  pointer-events: none;
-  opacity: 0;
-  transform: translate(4px, -50%);
-  transition: opacity 120ms ease, transform 120ms ease;
-}
-
-/* 指向按钮的小三角：旋转 45° 的方块，只描两条边 */
-.tool::before {
-  content: "";
-  position: absolute;
-  top: 50%;
-  right: calc(100% + 8px);
-  width: 8px;
-  height: 8px;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-  border-right: 1px solid var(--border);
-  pointer-events: none;
-  opacity: 0;
-  transform: translateY(-50%) rotate(45deg);
-  transition: opacity 120ms ease;
-}
-
-.tool:hover::after,
-.tool:focus-visible::after {
-  opacity: 1;
-  transform: translate(0, -50%);
-}
-
-.tool:hover::before,
-.tool:focus-visible::before {
-  opacity: 1;
-}
-
 /* ---------- 限宽按钮的图标切换动画 ---------- */
 
 .swap {
@@ -188,9 +141,7 @@ const emit = defineEmits<{
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .swap__icon,
-  .tool::after,
-  .tool::before {
+  .swap__icon {
     transition: none;
   }
 }

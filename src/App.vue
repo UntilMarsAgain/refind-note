@@ -2,6 +2,7 @@
 import { onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import FloatingTools from "./components/FloatingTools.vue";
+import TabRail from "./components/TabRail.vue";
 import TitleBar from "./components/TitleBar.vue";
 import NoteContent from "./components/NoteContent.vue";
 import PageHeader from "./components/PageHeader.vue";
@@ -115,25 +116,29 @@ function onAction(name: string) {
       @submit="onSubmit"
     />
 
-    <main
-      ref="scrollEl"
-      class="app__body"
-      :class="{ 'app__body--wide': !limitWidth }"
-      @scroll.passive="onScroll"
-    >
-      <div class="app__column" :class="{ 'app__column--wide': !limitWidth }">
-        <template v-if="note">
-          <PageHeader
-            :title="note.title"
-            :collapsed="scrolled"
-            @action="onAction"
-          />
-          <NoteContent :html="note.html" />
-        </template>
+    <div class="app__main">
+      <TabRail />
 
-        <p v-else-if="loadError" class="app__error">{{ loadError }}</p>
-      </div>
-    </main>
+      <main
+        ref="scrollEl"
+        class="app__body"
+        :class="{ 'app__body--wide': !limitWidth }"
+        @scroll.passive="onScroll"
+      >
+        <div class="app__column" :class="{ 'app__column--wide': !limitWidth }">
+          <template v-if="note">
+            <PageHeader
+              :title="note.title"
+              :collapsed="scrolled"
+              @action="onAction"
+            />
+            <NoteContent :html="note.html" />
+          </template>
+
+          <p v-else-if="loadError" class="app__error">{{ loadError }}</p>
+        </div>
+      </main>
+    </div>
   </div>
 
   <FloatingTools
@@ -151,8 +156,18 @@ function onAction(name: string) {
   height: 100vh;
 }
 
+/* min-height: 0 是必须的：否则这个 flex 项会被内容撑开，
+   里面 .app__body 的 overflow 就再也滚不动了 */
+.app__main {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .app__body {
   flex: 1 1 auto;
+  /* 同理，允许它被 TabRail 挤窄 */
+  min-width: 0;
   overflow: auto;
   /* 顶部留白交给 PageHeader，这样它贴顶冻结时不会有缝 */
   padding: 0 32px 64px;
@@ -179,16 +194,16 @@ function onAction(name: string) {
   max-width: 100%;
 }
 
+.app__error {
+  margin: 28px 0 0;
+  color: var(--accent-soft);
+  font-size: 14px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .app__body,
   .app__column {
     transition: none;
   }
-}
-
-.app__error {
-  margin: 28px 0 0;
-  color: var(--accent-soft);
-  font-size: 14px;
 }
 </style>
