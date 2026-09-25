@@ -19,7 +19,7 @@ pub const MAX_TITLE_BYTES: usize = 255;
 /// （`:` 是命名空间分隔符，永远不属于标题本身；`@` 被地址栏的 `标题@版本` 占用）
 // `@` 是版本引用、`!` 是模式后缀，所以都不允许出现在标题里 ——
 // 地址语法才能靠字符本身切分，不必猜。
-const ILLEGAL_CHARS: &[char] = &['#', '<', '>', '[', ']', '|', '{', '}', ':', '@', '!'];
+const ILLEGAL_CHARS: &[char] = &['#', '<', '>', '[', ']', '|', '{', '}', ':', '@', '$'];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Namespace {

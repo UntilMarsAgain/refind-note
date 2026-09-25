@@ -745,72 +745,116 @@ impl Vault {
 
     /// 解析地址栏那一行，并**解析到底**。
     ///
-    /// 放后端而不是前端：合法性（`@`、冒号、长度）、目标是否存在、缩写 ID 对应哪一版，
-    /// 这些知识全在后端；前端再实现一遍就是第二个真相来源。前端只按 `kind` 分发。
+    /// 标准顺序是 `NAMESPACE:NAME@VERSION#SECTION$STATE`。**顺序不强制**（各部分靠保留
+    /// 字符切分），但回显一律按标准顺序 —— 界面只显示 `address` 字段，不必自己拼。
+    /// 除 NAME 外都可省略。
     ///
-    /// 目前唯一的语法糖是 `@引用`（引用可以是数字版本号，也可以是 commit ID 缩写）。
-    /// 标题里不允许 `@`，所以按**最后一个** `@` 切是安全的。
+    /// 保留字符：`:` 命名空间、`@` 版本、`#` 章节、`$` 状态。它们都不允许出现在标题里，
+    /// 所以切分不必猜。
+    ///
+    /// **章节是唯一允许前端自己更新的部分**：它在地址里被原样带回，前端改章节不必再问
+    /// 后端（阅读位置本来就是界面的事）。
     pub fn parse_address(&self, input: &str) -> Result<Address, VaultError> {
         let raw = input.trim();
         if raw.is_empty() {
             return Ok(Address::Empty);
         }
 
-        // 模式后缀：`!edit` / `!history`。`!` 已列入非法标题字符，不会和标题打架。
-        if let Some(index) = raw.rfind('!') {
-            let parsed = self
-                .table
-                .parse(raw[..index].trim(), self.config.capital_links)?;
+        // 切分：NAME 之外的成分各自由保留字符开头，所以**顺序天然自由**。
+        // 保留字符不允许出现在标题里，因此不必猜边界。
+        let name_end = raw
+            .char_indices()
+            .find(|(_, ch)| matches!(ch, '@' | '#' | '$'))
+            .map(|(index, _)| index)
+            .unwrap_or(raw.len());
+        let name_part = raw[..name_end].trim();
+        let rest = &raw[name_end..];
+
+        let mut reference: Option<String> = None;
+        let mut section: Option<String> = None;
+        let mut state: Option<String> = None;
+
+        let mut cursor = 0;
+        while cursor < rest.len() {
+            let marker = rest[cursor..].chars().next().expect("非空");
+            let from = cursor + marker.len_utf8();
+            let to = rest[from..]
+                .find(['@', '#', '$'])
+                .map(|offset| from + offset)
+                .unwrap_or(rest.len());
+            let value = rest[from..to].trim();
+
+            match marker {
+                '@' => reference = Some(value.to_string()),
+                '#' => section = Some(value.to_string()),
+                '$' => state = Some(value.to_ascii_lowercase()),
+                _ => {}
+            }
+            cursor = to;
+        }
+
+        let reference = reference.filter(|value| !value.is_empty());
+        let section = section.filter(|value| !value.is_empty());
+        let state = match state.as_deref() {
+            None | Some("") => None,
+            Some("edit") => Some("edit"),
+            Some("history") => Some("history"),
+            Some(other) => {
+                return Err(VaultError::BadAddress(format!(
+                    "不认识「${other}」这种状态；目前只有 $edit 与 $history"
+                )))
+            }
+        };
+
+        // 按标准顺序组装回显地址
+        let compose = |title: &str, version: Option<&str>| {
+            let mut out = title.to_string();
+            if let Some(version) = version {
+                out.push('@');
+                out.push_str(version);
+            }
+            if let Some(section) = &section {
+                out.push('#');
+                out.push_str(section);
+            }
+            if let Some(state) = state {
+                out.push('$');
+                out.push_str(state);
+            }
+            out
+        };
+
+        let Some(reference) = reference else {
+            // 没有 @版本：NAME 决定一切
+            let parsed = self.table.parse(name_part, self.config.capital_links)?;
             let display = parsed.display(&self.table);
-            let mode = raw[index + 1..].trim().to_ascii_lowercase();
+            let address = compose(&display, None);
 
             if !self.log_path(&Self::id_of(&parsed)).is_file() {
                 return Ok(Address::Missing {
-                    address: display.clone(),
                     title: display,
+                    address,
                 });
             }
 
-            return match mode.as_str() {
-                "edit" => Ok(Address::Edit {
-                    address: format!("{display}!edit"),
+            return Ok(match state {
+                Some("edit") => Address::Edit {
                     title: display,
-                }),
-                "history" => Ok(Address::History {
-                    address: format!("{display}!history"),
+                    address,
+                },
+                Some("history") => Address::History {
                     title: display,
-                }),
-                other => Err(VaultError::BadAddress(format!(
-                    "不认识「!{other}」这种模式；目前只有 !edit 与 !history"
-                ))),
-            };
-        }
-
-        let (title_part, reference) = match raw.rfind('@') {
-            Some(index) => (raw[..index].trim(), Some(raw[index + 1..].trim().to_string())),
-            None => (raw, None),
-        };
-
-        let Some(reference) = reference.filter(|value| !value.is_empty()) else {
-            // 没有 @，或 @ 后面是空的：整串当标题（含 @ 的会被标题规则拒掉）
-            let parsed = self.table.parse(raw, self.config.capital_links)?;
-            let display = parsed.display(&self.table);
-            return Ok(if self.log_path(&Self::id_of(&parsed)).is_file() {
-                Address::Note {
-                    address: display.clone(),
+                    address,
+                },
+                _ => Address::Note {
                     title: display,
-                }
-            } else {
-                Address::Missing {
-                    address: display.clone(),
-                    title: display,
-                }
+                    address,
+                },
             });
         };
 
-        // 只写 `@引用`：commit ID 全局不重复，所以**扫全仓库**，是谁就跳到谁。
-        // 回显里带回那篇笔记的名称，界面直接显示「名称@缩写」。
-        if title_part.is_empty() {
+        // 只写 @版本：commit ID 全局不重复，所以扫全仓库，是谁就跳到谁
+        if name_part.is_empty() {
             if reference.len() < MIN_SHORT_ID {
                 return Err(VaultError::BadAddress(format!(
                     "只写 @ 引用时要用至少 {MIN_SHORT_ID} 位的 commit ID 缩写"
@@ -833,11 +877,12 @@ impl Vault {
                         continue;
                     };
                     let display = parsed.display(&self.table);
+                    let short = short_revision_id(&id);
                     matches.push(Address::Revision {
-                        address: format!("{display}@{}", short_revision_id(&id)),
+                        address: compose(&display, Some(&short)),
                         title: display,
                         rev,
-                        short_id: short_revision_id(&id),
+                        short_id: short,
                         id,
                     });
                 }
@@ -849,19 +894,19 @@ impl Vault {
                 ))),
                 1 => Ok(matches.remove(0)),
                 count => Err(VaultError::AmbiguousRevision {
-                    prefix: reference.to_string(),
+                    prefix: reference,
                     matches: count,
                 }),
             };
         }
 
-        let parsed = self.table.parse(title_part, self.config.capital_links)?;
+        let parsed = self.table.parse(name_part, self.config.capital_links)?;
         let display = parsed.display(&self.table);
         let id = Self::id_of(&parsed);
         if !self.log_path(&id).is_file() {
-            // 笔记还没有建立，版本自然无从谈起
+            // 笔记还没建立，版本无从谈起；但**照原样回显**用户写的版本，别把他的话吞掉
             return Ok(Address::Missing {
-                address: display.clone(),
+                address: compose(&display, Some(&reference)),
                 title: display,
             });
         }
@@ -876,13 +921,14 @@ impl Vault {
                 rev,
             })?;
         let full_id = revision_id(event);
+        let short = short_revision_id(&full_id);
 
         Ok(Address::Revision {
-            address: format!("{display}@{}", short_revision_id(&full_id)),
+            address: compose(&display, Some(&short)),
             title: display,
             rev,
-            id: full_id.clone(),
-            short_id: short_revision_id(&full_id),
+            id: full_id,
+            short_id: short,
         })
     }
 
@@ -2036,25 +2082,79 @@ mod tests {
         temp.vault.create("模式").unwrap();
         temp.vault.commit("模式", "正文", None, 0).unwrap();
 
-        match temp.vault.parse_address("模式!edit").unwrap() {
+        match temp.vault.parse_address("模式$edit").unwrap() {
             Address::Edit { title, address } => {
                 assert_eq!(title, "模式");
-                assert_eq!(address, "模式!edit", "回显用规范地址");
+                assert_eq!(address, "模式$edit", "回显用标准顺序");
             }
             other => panic!("{other:?}"),
         }
 
-        match temp.vault.parse_address("模式!history").unwrap() {
-            Address::History { address, .. } => assert_eq!(address, "模式!history"),
+        match temp.vault.parse_address("模式$history").unwrap() {
+            Address::History { address, .. } => assert_eq!(address, "模式$history"),
             other => panic!("{other:?}"),
         }
 
         // 不认识的模式要明确报错，不能悄悄当成标题
-        assert!(temp.vault.parse_address("模式!whatever").is_err());
+        assert!(temp.vault.parse_address("模式$whatever").is_err());
 
-        // `!` 与 `@` 都不允许出现在标题里：否则地址语法就和标题打架了
-        assert!(temp.vault.validate_title("带!的标题").is_err());
+        // 保留字符都不允许出现在标题里，否则地址语法就和标题打架了
+        assert!(temp.vault.validate_title("带$的标题").is_err());
+        assert!(temp.vault.validate_title("带#的标题").is_err());
         assert!(temp.vault.validate_title("带@的标题").is_err());
+    }
+
+    /// 标准顺序 NAMESPACE:NAME@VERSION#SECTION$STATE：顺序不强制，回显一律标准
+    #[test]
+    fn addresses_echo_in_standard_order() {
+        let temp = TempVault::new();
+        temp.vault.create("顺序").unwrap();
+        temp.vault.commit("顺序", "第一版", None, 0).unwrap();
+        temp.vault.commit("顺序", "第二版", None, 1).unwrap();
+
+        let second = temp
+            .vault
+            .history("顺序")
+            .unwrap()
+            .into_iter()
+            .find(|item| item.rev == 2)
+            .unwrap();
+
+        // 章节 + 状态：回显按 NAME@VERSION#SECTION$STATE
+        match temp
+            .vault
+            .parse_address(&format!("顺序@{}#小节$history", second.short_id))
+            .unwrap()
+        {
+            Address::Revision { address, title, rev, .. } => {
+                assert_eq!(title, "顺序");
+                assert_eq!(rev, 2);
+                assert_eq!(address, format!("顺序@{}#小节$history", second.short_id));
+            }
+            other => panic!("{other:?}"),
+        }
+
+        // 顺序不强制：状态写在章节前面也照样访问，回显仍是标准顺序
+        match temp.vault.parse_address("顺序$edit#小节").unwrap() {
+            Address::Edit { address, .. } => assert_eq!(address, "顺序#小节$edit"),
+            other => panic!("{other:?}"),
+        }
+
+        // 章节是唯一允许前端自己更新的部分，后端只管原样带回
+        match temp.vault.parse_address("顺序#任意章节").unwrap() {
+            Address::Note { address, .. } => assert_eq!(address, "顺序#任意章节"),
+            other => panic!("{other:?}"),
+        }
+
+        // 除 NAME 外都可省略
+        assert!(matches!(
+            temp.vault.parse_address("顺序").unwrap(),
+            Address::Note { .. }
+        ));
+        assert!(matches!(
+            temp.vault.parse_address("顺序$edit").unwrap(),
+            Address::Edit { .. }
+        ));
     }
 
     #[test]
