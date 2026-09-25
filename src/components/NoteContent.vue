@@ -139,7 +139,8 @@ function onContextMenu(event: MouseEvent) {
  */
 async function copyInlineCode(el: Element, text: string) {
   try {
-    await navigator.clipboard.writeText(text);
+    // 与代码块的复制按钮走同一条路：Tauri 剪贴板插件，不用 navigator.clipboard
+    await writeText(text);
   } catch {
     return;
   }

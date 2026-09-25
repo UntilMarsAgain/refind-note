@@ -8,6 +8,7 @@ import NewTab from "./components/NewTab.vue";
 import SettingsPage from "./components/SettingsPage.vue";
 import AllPages from "./components/AllPages.vue";
 import { setThemeMode, themeMode, type ThemeMode } from "./theme";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import NoteContent from "./components/NoteContent.vue";
 import NoteEditor from "./components/NoteEditor.vue";
 import PageHeader from "./components/PageHeader.vue";
@@ -273,7 +274,8 @@ function copyLinkTarget() {
   const target = linkMenu.value;
   linkMenu.value = null;
   if (target) {
-    void navigator.clipboard?.writeText(target.title);
+    // 与正文里的复制走同一条路（Tauri 剪贴板插件）
+    void writeText(target.title).catch(() => {});
   }
 }
 
