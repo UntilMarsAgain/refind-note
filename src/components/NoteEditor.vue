@@ -562,6 +562,20 @@ function submit() {
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: 8px;
+  /*
+   * 最高高度直接写在这里，**不依赖祖先链**：只要两栏各有上限，它们就是各自的滚动容器。
+   * 数值按视口减去本页固定开销（标题栏 + 编辑栏 + 留白）估的，是权宜值。
+   */
+  max-height: calc(100vh - 240px);
+}
+
+/* 左栏自己不滚：CM6 的虚拟渲染要求它的 `.cm-scroller` 是滚动容器，
+   滚外层会让它算错可视范围（内容可能不渲染）。所以外层隐藏溢出，滚动交给它。 */
+.editor__source {
+  overflow: hidden;
+}
+
+.editor__preview {
   overflow: auto;
 }
 
@@ -581,10 +595,14 @@ function submit() {
  * 选不到（之前那两条其实一直没生效）。要穿透作用域，必须用 :deep()。
  */
 .editor__source :deep(.cm-editor) {
-  height: 100%;
+  /* 不再要求撑满外层：外层高度由内容与上限共同决定，撑满反而会与上限打架 */
+  height: auto;
 }
 
 .editor__source :deep(.cm-scroller) {
+  /* CM6 的滚动容器：最高高度加在它身上，滚动由它负责 */
+  max-height: calc(100vh - 240px);
+  overflow: auto;
   font-family: var(--mono-font);
   font-size: 13px;
   line-height: 1.7;
