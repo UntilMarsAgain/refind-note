@@ -9,6 +9,7 @@ import SettingsPage from "./components/SettingsPage.vue";
 import AllPages from "./components/AllPages.vue";
 import { setThemeMode, themeMode, type ThemeMode } from "./theme";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import NoteContent from "./components/NoteContent.vue";
 import NoteEditor from "./components/NoteEditor.vue";
 import PageHeader from "./components/PageHeader.vue";
@@ -62,6 +63,8 @@ interface VaultSettings {
   /** 主题色 #rrggbb */
   accent: string;
   reading_width: number;
+  /** 界面缩放（1.0 = 100%），Ctrl + 滚轮调整 */
+  zoom: number;
 }
 
 /** 与 Rust 端 `RevisionContent` 对应（历史里某一版的正文） */
@@ -707,6 +710,9 @@ function applyAppearance() {
   root.setProperty("--accent-soft", appearance.accent);
   root.setProperty("--accent-tint", tintOf(appearance.accent));
   root.setProperty("--reading-width", `${appearance.reading_width}px`);
+
+  // 界面缩放交给 WebView 自己做：整页等比，和浏览器一致
+  void getCurrentWebview().setZoom(appearance.zoom);
 }
 
 /** 设置页改了哪一项就只传哪一项（后端是补丁式更新） */
@@ -762,6 +768,46 @@ function tintOf(hex: string): string {
   const value = Number.parseInt(match[1]!, 16);
   return `rgba(${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}, 0.16)`;
 }
+
+/**
+ * Ctrl + 滚轮缩放界面。
+ *
+ * 用 WebView 自己的缩放（整页等比），而不是逐处改 `font-size` —— 后者要动每一处字号，
+ * 而且图片、间距不会跟着变。值存进 `preferences.json`（界面偏好），重启后保持。
+ *
+ * 立即生效保手感，落盘节流：滚轮一次会连发很多事件，逐个写文件既慢也没意义。
+ */
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 3;
+const ZOOM_STEP = 0.1;
+let zoomSaveTimer: number | undefined;
+
+function onWheelZoom(event: WheelEvent) {
+  if (!event.ctrlKey) {
+    return;
+  }
+  // 拦掉 WebView 自己的 Ctrl+滚轮行为，避免两套缩放打架
+  event.preventDefault();
+
+  const current = vaultSettings.value?.zoom ?? 1;
+  const next = Math.min(
+    ZOOM_MAX,
+    Math.max(ZOOM_MIN, current - Math.sign(event.deltaY) * ZOOM_STEP),
+  );
+  if (next === current) {
+    return;
+  }
+
+  if (vaultSettings.value) {
+    vaultSettings.value.zoom = next;
+  }
+  void getCurrentWebview().setZoom(next);
+
+  window.clearTimeout(zoomSaveTimer);
+  zoomSaveTimer = window.setTimeout(() => void updateSettings({ zoom: next }), 400);
+}
+
+window.addEventListener("wheel", onWheelZoom, { passive: false });
 
 /** 标签栏底部的设置入口 */
 function openSettings() {

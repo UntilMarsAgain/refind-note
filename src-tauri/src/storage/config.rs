@@ -26,7 +26,11 @@ pub struct VaultConfig {
 ///
 /// 与 `VaultConfig` 分开，是因为它**不影响数据语义** —— 同一份笔记换个主题不该变成
 /// "数据变了"。将来做同步/备份时，这个文件整体排除即可。
+///
+/// 容器级的 `#[serde(default)]` 是为**向后兼容**：旧文件里没有后来加的字段（如 zoom）时，
+/// 用 `Default` 补齐，而不是让整份设置读失败。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Appearance {
     /// "system" | "light" | "dark"
     pub theme: String,
@@ -34,6 +38,8 @@ pub struct Appearance {
     pub accent: String,
     /// 正文限宽（px）
     pub reading_width: u32,
+    /// 界面缩放（1.0 = 100%）。Ctrl + 滚轮调整
+    pub zoom: f64,
 }
 
 impl Default for Appearance {
@@ -42,6 +48,7 @@ impl Default for Appearance {
             theme: "system".to_string(),
             accent: "#5b8dd6".to_string(),
             reading_width: 1080,
+            zoom: 1.0,
         }
     }
 }

@@ -454,6 +454,7 @@ impl Vault {
             theme: appearance.theme.clone(),
             accent: appearance.accent.clone(),
             reading_width: appearance.reading_width,
+            zoom: appearance.zoom,
         }
     }
 
@@ -466,6 +467,7 @@ impl Vault {
         theme: Option<String>,
         accent: Option<String>,
         reading_width: Option<u32>,
+        zoom: Option<f64>,
     ) -> Result<(), VaultError> {
         if let Some(value) = capital_links {
             self.config.capital_links = value;
@@ -485,6 +487,10 @@ impl Vault {
         }
         if let Some(value) = reading_width {
             self.preferences.reading_width = value;
+        }
+        if let Some(value) = zoom {
+            // 夹在合理区间：太小读不了，太大等于把界面推出屏幕
+            self.preferences.zoom = value.clamp(0.5, 3.0);
         }
 
         // 两条落盘路径，各写各的文件：数据语义进 vault.json、界面偏好进 preferences.json
@@ -2570,7 +2576,15 @@ mod tests {
         let before = fs::read_to_string(temp.root.join("vault.json")).unwrap();
 
         temp.vault
-            .update_settings(None, None, None, Some("light".to_string()), Some("#123456".to_string()), Some(900))
+            .update_settings(
+                None,
+                None,
+                None,
+                Some("light".to_string()),
+                Some("#123456".to_string()),
+                Some(900),
+                None,
+            )
             .unwrap();
 
         let preferences = fs::read_to_string(temp.root.join("preferences.json")).unwrap();

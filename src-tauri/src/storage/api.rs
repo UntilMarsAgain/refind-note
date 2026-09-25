@@ -176,4 +176,6 @@ pub struct VaultSettings {
     pub theme: String,
     pub accent: String,
     pub reading_width: u32,
+    /// 界面缩放（1.0 = 100%）
+    pub zoom: f64,
 }

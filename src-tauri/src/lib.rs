@@ -55,6 +55,7 @@ fn update_settings(
     theme: Option<String>,
     accent: Option<String>,
     reading_width: Option<u32>,
+    zoom: Option<f64>,
 ) -> Result<VaultSettings, String> {
     let _guard = write_guard();
     let mut vault = open()?;
@@ -66,6 +67,7 @@ fn update_settings(
             theme,
             accent,
             reading_width,
+            zoom,
         )
         .map_err(|error| error.to_string())?;
     Ok(vault.settings_view())

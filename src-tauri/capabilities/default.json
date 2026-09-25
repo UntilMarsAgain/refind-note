@@ -11,6 +11,7 @@
     "core:window:allow-start-dragging",
     "core:window:allow-start-resize-dragging",
     "opener:default",
-    "clipboard-manager:allow-write-text"
+    "clipboard-manager:allow-write-text",
+    "core:webview:allow-set-webview-zoom"
   ]
 }
