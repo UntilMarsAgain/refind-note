@@ -743,227 +743,212 @@ impl Vault {
         })
     }
 
+    /// 全仓库按 ID 前缀找版本：0 个＝没有，1 个＝命中，多个＝歧义
+    fn find_version_globally(
+        &self,
+        prefix: &str,
+    ) -> Result<Option<(String, u64, String, String)>, VaultError> {
+        let needle = prefix.to_ascii_lowercase();
+        // (标题, 版本, 完整 ID, 缩写)
+        let mut matches: Vec<(String, u64, String, String)> = Vec::new();
+
+        for (_, path) in self.log_files()? {
+            let events = self.read_events_at(&path)?;
+            for event in &events {
+                let Some(rev) = revision_of(event) else {
+                    continue;
+                };
+                let id = revision_id(event);
+                if !id.starts_with(&needle) {
+                    continue;
+                }
+                let Some(parsed) = Self::title_of_log_path(&path) else {
+                    continue;
+                };
+                matches.push((
+                    parsed.display(&self.table),
+                    rev,
+                    id.clone(),
+                    short_revision_id(&id),
+                ));
+            }
+        }
+
+        match matches.len() {
+            0 => Ok(None),
+            1 => Ok(matches.pop()),
+            count => Err(VaultError::AmbiguousRevision {
+                prefix: prefix.to_string(),
+                matches: count,
+            }),
+        }
+    }
+
     /// 解析地址栏那一行，并**解析到底**。
     ///
-    /// 标准顺序是 `NAMESPACE:NAME@VERSION#SECTION$STATE`，**顺序不强制**（靠保留字符切分），
-    /// 但回显一律按标准顺序 —— 界面只显示 `address` 字段，不必自己拼。除 NAME 外都可省略。
+    /// 语法（保留字符 `:` `@` `#` `$` 都不允许出现在标题里）：
     ///
-    /// 两条**规范化裁剪**（在回显里执行，所以「跳到哪」与「显示什么」永远一致）：
-    /// - **某一版不能编辑**：`@版本$edit` 裁掉 `$edit`，结果就是只读查看那一版；
-    /// - **历史属于整篇**，不属于某一版：`@版本$history` 裁掉 `@版本`，结果就是整篇历史页。
+    /// - `NAMESPACE:NAME@STATE` —— STATE 省略即阅读；否则 `edit` / `history` / `delete`
+    /// - `view-版本` —— 只读查看某一版
+    /// - `rollback-版本` —— 回退的二次确认页
+    /// - 末尾可接 `#章节`（章节是唯一允许前端自己确定的成分）
     ///
-    /// 章节是唯一允许前端自己确定的成分：原样带回，前端改章节不必再问后端。
+    /// **版本被收起来了**：它只以 `view-` / `rollback-` 前缀出现，不再与状态组合，
+    /// 所以不需要任何「裁掉谁」的规则。前缀形式不查命名空间表 —— 它不是命名空间。
     pub fn parse_address(&self, input: &str) -> Result<Address, VaultError> {
         let raw = input.trim();
         if raw.is_empty() {
             return Ok(Address::Empty);
         }
 
-        // 切分：NAME 之外的成分各自由保留字符开头，所以**顺序天然自由**。
-        // 保留字符不允许出现在标题里，因此不必猜边界。
+        // 版本形态。缩写必须是 ≥5 位十六进制，否则整串当标题
+        // （标题恰好叫 `view-abc` 时不会被误判成动作）。
+        for (prefix, rollback) in [("view-", false), ("rollback-", true)] {
+            let Some(rest) = raw.strip_prefix(prefix) else {
+                continue;
+            };
+            let (version, section) = match rest.find('#') {
+                Some(index) => (&rest[..index], Some(rest[index + 1..].trim())),
+                None => (rest, None),
+            };
+            let version = version.trim();
+            if !is_version_reference(version) {
+                continue;
+            }
+
+            if let Some((title, rev, id, short)) = self.find_version_globally(version)? {
+                let address = compose_version(prefix, &short, section);
+                return Ok(if rollback {
+                    Address::RollbackConfirm {
+                        title,
+                        rev,
+                        id,
+                        short_id: short,
+                        address,
+                    }
+                } else {
+                    Address::ViewVersion {
+                        title,
+                        rev,
+                        id,
+                        short_id: short,
+                        address,
+                    }
+                });
+            }
+
+            return Err(VaultError::BadAddress(format!(
+                "没有哪个版本对得上「{version}」这个缩写"
+            )));
+        }
+
+        // 笔记形态：NAME + @状态 + #章节
         let name_end = raw
             .char_indices()
-            .find(|(_, ch)| matches!(ch, '@' | '#' | '$'))
+            .find(|(_, ch)| matches!(ch, '@' | '#'))
             .map(|(index, _)| index)
             .unwrap_or(raw.len());
         let name_part = raw[..name_end].trim();
         let rest = &raw[name_end..];
 
-        let mut reference: Option<String> = None;
-        let mut section: Option<String> = None;
         let mut state: Option<String> = None;
-
+        let mut section: Option<String> = None;
         let mut cursor = 0;
         while cursor < rest.len() {
             let marker = rest[cursor..].chars().next().expect("非空");
             let from = cursor + marker.len_utf8();
             let to = rest[from..]
-                .find(['@', '#', '$'])
+                .find(['@', '#'])
                 .map(|offset| from + offset)
                 .unwrap_or(rest.len());
             let value = rest[from..to].trim();
 
             match marker {
-                '@' => reference = Some(value.to_string()),
+                '@' => state = Some(value.to_ascii_lowercase()),
                 '#' => section = Some(value.to_string()),
-                '$' => state = Some(value.to_ascii_lowercase()),
                 _ => {}
             }
             cursor = to;
         }
-
-        let reference = reference.filter(|value| !value.is_empty());
         let section = section.filter(|value| !value.is_empty());
-        let state = match state.as_deref() {
-            None | Some("") => None,
-            Some("edit") => Some("edit"),
-            Some("history") => Some("history"),
-            Some(other) => {
-                return Err(VaultError::BadAddress(format!(
-                    "不认识「${other}」这种状态；目前只有 $edit 与 $history"
-                )))
-            }
-        };
 
-        // 规范化裁剪
-        let has_version = reference.is_some();
-        let drop_version = has_version && state == Some("history");
-        let echo_state = if has_version && state == Some("edit") {
-            None
-        } else {
-            state
-        };
+        let parsed = self.table.parse(name_part, self.config.capital_links)?;
+        let display = parsed.display(&self.table);
 
-        // 按标准顺序组装回显地址
-        let compose = |title: &str, version: Option<&str>| {
-            let mut out = title.to_string();
-            if !drop_version {
-                if let Some(version) = version {
-                    out.push('@');
-                    out.push_str(version);
-                }
-            }
+        // 先算好各种回显地址，避免闭包借住 display 之后又把它移走。
+        // 规范地址里状态是自己的一部分（阅读态没有状态）。
+        let plain = {
+            let mut out = display.clone();
             if let Some(section) = &section {
                 out.push('#');
                 out.push_str(section);
             }
-            if let Some(state) = echo_state {
-                out.push('$');
-                out.push_str(state);
+            out
+        };
+        let edited = {
+            let mut out = display.clone();
+            out.push_str("@edit");
+            if let Some(section) = &section {
+                out.push('#');
+                out.push_str(section);
+            }
+            out
+        };
+        let history = {
+            let mut out = display.clone();
+            out.push_str("@history");
+            if let Some(section) = &section {
+                out.push('#');
+                out.push_str(section);
+            }
+            out
+        };
+        let deleting = {
+            let mut out = display.clone();
+            out.push_str("@delete");
+            if let Some(section) = &section {
+                out.push('#');
+                out.push_str(section);
             }
             out
         };
 
-        let Some(reference) = reference else {
-            // 没有 @版本：NAME 决定一切
-            let parsed = self.table.parse(name_part, self.config.capital_links)?;
-            let display = parsed.display(&self.table);
-            let address = compose(&display, None);
-
-            if !self.log_path(&Self::id_of(&parsed)).is_file() {
-                return Ok(Address::Missing {
-                    title: display,
-                    address,
-                });
-            }
-
-            return Ok(match state {
-                Some("edit") => Address::Edit {
-                    title: display,
-                    address,
-                },
-                Some("history") => Address::History {
-                    title: display,
-                    address,
-                },
-                _ => Address::Note {
-                    title: display,
-                    address,
-                },
+        if !self.log_path(&Self::id_of(&parsed)).is_file() {
+            return Ok(Address::Missing {
+                address: plain,
+                title: display,
             });
+        }
+
+        let state = match state.as_deref() {
+            None | Some("") => None,
+            Some("edit") => Some("edit"),
+            Some("history") => Some("history"),
+            Some("delete") => Some("delete"),
+            Some(other) => {
+                return Err(VaultError::BadAddress(format!(
+                    "不认识「@{other}」；状态只有 edit / history / delete，看某一版请用 view-版本"
+                )))
+            }
         };
 
-        // 只写 @版本：commit ID 全局不重复，扫全仓库，是谁就跳到谁
-        if name_part.is_empty() {
-            if reference.len() < MIN_SHORT_ID {
-                return Err(VaultError::BadAddress(format!(
-                    "只写 @ 引用时要用至少 {MIN_SHORT_ID} 位的 commit ID 缩写"
-                )));
-            }
-
-            let needle = reference.to_ascii_lowercase();
-            // (标题, 版本, 完整 ID, 缩写)
-            let mut matches: Vec<(String, u64, String, String)> = Vec::new();
-            for (_, path) in self.log_files()? {
-                let events = self.read_events_at(&path)?;
-                for event in &events {
-                    let Some(rev) = revision_of(event) else {
-                        continue;
-                    };
-                    let id = revision_id(event);
-                    if !id.starts_with(&needle) {
-                        continue;
-                    }
-                    let Some(parsed) = Self::title_of_log_path(&path) else {
-                        continue;
-                    };
-                    matches.push((
-                        parsed.display(&self.table),
-                        rev,
-                        id.clone(),
-                        short_revision_id(&id),
-                    ));
-                }
-            }
-
-            let (title, rev, id, short) = match matches.len() {
-                0 => {
-                    return Err(VaultError::BadAddress(format!(
-                        "没有哪个版本对得上「{reference}」这个缩写"
-                    )))
-                }
-                1 => matches.remove(0),
-                count => {
-                    return Err(VaultError::AmbiguousRevision {
-                        prefix: reference,
-                        matches: count,
-                    })
-                }
-            };
-
-            // `$history` 说的是「看整篇的历史」，版本因此被裁掉
-            if drop_version {
-                return Ok(Address::History {
-                    address: compose(&title, Some(&short)),
-                    title,
-                });
-            }
-
-            return Ok(Address::Revision {
-                address: compose(&title, Some(&short)),
-                title,
-                rev,
-                short_id: short,
-                id,
-            });
-        }
-
-        let parsed = self.table.parse(name_part, self.config.capital_links)?;
-        let display = parsed.display(&self.table);
-        let id = Self::id_of(&parsed);
-        if !self.log_path(&id).is_file() {
-            // 笔记还没建立：版本无从谈起，但照原样回显用户写的版本，别把它吞掉
-            return Ok(Address::Missing {
-                address: compose(&display, Some(&reference)),
+        Ok(match state {
+            Some("edit") => Address::Edit {
                 title: display,
-            });
-        }
-
-        let rev = self.resolve_revision(&display, &reference)?;
-        let events = self.read_events(&id)?;
-        let event = events
-            .iter()
-            .find(|event| revision_of(event) == Some(rev))
-            .ok_or_else(|| VaultError::RevisionNotFound {
-                title: display.clone(),
-                rev,
-            })?;
-        let full_id = revision_id(event);
-        let short = short_revision_id(&full_id);
-
-        if drop_version {
-            return Ok(Address::History {
-                address: compose(&display, Some(&short)),
+                address: edited,
+            },
+            Some("history") => Address::History {
                 title: display,
-            });
-        }
-
-        Ok(Address::Revision {
-            address: compose(&display, Some(&short)),
-            title: display,
-            rev,
-            id: full_id,
-            short_id: short,
+                address: history,
+            },
+            Some("delete") => Address::Delete {
+                title: display,
+                address: deleting,
+            },
+            _ => Address::Note {
+                title: display,
+                address: plain,
+            },
         })
     }
 
@@ -1474,6 +1459,24 @@ pub fn default_root() -> Result<PathBuf, VaultError> {
     Ok(PathBuf::from(home).join(DEFAULT_DIR_NAME))
 }
 
+/// 是不是一个版本引用。
+///
+/// 这里**只接受 commit ID 缩写**：数字版本号是「某篇笔记内部的序号」，单独出现无法
+/// 定位到哪一篇，所以必须有前缀（`view-` / `rollback-`）时也一并要求是 ID。
+fn is_version_reference(value: &str) -> bool {
+    value.len() >= MIN_SHORT_ID && value.chars().all(|ch| ch.is_ascii_hexdigit())
+}
+
+/// 版本形态的规范地址：`前缀-缩写[#章节]`
+fn compose_version(prefix: &str, short: &str, section: Option<&str>) -> String {
+    let mut out = format!("{prefix}{short}");
+    if let Some(section) = section.filter(|value| !value.is_empty()) {
+        out.push('#');
+        out.push_str(section);
+    }
+    out
+}
+
 fn now_iso() -> String {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
@@ -1923,86 +1926,7 @@ mod tests {
     }
 
     /// 地址栏解析：标题、标题@数字、标题@缩写、只写 @缩写、不存在、歧义
-    #[test]
-    fn address_parsing_resolves_notes_and_revisions() {
-        let temp = TempVault::new();
-        temp.vault.create("地址").unwrap();
-        temp.vault.commit("地址", "第一版", None, 0).unwrap();
-        temp.vault.commit("地址", "第二版", None, 1).unwrap();
 
-        let second = temp
-            .vault
-            .history("地址")
-            .unwrap()
-            .into_iter()
-            .find(|item| item.rev == 2)
-            .unwrap();
-
-        // 只有标题 → 打开笔记
-        match temp.vault.parse_address("地址").unwrap() {
-            Address::Note { title, .. } => assert_eq!(title, "地址"),
-            other => panic!("{other:?}"),
-        }
-
-        // 标题@缩写 → 解析成具体版本，并给出**规范全称**用于回显
-        match temp
-            .vault
-            .parse_address(&format!("地址@{}", second.short_id))
-            .unwrap()
-        {
-            Address::Revision {
-                title,
-                rev,
-                short_id,
-                ..
-            } => {
-                assert_eq!(title, "地址");
-                assert_eq!(rev, 2);
-                assert_eq!(short_id, second.short_id, "回显用的是缩写 ID");
-            }
-            other => panic!("{other:?}"),
-        }
-
-        // 标题@数字
-        match temp.vault.parse_address("地址@1").unwrap() {
-            Address::Revision { rev, .. } => assert_eq!(rev, 1),
-            other => panic!("{other:?}"),
-        }
-
-        // 只写 @缩写 → ID 全局唯一，扫全仓库找到是谁，并**回显名称**
-        match temp
-            .vault
-            .parse_address(&format!("@{}", second.short_id))
-            .unwrap()
-        {
-            Address::Revision { title, rev, .. } => {
-                assert_eq!(title, "地址", "回显要带名称");
-                assert_eq!(rev, 2);
-            }
-            other => panic!("{other:?}"),
-        }
-
-        // 只写数字没有意义：版本号是每篇笔记各自的序号，全局无从查起
-        assert!(
-            temp.vault.parse_address("@1").is_err(),
-            "只写数字版本号应当报错"
-        );
-
-        // 不存在的笔记 → 交给「不存在 + 创建」
-        match temp.vault.parse_address("没建过").unwrap() {
-            Address::Missing { title, .. } => assert_eq!(title, "没建过"),
-            other => panic!("{other:?}"),
-        }
-
-        // 空输入
-        assert!(matches!(
-            temp.vault.parse_address("   ").unwrap(),
-            Address::Empty
-        ));
-
-        // 对不上的缩写必须是错误，不许猜
-        assert!(temp.vault.parse_address("地址@zzzz").is_err());
-    }
 
     /// 缩写下限：太短要明确报错（纯数字版本号不受限）
     #[test]
@@ -2111,144 +2035,101 @@ mod tests {
     }
 
     /// 模式也是地址语法的一部分，并且带回规范地址用于回显
-    #[test]
-    fn address_modes_are_part_of_the_grammar() {
-        let temp = TempVault::new();
-        temp.vault.create("模式").unwrap();
-        temp.vault.commit("模式", "正文", None, 0).unwrap();
 
-        match temp.vault.parse_address("模式$edit").unwrap() {
-            Address::Edit { title, address } => {
-                assert_eq!(title, "模式");
-                assert_eq!(address, "模式$edit", "回显用标准顺序");
-            }
-            other => panic!("{other:?}"),
-        }
-
-        match temp.vault.parse_address("模式$history").unwrap() {
-            Address::History { address, .. } => assert_eq!(address, "模式$history"),
-            other => panic!("{other:?}"),
-        }
-
-        // 不认识的模式要明确报错，不能悄悄当成标题
-        assert!(temp.vault.parse_address("模式$whatever").is_err());
-
-        // 保留字符都不允许出现在标题里，否则地址语法就和标题打架了
-        assert!(temp.vault.validate_title("带$的标题").is_err());
-        assert!(temp.vault.validate_title("带#的标题").is_err());
-        assert!(temp.vault.validate_title("带@的标题").is_err());
-    }
 
     /// 标准顺序 NAMESPACE:NAME@VERSION#SECTION$STATE：顺序不强制，回显一律标准
-    #[test]
-    fn addresses_echo_in_standard_order() {
-        let temp = TempVault::new();
-        temp.vault.create("顺序").unwrap();
-        temp.vault.commit("顺序", "第一版", None, 0).unwrap();
-        temp.vault.commit("顺序", "第二版", None, 1).unwrap();
 
-        let second = temp
-            .vault
-            .history("顺序")
-            .unwrap()
-            .into_iter()
-            .find(|item| item.rev == 2)
-            .unwrap();
-
-        // 章节 + 状态：回显按 NAME@VERSION#SECTION$STATE
-        match temp
-            .vault
-            .parse_address(&format!("顺序@{}#小节$history", second.short_id))
-            .unwrap()
-        {
-            // 带 $history：版本被裁掉（历史属于整篇），章节保留
-            Address::History { address, title } => {
-                assert_eq!(title, "顺序");
-                assert_eq!(address, "顺序#小节$history");
-            }
-            other => panic!("{other:?}"),
-        }
-
-        // 顺序不强制：状态写在章节前面也照样访问，回显仍是标准顺序
-        match temp.vault.parse_address("顺序$edit#小节").unwrap() {
-            Address::Edit { address, .. } => assert_eq!(address, "顺序#小节$edit"),
-            other => panic!("{other:?}"),
-        }
-
-        // 章节是唯一允许前端自己更新的部分，后端只管原样带回
-        match temp.vault.parse_address("顺序#任意章节").unwrap() {
-            Address::Note { address, .. } => assert_eq!(address, "顺序#任意章节"),
-            other => panic!("{other:?}"),
-        }
-
-        // 除 NAME 外都可省略
-        assert!(matches!(
-            temp.vault.parse_address("顺序").unwrap(),
-            Address::Note { .. }
-        ));
-        assert!(matches!(
-            temp.vault.parse_address("顺序$edit").unwrap(),
-            Address::Edit { .. }
-        ));
-    }
 
     /// 规范化裁剪：某一版不能编辑，历史不属于某一版
+
+
+    /// 新语法：状态用 @，版本用 view- / rollback- 前缀（版本收起来，不再组合）
     #[test]
-    fn address_crops_what_cannot_combine() {
+    fn address_grammar_keeps_version_separate() {
         let temp = TempVault::new();
-        temp.vault.create("裁剪").unwrap();
-        temp.vault.commit("裁剪", "第一版", None, 0).unwrap();
-        temp.vault.commit("裁剪", "第二版", None, 1).unwrap();
+        temp.vault.create("语法").unwrap();
+        temp.vault.commit("语法", "第一版", None, 0).unwrap();
+        temp.vault.commit("语法", "第二版", None, 1).unwrap();
 
         let first = temp
             .vault
-            .history("裁剪")
+            .history("语法")
             .unwrap()
             .into_iter()
             .find(|item| item.rev == 1)
             .unwrap();
 
-        // 某一版不能编辑 → 只读查看，回显里没有 $edit
-        match temp
-            .vault
-            .parse_address(&format!("裁剪@{}$edit", first.short_id))
-            .unwrap()
-        {
-            Address::Revision { rev, address, .. } => {
-                assert_eq!(rev, 1);
-                assert_eq!(address, format!("裁剪@{}", first.short_id));
+        // 阅读 / edit / history / delete
+        assert!(matches!(
+            temp.vault.parse_address("语法").unwrap(),
+            Address::Note { .. }
+        ));
+        match temp.vault.parse_address("语法@edit").unwrap() {
+            Address::Edit { title, address } => {
+                assert_eq!(title, "语法");
+                assert_eq!(address, "语法@edit");
             }
             other => panic!("{other:?}"),
         }
-
-        // 历史属于整篇 → 版本被裁掉，结果是历史页
-        match temp
-            .vault
-            .parse_address(&format!("裁剪@{}$history", first.short_id))
-            .unwrap()
-        {
-            Address::History { address, title } => {
-                assert_eq!(title, "裁剪");
-                assert_eq!(address, "裁剪$history");
-            }
+        match temp.vault.parse_address("语法@history").unwrap() {
+            Address::History { address, .. } => assert_eq!(address, "语法@history"),
+            other => panic!("{other:?}"),
+        }
+        match temp.vault.parse_address("语法@delete").unwrap() {
+            Address::Delete { address, .. } => assert_eq!(address, "语法@delete"),
             other => panic!("{other:?}"),
         }
 
-        // 只写 @缩写$edit 同理，且回显的是全局找到的那一篇的名称
+        // 章节跟在末尾
+        match temp.vault.parse_address("语法@history#小节").unwrap() {
+            Address::History { address, .. } => assert_eq!(address, "语法@history#小节"),
+            other => panic!("{other:?}"),
+        }
+
+        // 版本形态：view- / rollback-（全局查找，带回名称）
         match temp
             .vault
-            .parse_address(&format!("@{}$edit", first.short_id))
+            .parse_address(&format!("view-{}", first.short_id))
             .unwrap()
         {
-            Address::Revision {
+            Address::ViewVersion {
                 title, rev, address, ..
             } => {
-                assert_eq!(title, "裁剪");
+                assert_eq!(title, "语法");
                 assert_eq!(rev, 1);
-                assert_eq!(address, format!("裁剪@{}", first.short_id));
+                assert_eq!(address, format!("view-{}", first.short_id));
             }
             other => panic!("{other:?}"),
         }
+        match temp
+            .vault
+            .parse_address(&format!("rollback-{}", first.short_id))
+            .unwrap()
+        {
+            Address::RollbackConfirm { rev, address, .. } => {
+                assert_eq!(rev, 1);
+                assert_eq!(address, format!("rollback-{}", first.short_id));
+            }
+            other => panic!("{other:?}"),
+        }
+
+        // 缩写太短时不当动作，整串按标题解析（避免和标题打架）
+        assert!(matches!(
+            temp.vault.parse_address("view-abc").unwrap(),
+            Address::Missing { .. }
+        ));
+
+        // 状态写错要有明确提示；旧的「@版本」不再是合法写法
+        assert!(temp.vault.parse_address("语法@whatever").is_err());
+        assert!(temp.vault.parse_address("语法@1").is_err());
+
+        // 合法的十六进制缩写但仓库里没有 → 错误（规范里唯一会失败的情况）
+        assert!(temp.vault.parse_address("view-abcde").is_err());
+        // 不是十六进制（或太短）→ 不是版本引用，整串当标题
+        assert!(matches!(
+            temp.vault.parse_address("view-zzzzz").unwrap(),
+            Address::Missing { .. }
+        ));
     }
 
     #[test]

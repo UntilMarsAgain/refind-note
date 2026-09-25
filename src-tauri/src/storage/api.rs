@@ -122,18 +122,28 @@ pub enum Address {
     Empty,
     /// 阅读一篇笔记（已确认存在）
     Note { title: String, address: String },
-    /// 只读查看某一版
-    Revision {
+    /// 编辑
+    Edit { title: String, address: String },
+    /// 版本历史（整篇）
+    History { title: String, address: String },
+    /// 删除的**二次确认页**
+    Delete { title: String, address: String },
+    /// 只读查看某一版（`view-版本`）
+    ViewVersion {
         title: String,
         rev: u64,
         id: String,
         short_id: String,
         address: String,
     },
-    /// 编辑一篇笔记（历史版本不能编辑：那种地址里的 `$edit` 会被裁掉）
-    Edit { title: String, address: String },
-    /// 看一篇笔记的**整篇**版本历史（历史不属于某一版：那种地址里的 `@版本` 会被裁掉）
-    History { title: String, address: String },
+    /// 回退的**二次确认页**（`rollback-版本`）
+    RollbackConfirm {
+        title: String,
+        rev: u64,
+        id: String,
+        short_id: String,
+        address: String,
+    },
     /// 目标还不存在，交给「不存在 + 创建」那条路
     Missing { title: String, address: String },
 }
