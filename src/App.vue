@@ -203,8 +203,8 @@ async function createNote(title: string) {
     await invoke<Note>("create_note", { title: trimmed });
     loadError.value = "";
     await refreshNotes();
-    // 建完进编辑器：同样通过改地址（`$edit`）
-    await navigate(`${trimmed}$edit`);
+    // 建完进编辑器：同样通过改地址（`@edit`）
+    await navigate(`${trimmed}@edit`);
   } catch (error) {
     loadError.value = String(error);
   } finally {
@@ -314,11 +314,11 @@ function leaveEditor() {
   }
 }
 
-/** 看版本历史：同样是改地址（`$history`） */
+/** 看版本历史：同样是改地址（`@history`） */
 function openHistory() {
   const title = note.value?.title;
   if (title) {
-    void navigate(`${title}$history`);
+    void navigate(`${title}@history`);
   }
 }
 
@@ -358,7 +358,7 @@ async function renameCurrent(nextTitle: string) {
         baseRev: renamed.rev,
       });
     }
-    await navigate(`${renamed.title}$edit`);
+    await navigate(`${renamed.title}@edit`);
     editorStatus.value = `已改名为「${renamed.title}」（改名本身记为一版）`;
   } catch (error) {
     editorStatus.value = `改名失败：${String(error)}`;
@@ -438,7 +438,7 @@ function scrollToBottom() {
 function onOpenRevision(reference: string) {
   const title = note.value?.title;
   if (title) {
-    void navigate(`${title}@${reference}`);
+    void navigate(`${title}@view-${reference}`);
   }
 }
 
@@ -569,7 +569,7 @@ function cancelConfirm() {
     return;
   }
   if (mode.value === "rollback" && rollbackTarget.value) {
-    void navigate(`view-${rollbackTarget.value.shortId}`);
+    void navigate(`${title}@view-${rollbackTarget.value.shortId}`);
     return;
   }
   void navigate(title);
@@ -598,7 +598,7 @@ async function openDraftPreview() {
   try {
     const draft = await invoke<Draft | null>("load_draft", { title });
     if (draft) {
-      await navigate(`${title}@${draft.short_id}`);
+      await navigate(`${title}@view-${draft.short_id}`);
     }
   } catch (error) {
     addressError.value = String(error);
@@ -739,8 +739,9 @@ async function doDelete() {
  * 而这一页本身也是地址。
  */
 function onRollbackRequire(reference: string) {
-  if (reference) {
-    void navigate(`rollback-${reference}`);
+  const title = note.value?.title;
+  if (title && reference) {
+    void navigate(`${title}@rollback-${reference}`);
   }
 }
 
@@ -785,7 +786,7 @@ function onAction(name: string) {
   }
 
   if (name === "edit") {
-    void navigate(`${title}$edit`);
+    void navigate(`${title}@edit`);
     return;
   }
   if (name === "history") {
