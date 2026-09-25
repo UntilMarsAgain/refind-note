@@ -26,8 +26,8 @@ mod error;
 mod event;
 
 pub use api::{
-    Address, DiffResult, Draft, GcReport, LoadOutcome, Note, NoteSummary, PurgeReport,
-    RevisionContent, RevisionSummary, TrashEntry, VaultSettings,
+    Address, DiffResult, Draft, GcReport, LoadOutcome, MaintenanceReport, Note, NoteSummary,
+    PurgeReport, RevisionContent, RevisionSummary, TrashEntry, VaultSettings,
 };
 pub use config::VaultConfig;
 pub use error::VaultError;
@@ -451,6 +451,10 @@ impl Vault {
             capital_links: self.config.capital_links,
             max_title_bytes: self.config.max_title_bytes,
             delta_chain_limit: self.config.delta_chain_limit,
+            trash_keep_days: self.config.trash_keep_days,
+            gc_interval_days: self.config.gc_interval_days,
+            last_trash_purge: self.config.last_trash_purge.clone(),
+            last_gc: self.config.last_gc.clone(),
             theme: appearance.theme.clone(),
             accent: appearance.accent.clone(),
             reading_width: appearance.reading_width,
@@ -464,6 +468,8 @@ impl Vault {
         capital_links: Option<bool>,
         max_title_bytes: Option<usize>,
         delta_chain_limit: Option<usize>,
+        trash_keep_days: Option<u64>,
+        gc_interval_days: Option<u64>,
         theme: Option<String>,
         accent: Option<String>,
         reading_width: Option<u32>,
@@ -478,6 +484,13 @@ impl Vault {
         if let Some(value) = delta_chain_limit {
             // 下限留 1：0 会让每一版都退回整份快照（合法但没意义）
             self.config.delta_chain_limit = value.max(1);
+        }
+        if let Some(value) = trash_keep_days {
+            // 下限 1 天：填 0 会变成"每次启动都清空回收站"，那不是配置项该有的后果
+            self.config.trash_keep_days = value.max(1);
+        }
+        if let Some(value) = gc_interval_days {
+            self.config.gc_interval_days = value.max(1);
         }
         if let Some(value) = theme {
             self.preferences.theme = value;
@@ -1158,6 +1171,129 @@ impl Vault {
                 "不认识「@{state}」；状态只有 edit / history / delete / view-版本 / rollback-版本 / no-command"
             ))),
         }
+    }
+
+    /// 从回收站还原一篇笔记。
+    ///
+    /// 做法：文件搬回 `notes/`、名字表挪回去，然后**追加一次提交**（内容不变）——
+    /// `fold` 遇到 `Rev` 会把 `deleted` 清掉，于是它重新算"活着"。
+    ///
+    /// 用追加而不是抹掉那条删除标记：**一条历史都不丢**（"什么时候删过"这件事仍留在链上），
+    /// 这也是删除确认页对用户的承诺。
+    pub fn restore_note(&self, title: &str) -> Result<Note, VaultError> {
+        let (parsed, path) = self.locate(title)?;
+        let display = parsed.display(&self.table);
+        let id = Self::id_from_path(&path);
+
+        let trashed = self.trashed_path(&id);
+        if !trashed.is_file() {
+            return Err(VaultError::NotFound(display));
+        }
+
+        let events = self.read_events_at(&trashed)?;
+        let state = fold(&events);
+        if !state.deleted {
+            // 文件在回收站里、日志却没有删除标记：状态不一致，先别动它
+            return Err(VaultError::Corrupt(format!(
+                "《{display}》在回收站里，但日志里没有删除标记"
+            )));
+        }
+
+        // 先把文件搬回去，再追加"还原"这一版
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::rename(&trashed, &path)?;
+
+        let mut titles = self.titles()?;
+        titles.trashed.remove(&id);
+        titles.notes.insert(id.clone(), display.clone());
+        self.save_titles(&titles)?;
+
+        // 与"改名"同一套做法：复用原有的 blob，只追加一条指向它的提交
+        let rev = next_rev(&events);
+        self.append(
+            &id,
+            &Event::Rev {
+                at: now_iso(),
+                rev,
+                blob: state.blob.clone().unwrap_or_default(),
+                bytes: state.bytes,
+                encoding: state.encoding.clone(),
+                base_rev: state.base_rev,
+                content_hash: state.content_hash.clone(),
+                mime: state.mime.clone(),
+                parent: (state.rev > 0).then_some(state.rev),
+                supersedes: drafts_of(&events, state.rev),
+                ns: None,
+                title: None,
+                summary: Some("从回收站还原".to_string()),
+            },
+        )?;
+
+        self.load(&display)
+    }
+
+    /// 立即清除回收站里的**一条**（不等保留期）。
+    ///
+    /// 只删日志与名字表项，**不顺手回收内容块**：那件事交给「数据库回收」那一页，
+    /// 由用户决定何时回收 —— 回收站页面正好链过去。
+    pub fn purge_trash_entry(&self, title: &str) -> Result<(), VaultError> {
+        let (parsed, path) = self.locate(title)?;
+        let display = parsed.display(&self.table);
+        let id = Self::id_from_path(&path);
+
+        let trashed = self.trashed_path(&id);
+        if !trashed.is_file() {
+            return Err(VaultError::NotFound(display));
+        }
+        fs::remove_file(&trashed)?;
+
+        let mut titles = self.titles()?;
+        titles.trashed.remove(&id);
+        self.save_titles(&titles)?;
+        Ok(())
+    }
+
+    /// 该跑了吗：用**上次执行的时间**与现在比。
+    ///
+    /// 从没跑过（空字符串或解析失败）一律算"该跑了"；间隔下限 1 天，
+    /// 免得 0 变成"每次启动都清一次"。
+    fn maintenance_due(&self, last: &str, interval_days: u64) -> bool {
+        let interval = interval_days.max(1);
+        match parse_iso(last) {
+            None => true,
+            Some(at) => {
+                let elapsed = (time::OffsetDateTime::now_utc() - at).whole_days();
+                elapsed >= interval as i64
+            }
+        }
+    }
+
+    /// 自动维护：到点了就清回收站、回收内容块，并记下这次的时间。
+    ///
+    /// 判定只看**上次执行时间**（不是"每次启动都跑"）：间隔之内什么都不做。
+    pub fn run_maintenance(&mut self) -> Result<MaintenanceReport, VaultError> {
+        let mut report = MaintenanceReport::default();
+        let mut touched = false;
+
+        if self.maintenance_due(&self.config.last_trash_purge.clone(), self.config.trash_keep_days) {
+            let keep = self.config.trash_keep_days as i64;
+            report.purged = Some(self.purge_trash(keep)?);
+            self.config.last_trash_purge = now_iso();
+            touched = true;
+        }
+
+        if self.maintenance_due(&self.config.last_gc.clone(), self.config.gc_interval_days) {
+            report.gc = Some(self.gc(true, false)?);
+            self.config.last_gc = now_iso();
+            touched = true;
+        }
+
+        if touched {
+            self.save_config()?;
+        }
+        Ok(report)
     }
 
     /// 回收站清单：删过的笔记，连同"删了多久"。
@@ -2893,6 +3029,8 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
+                None,
                 Some("light".to_string()),
                 Some("#123456".to_string()),
                 Some(900),
@@ -3310,6 +3448,87 @@ mod tests {
             purged.blobs.removed_blobs >= 1,
             "回收站清掉后，草稿独有的内容块才成为孤块"
         );
+    }
+
+    /// 还原：文件搬回来、名字挪回去，并**追加一版**（历史一条不丢）
+    #[test]
+    fn restore_brings_a_note_back() {
+        let temp = TempVault::new();
+        temp.vault.create("回来的").unwrap();
+        temp.vault.commit("回来的", "正文还在", None, 0).unwrap();
+        temp.vault.delete("回来的").unwrap();
+        assert!(temp.vault.list_trash().unwrap().len() == 1);
+
+        let note = temp.vault.restore_note("回来的").unwrap();
+        assert_eq!(note.markdown, "正文还在", "内容原样回来");
+        assert!(temp.vault.list_trash().unwrap().is_empty());
+        assert!(
+            temp.vault.list_notes().unwrap().iter().any(|item| item.title == "回来的"),
+            "应当重新出现在笔记列表里"
+        );
+        assert!(temp.vault.load("回来的").is_ok());
+
+        // 历史一条不丢：创建 / 提交 / 删除 / 还原
+        let history = temp.vault.history("回来的").unwrap();
+        assert!(
+            history.iter().any(|item| item.summary.as_deref() == Some("从回收站还原")),
+            "还原本身应当在历史里留下一笔"
+        );
+        assert!(history.len() >= 4, "{history:?}");
+    }
+
+    /// 立即清除：只清一条，别的还在；且**不**顺手回收内容块（那件事交给数据库回收页）
+    #[test]
+    fn purge_entry_removes_one() {
+        let temp = TempVault::new();
+        for title in ["留着", "马上清"] {
+            temp.vault.create(title).unwrap();
+            temp.vault.commit(title, "各自的内容", None, 0).unwrap();
+            temp.vault.delete(title).unwrap();
+        }
+
+        temp.vault.purge_trash_entry("马上清").unwrap();
+        let listed = temp.vault.list_trash().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].title, "留着");
+
+        assert!(temp.vault.restore_note("留着").is_ok(), "别的那条仍可还原");
+        assert!(temp.vault.purge_trash_entry("马上清").is_err(), "已经清了");
+    }
+
+    /// 自动维护：**按上次执行时间判定**，间隔之内什么都不做
+    #[test]
+    fn maintenance_runs_once_per_interval() {
+        let mut temp = TempVault::new();
+        temp.vault.create("甲").unwrap();
+        temp.vault.commit("甲", "正文", None, 0).unwrap();
+        temp.vault.create("乙").unwrap();
+        temp.vault.commit("乙", "待清理的正文", None, 0).unwrap();
+        // 传 0 天：让它这次就到点
+        temp.vault
+            .update_settings(None, None, None, Some(0), Some(0), None, None, None, None)
+            .unwrap();
+        temp.vault.delete("乙").unwrap();
+
+        // 第一次：从没跑过 → 该跑
+        let first = temp.vault.run_maintenance().unwrap();
+        assert!(first.purged.is_some(), "从没跑过就该跑一次");
+        assert!(first.gc.is_some());
+        assert_eq!(
+            temp.vault.list_trash().unwrap().len(),
+            1,
+            "保留期下限是 1 天：刚删的那条不该被自动清掉"
+        );
+
+        // 再跑一次：刚跑过，间隔没到 → 什么都不做
+        let second = temp.vault.run_maintenance().unwrap();
+        assert!(second.purged.is_none(), "间隔之内不该重复清");
+        assert!(second.gc.is_none());
+
+        // 判定靠"上次执行时间"，所以它必须被记下来
+        let view = temp.vault.settings_view();
+        assert!(!view.last_trash_purge.is_empty(), "上次清理时间要写回去");
+        assert!(!view.last_gc.is_empty(), "上次回收时间要写回去");
     }
 
     #[test]

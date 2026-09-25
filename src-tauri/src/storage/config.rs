@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------- 配置
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct VaultConfig {
     pub format: u32,
     /// 标题首字母是否强制大写（对应 MediaWiki 的 $wgCapitalLinks）
@@ -20,6 +21,17 @@ pub struct VaultConfig {
     pub max_title_bytes: usize,
     /// 增量链的长度上限：超过就让下一版退回整份快照，免得读取时一路回放。
     pub delta_chain_limit: usize,
+    /// 回收站保留天数：更早的条目会在自动清理时被删掉。
+    pub trash_keep_days: u64,
+    /// 自动回收的间隔天数：距上次回收超过它就再跑一次。
+    pub gc_interval_days: u64,
+    /// 上次清理回收站的时间（RFC3339；空 = 从未跑过）。
+    ///
+    /// 与设置放在一起，是因为它描述的是**这份数据**的维护状态，换台机器看同一份笔记时
+    /// 也该跟着走（对比 `preferences.json`：那份是"这台机器"的偏好，同步时要排除）。
+    pub last_trash_purge: String,
+    /// 上次回收的时间（RFC3339；空 = 从未跑过）。
+    pub last_gc: String,
 }
 
 /// 界面偏好：独立存在 `preferences.json`。
@@ -60,6 +72,10 @@ impl Default for VaultConfig {
             capital_links: true,
             max_title_bytes: crate::title::MAX_TITLE_BYTES,
             delta_chain_limit: 32,
+            trash_keep_days: 30,
+            gc_interval_days: 30,
+            last_trash_purge: String::new(),
+            last_gc: String::new(),
         }
     }
 }

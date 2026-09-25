@@ -10,8 +10,8 @@ mod title;
 
 use std::sync::{Mutex, MutexGuard};
 use storage::{
-    Address, DiffResult, Draft, GcReport, LoadOutcome, Note, NoteSummary, PurgeReport,
-    RevisionContent, RevisionSummary, TrashEntry, Vault, VaultSettings,
+    Address, DiffResult, Draft, GcReport, LoadOutcome, MaintenanceReport, Note, NoteSummary,
+    PurgeReport, RevisionContent, RevisionSummary, TrashEntry, Vault, VaultSettings,
 };
 use tauri::Manager;
 
@@ -53,6 +53,8 @@ fn update_settings(
     capital_links: Option<bool>,
     max_title_bytes: Option<usize>,
     delta_chain_limit: Option<usize>,
+    trash_keep_days: Option<u64>,
+    gc_interval_days: Option<u64>,
     theme: Option<String>,
     accent: Option<String>,
     reading_width: Option<u32>,
@@ -65,6 +67,8 @@ fn update_settings(
             capital_links,
             max_title_bytes,
             delta_chain_limit,
+            trash_keep_days,
+            gc_interval_days,
             theme,
             accent,
             reading_width,
@@ -99,6 +103,36 @@ fn load_note_no_command(title: String) -> Result<LoadOutcome, String> {
 #[tauri::command]
 fn list_trash() -> Result<Vec<TrashEntry>, String> {
     open()?.list_trash().map_err(|error| error.to_string())
+}
+
+/// 从回收站还原一篇笔记
+#[tauri::command]
+fn restore_note(title: String) -> Result<Note, String> {
+    let _guard = write_guard();
+    let vault = open()?;
+    vault
+        .restore_note(&title)
+        .map_err(|error| error.to_string())
+}
+
+/// 立即清除回收站里的一条（不等保留期）
+#[tauri::command]
+fn purge_trash_entry(title: String) -> Result<(), String> {
+    let _guard = write_guard();
+    let vault = open()?;
+    vault
+        .purge_trash_entry(&title)
+        .map_err(|error| error.to_string())
+}
+
+/// 自动维护：到点了就清回收站、回收内容块。前端在启动时调一次。
+#[tauri::command]
+fn run_maintenance() -> Result<MaintenanceReport, String> {
+    let _guard = write_guard();
+    let mut vault = open()?;
+    vault
+        .run_maintenance()
+        .map_err(|error| error.to_string())
 }
 
 /// 清理回收站：删掉超过 `olderThanDays` 天的条目，并顺手回收内容块
@@ -328,6 +362,9 @@ pub fn run() {
             command_kind,
             list_trash,
             purge_trash,
+            restore_note,
+            purge_trash_entry,
+            run_maintenance,
             list_notes,
             load_note,
             create_note,

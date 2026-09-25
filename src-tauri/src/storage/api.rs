@@ -159,6 +159,13 @@ pub enum Address {
     Missing { title: String, address: String },
 }
 
+/// 一次自动维护的结果。`None` 表示这一项这次**没到时间**，没跑。
+#[derive(Debug, Default, Serialize)]
+pub struct MaintenanceReport {
+    pub purged: Option<PurgeReport>,
+    pub gc: Option<GcReport>,
+}
+
 /// 回收站里的一个条目
 #[derive(Debug, Clone, Serialize)]
 pub struct TrashEntry {
@@ -207,6 +214,14 @@ pub struct VaultSettings {
     pub max_title_bytes: usize,
     /// 增量链长度上限（0 之外的任何值都合法；界面里给个合理区间）
     pub delta_chain_limit: usize,
+    /// 回收站保留天数（自动清理用）
+    pub trash_keep_days: u64,
+    /// 自动回收的间隔天数
+    pub gc_interval_days: u64,
+    /// 上次清理回收站的时间（只读信息）
+    pub last_trash_purge: String,
+    /// 上次回收的时间（只读信息）
+    pub last_gc: String,
     pub theme: String,
     pub accent: String,
     pub reading_width: u32,
