@@ -21,7 +21,35 @@ const emit = defineEmits<{
   (e: "select", index: number): void;
   (e: "close", index: number): void;
   (e: "new-tab"): void;
+  /** 拖放调整顺序 */
+  (e: "move", from: number, to: number): void;
 }>();
+
+/** 正在拖的标签页与拖到哪一格上面（用来画插入位置） */
+const dragging = ref<number | null>(null);
+const overIndex = ref<number | null>(null);
+
+function onDragStart(index: number) {
+  dragging.value = index;
+}
+
+function onDragOver(index: number) {
+  overIndex.value = index;
+}
+
+function onDragEnd() {
+  dragging.value = null;
+  overIndex.value = null;
+}
+
+function onDrop(index: number) {
+  const from = dragging.value;
+  dragging.value = null;
+  overIndex.value = null;
+  if (from !== null && from !== index) {
+    emit("move", from, index);
+  }
+}
 
 /** 默认收起；展开状态记进界面偏好，下次打开保持原样 */
 const collapsed = ref(readFlag(PREFERENCE_KEYS.railCollapsed, true));
@@ -44,7 +72,7 @@ function initialOf(tab: { address: string; title: string }) {
       <button
         class="rail__icon"
         type="button"
-        :data-tip="collapsed ? '展开标签栏' : null"
+        :title="collapsed ? '展开标签栏' : '收起标签栏'"
         :aria-label="collapsed ? '展开标签栏' : '收起标签栏'"
         :aria-expanded="!collapsed"
         @click="toggle"
@@ -59,7 +87,7 @@ function initialOf(tab: { address: string; title: string }) {
       <button
         class="rail__icon"
         type="button"
-        :data-tip="collapsed ? '新建标签页' : null"
+        title="新建标签页"
         aria-label="新建标签页"
         @click="emit('new-tab')"
       >
@@ -68,8 +96,23 @@ function initialOf(tab: { address: string; title: string }) {
     </div>
 
     <ol class="rail__list">
-      <li v-for="(tab, index) in tabs" :key="`${index}-${tab.address}`">
-        <div class="rail__item" :class="{ 'rail__item--active': index === active }">
+      <li
+        v-for="(tab, index) in tabs"
+        :key="`${index}-${tab.address}`"
+        draggable="true"
+        @dragstart="onDragStart(index)"
+        @dragover.prevent="onDragOver(index)"
+        @drop.prevent="onDrop(index)"
+        @dragend="onDragEnd"
+      >
+        <div
+          class="rail__item"
+          :class="{
+            'rail__item--active': index === active,
+            'rail__item--over': overIndex === index && dragging !== index,
+          }"
+          @mousedown.middle.prevent="emit('close', index)"
+        >
           <button
             class="rail__pick"
             type="button"
@@ -82,7 +125,7 @@ function initialOf(tab: { address: string; title: string }) {
           <button
             class="rail__close"
             type="button"
-            :data-tip="collapsed ? '关闭' : null"
+            title="关闭"
             aria-label="关闭"
             @click="emit('close', index)"
           >
@@ -103,6 +146,9 @@ function initialOf(tab: { address: string; title: string }) {
   width: 168px;
   padding: 10px 8px;
   border-right: 1px solid var(--divider);
+  /* 只要上下滚动条：overflow-y 一旦不是 visible，x 轴就会被算成 auto，
+     于是出现那条莫名的左右滚动条。这里显式关掉 x 轴。 */
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
@@ -143,6 +189,11 @@ function initialOf(tab: { address: string; title: string }) {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+/* 拖放时提示插入位置 */
+.rail__item--over {
+  box-shadow: inset 0 2px 0 var(--accent);
 }
 
 .rail__item {

@@ -203,6 +203,27 @@ function selectTab(index: number) {
   void navigate(tab.address);
 }
 
+/** 拖放调整标签页顺序：把 from 位置的标签页挪到 to 位置，并让「当前」仍指向同一个 */
+function moveTab(from: number, to: number) {
+  if (from === to || from < 0 || to < 0) {
+    return;
+  }
+
+  const [moved] = tabs.value.splice(from, 1);
+  if (!moved) {
+    return;
+  }
+  tabs.value.splice(to, 0, moved);
+
+  if (activeTab.value === from) {
+    activeTab.value = to;
+  } else if (from < activeTab.value && to >= activeTab.value) {
+    activeTab.value -= 1;
+  } else if (from > activeTab.value && to <= activeTab.value) {
+    activeTab.value += 1;
+  }
+}
+
 /** 关闭标签页；关掉当前这个就切到邻居，全关了就给一个新的，免得出现没有标签页的空壳 */
 function closeTab(index: number) {
   if (tabs.value.length <= 1) {
@@ -893,6 +914,7 @@ function onAction(name: string) {
         @select="selectTab"
         @close="closeTab"
         @new-tab="openNewTab"
+        @move="moveTab"
       />
 
       <main
