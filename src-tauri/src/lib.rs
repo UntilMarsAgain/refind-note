@@ -83,6 +83,17 @@ fn special_pages() -> Vec<String> {
         .collect()
 }
 
+/// 按 `@no-command` 读一篇指令页面（正文包成代码块）。
+///
+/// 单独一条命令，而不是给 `load_note` 加参数：现有调用点因此一个都不用动，
+/// 前端也只在"地址里带 @no-command"这一种情况下走它。
+#[tauri::command]
+fn load_note_no_command(title: String) -> Result<LoadOutcome, String> {
+    open()?
+        .load_code_blocked(&title)
+        .map_err(|error| error.to_string())
+}
+
 /// 渲染预览：与阅读视图同一个渲染器（编辑器右侧的预览区用它）
 #[tauri::command]
 fn render_markdown(markdown: String) -> Result<String, String> {
@@ -286,6 +297,7 @@ pub fn run() {
             update_settings,
             special_pages,
             render_markdown,
+            load_note_no_command,
             list_notes,
             load_note,
             create_note,

@@ -121,7 +121,12 @@ pub enum Address {
     /// 空输入
     Empty,
     /// 阅读一篇笔记（已确认存在）
-    Note { title: String, address: String },
+    Note {
+        title: String,
+        address: String,
+        /// 指令页面 + `@no-command`：正文要包成**代码块**显示（不执行指令）
+        code_block: bool,
+    },
     /// 编辑
     Edit { title: String, address: String },
     /// 版本历史（整篇）

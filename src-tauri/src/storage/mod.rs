@@ -930,6 +930,11 @@ impl Vault {
     ///
     /// 版本在**这篇笔记内**解析（数字版本号或 commit ID 缩写都行）。
     pub fn parse_address(&self, input: &str) -> Result<Address, VaultError> {
+        self.parse_address_at(input, 0)
+    }
+
+    /// 真正的解析。`hops` 是已经跟过几跳重定向（对外一律从 0 起步）。
+    fn parse_address_at(&self, input: &str, hops: usize) -> Result<Address, VaultError> {
         let raw = input.trim();
         if raw.is_empty() {
             return Ok(Address::Empty);
@@ -1020,6 +1025,31 @@ impl Vault {
         };
 
         let state = state.unwrap_or_default();
+
+        // `no-command` 自己带一个连字符，所以必须在拆分 `head-reference` **之前**识别。
+        if state.eq_ignore_ascii_case("no-command") {
+            let is_command = self
+                .current_markdown(&display)?
+                .map(|markdown| command_of(&markdown).is_some())
+                .unwrap_or(false);
+
+            // 一般页面：这个状态没有意义 —— 回显时裁掉，当作没写
+            if !is_command {
+                return Ok(Address::Note {
+                    address: compose_address(&display, None, section.as_deref()),
+                    title: display,
+                    code_block: false,
+                });
+            }
+
+            // 指令页面：不执行指令，原样显示它自己的内容（前端按 code_block 包成代码块）
+            return Ok(Address::Note {
+                address: compose_address(&display, Some("no-command"), section.as_deref()),
+                title: display,
+                code_block: true,
+            });
+        }
+
         let (head, reference) = match state.split_once('-') {
             Some((head, reference)) => (head.to_ascii_lowercase(), Some(reference.trim())),
             None => (state.to_ascii_lowercase(), None),
@@ -1027,10 +1057,19 @@ impl Vault {
 
         match (head.as_str(), reference) {
             // 默认：看最新提交
-            ("", _) | ("view", None) => Ok(Address::Note {
-                address: compose_address(&display, None, section.as_deref()),
-                title: display,
-            }),
+            ("", _) | ("view", None) => {
+                // 指令页面：**只有这一路跟重定向**。@edit / @history / @delete 操作的是
+                // 这一页本身，跟着跳走会让人删错页面。跳数上限在 redirect_target 里把关。
+                if let Some(target) = self.redirect_target(&display, hops)? {
+                    return self.parse_address_at(&target, hops + 1);
+                }
+
+                Ok(Address::Note {
+                    address: compose_address(&display, None, section.as_deref()),
+                    title: display,
+                    code_block: false,
+                })
+            }
             ("edit", None) => Ok(Address::Edit {
                 address: compose_address(&display, Some("edit"), section.as_deref()),
                 title: display,
@@ -1058,9 +1097,14 @@ impl Vault {
                 // 规则：看的就是**最新提交**时，`view-` 正是默认状态，回显里裁掉它
                 // （只裁 view —— rollback 不是默认状态，不能省）。
                 if head == "view" && rev == fold(&events).rev {
+                    // 看最新提交等价于"直接看这篇"，所以同样要跟重定向
+                    if let Some(target) = self.redirect_target(&display, hops)? {
+                        return self.parse_address_at(&target, hops + 1);
+                    }
                     return Ok(Address::Note {
                         address: compose_address(&display, None, section.as_deref()),
                         title: display,
+                        code_block: false,
                     });
                 }
 
@@ -1092,9 +1136,67 @@ impl Vault {
                 "回退要指出哪一版：写成 rollback-版本".to_string(),
             )),
             _ => Err(VaultError::BadAddress(format!(
-                "不认识「@{state}」；状态只有 edit / history / delete / view-版本 / rollback-版本"
+                "不认识「@{state}」；状态只有 edit / history / delete / view-版本 / rollback-版本 / no-command"
             ))),
         }
+    }
+
+    /// 读一篇笔记的**当前正文**（不渲染）。不存在或已删除时返回 None。
+    fn current_markdown(&self, title: &str) -> Result<Option<String>, VaultError> {
+        let (_, path) = self.locate(title)?;
+        let id = Self::id_from_path(&path);
+        if !path.is_file() {
+            return Ok(None);
+        }
+
+        let events = self.read_events(&id)?;
+        let state = fold(&events);
+        if state.deleted {
+            return Ok(None);
+        }
+        if state.rev == 0 {
+            return Ok(Some(String::new()));
+        }
+        Ok(Some(self.content_of(&events, state.rev, 0)?))
+    }
+
+    /// 如果这篇笔记是指令页面且写了 `REDIRECT:`，返回目标地址字符串。
+    ///
+    /// `hops` 是已经跟过的跳数：到上限就报错 —— 成环时给一句能看懂的提示，
+    /// 总好过递归到栈溢出。
+    fn redirect_target(&self, title: &str, hops: usize) -> Result<Option<String>, VaultError> {
+        let Some(markdown) = self.current_markdown(title)? else {
+            return Ok(None);
+        };
+        let Some(Command::Redirect(target)) = command_of(&markdown) else {
+            return Ok(None);
+        };
+
+        if target.is_empty() {
+            return Err(VaultError::BadAddress(format!(
+                "《{title}》的 REDIRECT 没有写目标地址"
+            )));
+        }
+        if hops >= MAX_REDIRECT_HOPS {
+            return Err(VaultError::BadAddress(format!(
+                "重定向超过 {MAX_REDIRECT_HOPS} 跳，可能成环（停在《{title}》）"
+            )));
+        }
+        Ok(Some(target))
+    }
+
+    /// 按 `@no-command` 读一篇指令页面：正文**包成一个代码块**再渲染。
+    ///
+    /// 这样前端不必为它单开一种视图 —— 拿到的仍是一个普通 `Note`，只是 `html` 不同；
+    /// `markdown` 保持原样，所以进编辑器看到的还是原始文本。
+    pub fn load_code_blocked(&self, title: &str) -> Result<LoadOutcome, VaultError> {
+        let mut outcome = self.load_outcome(title)?;
+        if let Some(note) = outcome.note.take() {
+            let resolver = self.resolver(None);
+            let html = markdown::render_with(&fence_code(&note.markdown), Some(&resolver));
+            outcome.note = Some(Note { html, ..note });
+        }
+        Ok(outcome)
     }
 
     /// 把「版本引用」解析成版本号。
@@ -1647,6 +1749,69 @@ fn strip_prefix_ci<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
 
 /// 现有的特殊页面。不在这里面的 `special:` 地址直接报「不存在」。
 pub(crate) const SPECIAL_PAGES: [&str; 3] = ["newtab", "settings", "all"];
+
+/// 指令页面的标记：正文**第一行**（忽略末尾空白）等于它，就认为这是一页指令。
+const COMMAND_MARKER: &str = "$$COMMAND$$";
+
+/// 指令页面里唯一实现的指令：`REDIRECT: 内部地址`（写在第 2 行）
+const REDIRECT_PREFIX: &str = "REDIRECT:";
+
+/// 重定向最多跟几跳。超过就报错，而不是让 A→B→A 这类环无限递归。
+const MAX_REDIRECT_HOPS: usize = 8;
+
+/// 一页指令的内容（只有第一行是标记时才算）
+#[derive(Debug, Clone, PartialEq)]
+enum Command {
+    /// `REDIRECT: <内部地址>`
+    Redirect(String),
+    /// 是指令页面，但没有认出指令（或第 2 行不是 REDIRECT）
+    Other,
+}
+
+/// 识别「指令页面」。
+///
+/// 规则只有一条：**第一行忽略末尾空白后等于 `$$COMMAND$$`**。其余内容都是指令本身。
+/// 返回 `None` 表示这不是指令页面。
+fn command_of(markdown: &str) -> Option<Command> {
+    let mut lines = markdown.lines();
+    if lines.next()?.trim_end() != COMMAND_MARKER {
+        return None;
+    }
+
+    let Some(second) = lines.next() else {
+        return Some(Command::Other);
+    };
+    let second = second.trim_end();
+
+    // 取前 REDIRECT_PREFIX.len() 个**字符**（不是字节）再比较：按字节切中文会 panic，
+    // 而这里恰恰是"用户随便写点什么"的地方。
+    let head_end = second
+        .char_indices()
+        .nth(REDIRECT_PREFIX.len())
+        .map(|(index, _)| index)
+        .unwrap_or(second.len());
+    if !second[..head_end].eq_ignore_ascii_case(REDIRECT_PREFIX) {
+        return Some(Command::Other);
+    }
+
+    Some(Command::Redirect(second[head_end..].trim().to_string()))
+}
+
+/// 把一段文本包进代码块。围栏要比正文里最长的一串反引号更长，否则会被提前闭合。
+fn fence_code(text: &str) -> String {
+    let mut longest = 0usize;
+    let mut run = 0usize;
+    for ch in text.chars() {
+        if ch == '`' {
+            run += 1;
+            longest = longest.max(run);
+        } else {
+            run = 0;
+        }
+    }
+    let fence = "`".repeat((longest + 1).max(3));
+    format!("{fence}\n{}\n{fence}\n", text.trim_end())
+}
 
 /// 规范地址拼装：`NAME[@STATE][#章节]`。
 ///
@@ -2252,7 +2417,7 @@ mod tests {
 
         // 默认（命名空间 0 + 看最新提交）→ 最简形式
         match temp.vault.parse_address("模型").unwrap() {
-            Address::Note { title, address } => {
+            Address::Note { title, address, .. } => {
                 assert_eq!(title, "模型");
                 assert_eq!(address, "模型");
             }
@@ -2496,7 +2661,7 @@ mod tests {
             .parse_address(&format!("顺序@view-{}", latest.short_id))
             .unwrap()
         {
-            Address::Note { address, title } => {
+            Address::Note { address, title, .. } => {
                 assert_eq!(title, "顺序");
                 assert_eq!(address, "顺序");
             }
@@ -2613,6 +2778,136 @@ mod tests {
         let text = error.to_string();
         assert!(!text.contains("版本 0"), "不该打出占位用的 0：{text}");
         assert!(text.contains("没有这个版本"), "{text}");
+    }
+
+    /// 指令页面：第一行 `$$COMMAND$$`（忽略末尾空白）+ 第二行 `REDIRECT: 地址`
+    #[test]
+    fn command_page_redirects_and_no_command_shows_itself() {
+        let temp = TempVault::new();
+        temp.vault.create("目标").unwrap();
+        temp.vault.commit("目标", "正文", None, 0).unwrap();
+
+        // 第一行末尾故意留空格：规则是"忽略末尾空白"
+        temp.vault.create("指令页").unwrap();
+        temp.vault
+            .commit("指令页", "$$COMMAND$$   \nREDIRECT: 目标\n", None, 0)
+            .unwrap();
+
+        // 不带状态：跟重定向，落到目标上（回显也是目标）
+        match temp.vault.parse_address("指令页").unwrap() {
+            Address::Note {
+                title,
+                address,
+                code_block,
+            } => {
+                assert_eq!(title, "目标");
+                assert_eq!(address, "目标");
+                assert!(!code_block);
+            }
+            other => panic!("{other:?}"),
+        }
+
+        // @no-command：不跟重定向，显示它自己，回显保留状态
+        match temp.vault.parse_address("指令页@no-command").unwrap() {
+            Address::Note {
+                title,
+                address,
+                code_block,
+            } => {
+                assert_eq!(title, "指令页");
+                assert_eq!(address, "指令页@no-command");
+                assert!(code_block);
+            }
+            other => panic!("{other:?}"),
+        }
+
+        // 一般页面上的 @no-command：没有影响，回显裁掉
+        match temp.vault.parse_address("目标@no-command").unwrap() {
+            Address::Note {
+                address, code_block, ..
+            } => {
+                assert_eq!(address, "目标");
+                assert!(!code_block);
+            }
+            other => panic!("{other:?}"),
+        }
+
+        // @no-command 读出来的 html 是代码块，markdown 保持原样（编辑器里仍看到原文）
+        let outcome = temp.vault.load_code_blocked("指令页").unwrap();
+        let note = outcome.note.unwrap();
+        assert!(note.html.contains("<pre"), "{}", note.html);
+        assert!(note.html.contains("<code"), "{}", note.html);
+        assert_eq!(note.markdown, "$$COMMAND$$   \nREDIRECT: 目标\n");
+    }
+
+    /// 指令页面没有重定向（或指令认不出来）时：当普通页面读，不报错
+    #[test]
+    fn command_page_without_redirect_is_read_normally() {
+        let temp = TempVault::new();
+        temp.vault.create("空指令").unwrap();
+        temp.vault
+            .commit("空指令", "$$COMMAND$$\n", None, 0)
+            .unwrap();
+
+        match temp.vault.parse_address("空指令").unwrap() {
+            Address::Note {
+                address, code_block, ..
+            } => {
+                assert_eq!(address, "空指令");
+                assert!(!code_block);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// 重定向成环要报错，而不是无限递归
+    #[test]
+    fn redirect_loop_is_reported() {
+        let temp = TempVault::new();
+        temp.vault.create("甲").unwrap();
+        temp.vault
+            .commit("甲", "$$COMMAND$$\nREDIRECT: 乙\n", None, 0)
+            .unwrap();
+        temp.vault.create("乙").unwrap();
+        temp.vault
+            .commit("乙", "$$COMMAND$$\nREDIRECT: 甲\n", None, 0)
+            .unwrap();
+
+        let error = temp.vault.parse_address("甲").unwrap_err();
+        assert!(error.to_string().contains("重定向"), "{error}");
+    }
+
+    /// REDIRECT 没写目标 → 明确报错；而 @no-command 仍是逃生口，能进去看/改
+    #[test]
+    fn redirect_without_target_is_an_error() {
+        let temp = TempVault::new();
+        temp.vault.create("缺目标").unwrap();
+        temp.vault
+            .commit("缺目标", "$$COMMAND$$\nREDIRECT:\n", None, 0)
+            .unwrap();
+
+        assert!(temp.vault.parse_address("缺目标").is_err());
+        match temp.vault.parse_address("缺目标@no-command").unwrap() {
+            Address::Note { code_block, .. } => assert!(code_block),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// 第一行不是标记时，即使第二行写了 REDIRECT 也不当指令页面
+    #[test]
+    fn redirect_needs_the_marker_on_the_first_line() {
+        let temp = TempVault::new();
+        temp.vault.create("目标2").unwrap();
+        temp.vault.commit("目标2", "正文", None, 0).unwrap();
+        temp.vault.create("伪装").unwrap();
+        temp.vault
+            .commit("伪装", "前言\nREDIRECT: 目标2\n", None, 0)
+            .unwrap();
+
+        match temp.vault.parse_address("伪装").unwrap() {
+            Address::Note { address, .. } => assert_eq!(address, "伪装"),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]

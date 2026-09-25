@@ -89,7 +89,13 @@ type Mode =
 /** 与 Rust 端 `Address` 对应：地址栏那一行的解析结果（后端解析到底） */
 type Address =
   | { kind: "empty" }
-  | { kind: "note"; title: string; address: string }
+  | {
+      kind: "note";
+      title: string;
+      address: string;
+      /** 指令页面 + `@no-command`：正文按代码块显示（不执行指令） */
+      code_block: boolean;
+    }
   | { kind: "edit"; title: string; address: string }
   | { kind: "history"; title: string; address: string }
   | { kind: "delete"; title: string; address: string }
@@ -361,9 +367,14 @@ function showMissing(title: string) {
  * 但走到这里时地址解析已经确认它存在，所以正常不会缺内容；万一缺了就退回「不存在」
  * 视图 —— 仍然不改模式，模式只认权威副本。
  */
-async function loadNote(title: string) {
+async function loadNote(title: string, codeBlock = false) {
   try {
-    const outcome = await invoke<LoadOutcome>("load_note", { title });
+    // 指令页面的 `@no-command` 走另一条命令：正文包成代码块后再渲染。
+    // 单独一条命令而不是给 load_note 加参数，是为了让现有调用点一个都不用动。
+    const outcome = await invoke<LoadOutcome>(
+      codeBlock ? "load_note_no_command" : "load_note",
+      { title },
+    );
     if (!outcome.note) {
       showMissing(outcome.title);
       return;
@@ -1071,7 +1082,7 @@ async function navigate(
       // 特殊页面：后端只负责解析出来，内容由前端渲染
       return;
     case "note":
-      await loadNote(address.title);
+      await loadNote(address.title, address.code_block);
       await settleScroll(movement, address);
       return;
     case "edit":
