@@ -60,7 +60,7 @@ const handles: { dir: ResizeDirection; side: string }[] = [
   top: 0;
   left: 0;
   /* 避开右侧窗口按钮，免得抢掉它们的点击 */
-  right: var(--window-controls-width);
+  right: var(--titlebar-actions-width);
   height: 4px;
   cursor: ns-resize;
 }

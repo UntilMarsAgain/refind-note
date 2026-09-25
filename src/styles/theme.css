@@ -1,17 +1,30 @@
+/*
+ * 深色是默认值：不给 <html data-theme> 时就是深色。
+ * 浅色只在这里覆盖同名变量。
+ *
+ * 真正生效的 light / dark 由 src/theme.ts 解析后写进 <html data-theme>，
+ * 所以本文件不需要任何 prefers-color-scheme 媒体查询。
+ */
 :root {
-  /* 标题栏高度对齐浏览器：Firefox / Chrome 的工具栏基本都在 36~40px */
-  --titlebar-height: 36px;
-  /* 右侧三个窗口按钮的总宽，顶部缩放热区要避开它们 */
-  --window-controls-width: 132px;
+  /* 标题栏高度对齐浏览器：Firefox / Chrome 的工具栏都在 36~40px。
+     取 40px 是为了让框里的文字有足够行高，别再往回收。 */
+  --titlebar-height: 40px;
+  /* 标题栏右侧按钮区总宽 = 3 个窗口按钮 x 44px + 循环切换按钮 28px + 间距 6px。
+     顶部缩放热区要避开这片区域，所以数值需与 TitleBar 的按钮尺寸保持一致。 */
+  --titlebar-actions-width: 166px;
 
-  --bg: #1e1e1e;
+  /* 标题栏与正文共用同一个底色。
+     只留 --bg 一个变量是刻意的：这样两者之间结构上就不会出现可见分界。 */
+  --bg: #000201;
   --surface: #372728;
-  --titlebar-bg: #000201;
   --border: rgba(255, 255, 255, 0.14);
+  --divider: rgba(255, 255, 255, 0.3);
+  --field-bg: rgba(0, 0, 0, 0.45);
   --text: #e8e8e8;
   --text-dim: #a8a2a2;
   --icon: #dcdcdc;
   --accent: #9f5354;
+  --accent-hover: #b05f60;
   --accent-soft: #c68e8c;
   --hover: rgba(255, 255, 255, 0.12);
   --press: rgba(255, 255, 255, 0.2);
@@ -27,6 +40,22 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+:root[data-theme="light"] {
+  --bg: #f7f5f4;
+  --surface: #ffffff;
+  --border: rgba(0, 0, 0, 0.14);
+  --divider: rgba(0, 0, 0, 0.22);
+  --field-bg: rgba(0, 0, 0, 0.05);
+  --text: #201c1c;
+  --text-dim: #6d6464;
+  --icon: #3a3434;
+  --accent: #9f5354;
+  --accent-hover: #8a4748;
+  --accent-soft: #8a4748;
+  --hover: rgba(0, 0, 0, 0.06);
+  --press: rgba(0, 0, 0, 0.12);
 }
 
 *,
@@ -49,6 +78,7 @@ body {
   overflow: hidden;
   user-select: none;
   -webkit-user-select: none;
+  transition: background-color 160ms ease;
 }
 
 /* 表单控件要能正常选中和编辑；.selectable 用于内容区需要复制的文本 */

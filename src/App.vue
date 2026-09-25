@@ -11,14 +11,10 @@ async function greet() {
   greetMsg.value = await invoke("greet", { name: name.value });
 }
 
-// 标题栏上的三个入口目前都是占位，先在代码里留痕，
+// 标题栏上的入口目前是占位，先在代码里留痕，
 // 避免以后看代码时误以为「点了没反应」是 bug。
 function onSearch() {
   // TODO: 打开搜索面板
-}
-
-function onMenu() {
-  // TODO: 展开侧边菜单
 }
 
 function onSubmit(value: string) {
@@ -31,7 +27,7 @@ function onSubmit(value: string) {
   <WindowResizeHandles />
 
   <div class="app">
-    <TitleBar @search="onSearch" @menu="onMenu" @submit="onSubmit" />
+    <TitleBar @search="onSearch" @submit="onSubmit" />
 
     <main class="app__body">
       <section class="card">
@@ -98,7 +94,7 @@ function onSubmit(value: string) {
   padding: 8px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: rgba(0, 0, 0, 0.28);
+  background: var(--field-bg);
   color: var(--text);
   outline: none;
 }
@@ -117,7 +113,7 @@ function onSubmit(value: string) {
 }
 
 .probe__btn:hover {
-  background: #b05f60;
+  background: var(--accent-hover);
 }
 
 .probe__out {

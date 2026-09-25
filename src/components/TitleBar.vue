@@ -1,7 +1,26 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, type Component } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Copy, Menu, Minus, Search, Square, X } from "@lucide/vue";
+import {
+  Check,
+  Copy,
+  Menu,
+  Minus,
+  Monitor,
+  Moon,
+  Search,
+  Square,
+  Sun,
+  X,
+} from "@lucide/vue";
+import {
+  cycleThemeMode,
+  nextThemeMode,
+  setThemeMode,
+  themeMode,
+  themeOptions,
+  type ThemeMode,
+} from "../theme";
 
 /**
  * 自绘标题栏。
@@ -13,7 +32,6 @@ import { Copy, Menu, Minus, Search, Square, X } from "@lucide/vue";
 
 const emit = defineEmits<{
   (e: "search"): void;
-  (e: "menu"): void;
   (e: "submit", value: string): void;
 }>();
 
@@ -25,6 +43,24 @@ const fieldEl = ref<HTMLInputElement | null>(null);
 const draft = ref("");
 /** 最近一次提交的值，Esc 或失焦时回退到它 */
 let committed = "";
+
+const menuEl = ref<HTMLElement | null>(null);
+const menuOpen = ref(false);
+
+/** 循环切换按钮显示当前模式，点一下按 themeOptions 的顺序换到下一个 */
+const themeIcons: Record<ThemeMode, Component> = {
+  system: Monitor,
+  light: Sun,
+  dark: Moon,
+};
+
+const themeIcon = computed(() => themeIcons[themeMode.value]);
+
+const themeTip = computed(() => {
+  const current = themeOptions.find((item) => item.value === themeMode.value);
+  const next = themeOptions.find((item) => item.value === nextThemeMode.value);
+  return `外观：${current?.label ?? ""}（点击切到 ${next?.label ?? ""}）`;
+});
 
 let unlistenResized: (() => void) | undefined;
 
@@ -38,9 +74,14 @@ onMounted(async () => {
   unlistenResized = await appWindow.onResized(async () => {
     isMaximized.value = await appWindow.isMaximized();
   });
+
+  document.addEventListener("pointerdown", onPointerDown);
 });
 
-onUnmounted(() => unlistenResized?.());
+onUnmounted(() => {
+  unlistenResized?.();
+  document.removeEventListener("pointerdown", onPointerDown);
+});
 
 function onFocus() {
   // 地址栏惯例：一点就全选
@@ -64,20 +105,32 @@ function onBlur() {
     draft.value = committed;
   }
 }
+
+/** 点菜单面板以外的地方就收起它 */
+function onPointerDown(event: PointerEvent) {
+  if (!menuOpen.value) {
+    return;
+  }
+  const target = event.target;
+  if (target instanceof Node && !menuEl.value?.contains(target)) {
+    menuOpen.value = false;
+  }
+}
+
+function chooseTheme(next: ThemeMode) {
+  setThemeMode(next);
+  menuOpen.value = false;
+}
 </script>
 
 <template>
-  <header class="titlebar" data-tauri-drag-region>
+  <!-- "deep" = 子树内任意位置都能拖动。
+       输入框与按钮属于 Tauri 的 CLICKABLE_TAGS，会自动阻断拖动，所以不必逐个排除。 -->
+  <header class="titlebar" data-tauri-drag-region="deep">
     <div class="titlebar__start">
       <!-- 先放占位图标，之后再换成真正的应用图标 -->
-      <img
-        class="logo"
-        src="/tauri.svg"
-        alt=""
-        draggable="false"
-        data-tauri-drag-region
-      />
-      <span class="divider" data-tauri-drag-region />
+      <img class="logo" src="/tauri.svg" alt="" draggable="false" />
+      <span class="divider" />
 
       <button
         class="tbtn"
@@ -88,15 +141,47 @@ function onBlur() {
       >
         <Search :size="16" :stroke-width="1.75" />
       </button>
-      <button
-        class="tbtn"
-        type="button"
-        title="菜单"
-        aria-label="菜单"
-        @click="emit('menu')"
-      >
-        <Menu :size="16" :stroke-width="1.75" />
-      </button>
+
+      <div ref="menuEl" class="menu">
+        <button
+          class="tbtn"
+          type="button"
+          title="菜单"
+          aria-label="菜单"
+          aria-haspopup="menu"
+          :aria-expanded="menuOpen"
+          @click="menuOpen = !menuOpen"
+        >
+          <Menu :size="16" :stroke-width="1.75" />
+        </button>
+
+        <!-- "false" = 面板内不留拖动区，否则点标题或空白会把窗口拖走 -->
+        <div
+          v-if="menuOpen"
+          class="menu__panel"
+          role="menu"
+          data-tauri-drag-region="false"
+        >
+          <p class="menu__title">外观</p>
+          <button
+            v-for="option in themeOptions"
+            :key="option.value"
+            class="menu__item"
+            type="button"
+            role="menuitemradio"
+            :aria-checked="themeMode === option.value"
+            @click="chooseTheme(option.value)"
+          >
+            <Check
+              v-if="themeMode === option.value"
+              class="menu__check"
+              :size="14"
+            />
+            <span v-else class="menu__check" />
+            {{ option.label }}
+          </button>
+        </div>
+      </div>
     </div>
 
     <div class="titlebar__center">
@@ -112,6 +197,16 @@ function onBlur() {
         @blur="onBlur"
       />
     </div>
+
+    <button
+      class="tbtn tbtn--theme"
+      type="button"
+      :title="themeTip"
+      aria-label="切换外观"
+      @click="cycleThemeMode()"
+    >
+      <component :is="themeIcon" :size="16" :stroke-width="1.75" />
+    </button>
 
     <div class="titlebar__controls">
       <button
@@ -152,7 +247,9 @@ function onBlur() {
   align-items: center;
   flex: 0 0 auto;
   height: var(--titlebar-height);
-  background: var(--titlebar-bg);
+  /* 与正文同一个变量，两者之间不留分界 */
+  background: var(--bg);
+  transition: background-color 160ms ease;
 }
 
 .titlebar__start {
@@ -164,16 +261,16 @@ function onBlur() {
 
 .logo {
   display: block;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   margin: 0 2px;
 }
 
 .divider {
   width: 1px;
-  height: 16px;
+  height: 18px;
   margin: 0 8px;
-  background: rgba(255, 255, 255, 0.3);
+  background: var(--divider);
 }
 
 .titlebar__center {
@@ -185,17 +282,18 @@ function onBlur() {
   padding: 0 10px;
 }
 
-/* 静止时看起来就是一行窗口标题；聚焦后才显出输入框的样子 */
+/* 静止时看起来就是一行窗口标题；聚焦后才显出输入框的样子。
+   尺寸对齐 Chrome：栏高 40px / 地址栏 28px / 文字 14px */
 .field {
   width: min(100%, 520px);
-  height: 24px;
+  height: 28px;
   padding: 0 10px;
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 12.5px;
+  font-size: 14px;
   text-align: center;
   text-overflow: ellipsis;
   outline: none;
@@ -208,7 +306,7 @@ function onBlur() {
 }
 
 .field:focus {
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--field-bg);
   border-color: var(--border);
   cursor: text;
 }
@@ -239,6 +337,62 @@ function onBlur() {
 
 .tbtn:active {
   background: var(--press);
+}
+
+/* 循环切换按钮紧挨着窗口按钮，但要留一条缝，
+   免得被误认成最小化/最大化那一组 */
+.tbtn--theme {
+  margin-right: 6px;
+}
+
+.menu {
+  position: relative;
+}
+
+.menu__panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: 136px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.menu__title {
+  margin: 2px 8px 6px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.menu__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13.5px;
+  text-align: left;
+  cursor: default;
+}
+
+.menu__item:hover {
+  background: var(--hover);
+}
+
+/* 选中态与占位用同一个宽度，避免三行的文字左右错位 */
+.menu__check {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 14px;
+  color: var(--accent-soft);
 }
 
 .wbtn {
