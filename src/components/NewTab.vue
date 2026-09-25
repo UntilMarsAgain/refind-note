@@ -23,7 +23,7 @@ function submit() {
   <section class="newtab">
     <h1 class="newtab__title">新标签页</h1>
     <p class="newtab__hint">
-      输入笔记名打开；输入一个不存在的名字就会进入创建流程。地址栏里也能这么写。
+      输入笔记名打开；名字不存在时进入创建流程。地址栏同样可用。
     </p>
     <div class="newtab__field">
       <input

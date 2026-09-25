@@ -98,7 +98,8 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
   <section class="settings">
     <h1 class="settings__title">设置</h1>
     <p class="settings__where">
-      全部保存在 <code>{{ settings.root }}</code> 下的 <code>vault.json</code>
+      外观存在 <code>{{ settings.root }}</code> 下的 <code>preferences.json</code>，
+      存储相关的存在同目录的 <code>vault.json</code>
     </p>
 
     <h2 class="settings__section">外观</h2>
@@ -180,8 +181,8 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
       />
     </div>
     <p class="settings__hint">
-      一条改动链超过这个长度后，下一版就改存整份快照 —— 避免读取时一路回放增量。
-      调大省空间、读取慢；调小读取快、占空间。默认 32。
+      改动链长于这个值时，下一版改存整份快照，避免读取时逐条回放增量。
+      调大更省空间、读取更慢；调小读取更快、更占空间。默认 32。
     </p>
   </section>
 </template>

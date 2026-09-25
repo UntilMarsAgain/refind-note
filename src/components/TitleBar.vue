@@ -221,7 +221,7 @@ function onBlur() {
     <button
       class="tbtn tbtn--theme"
       type="button"
-      aria-label="切换外观"
+      aria-label="切换主题"
       @click="emit('theme', cycleThemeMode())"
     >
       <component :is="themeIcon" :size="16" :stroke-width="1.75" />
@@ -393,8 +393,8 @@ function onBlur() {
  * 笔画色跟随正文色：深色主题下是浅色形、浅色主题下是深色形 —— 两侧都与标题栏底色
  * 反差足够，形才看得见。
  *
- * 教训：这张图原本是**抠空**的（可见的是方块、形是透明的洞），于是「形」永远等于
- * 背景色 —— 方块一旦接近底色就整块看不见。所以这里把 mask 反了过来，让可见的是形。
+ * 原图是抠空的（可见的是方块、形是透明的洞），于是「形」永远等于
+ * 背景色：方块一旦接近底色就整块看不见。这里把 mask 反相，让可见的是形本身。
  */
 .logo {
   color: var(--text);

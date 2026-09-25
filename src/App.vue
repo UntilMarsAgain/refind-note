@@ -1225,7 +1225,7 @@ function onAction(name: string) {
               <h2 class="confirm__title">删除《{{ note.title }}》？</h2>
               <p class="confirm__body">
                 历史一条都不会丢：会写一条删除标记，文件挪进 <code>trash/</code>，
-                随时可以捞回来。
+                暂未提供恢复界面，但数据都还在，可以手工搬回。
               </p>
               <label class="confirm__opt">
                 <input v-model="deleteWithGc" type="checkbox" />

@@ -20,7 +20,7 @@ const emit = defineEmits<{
 
 /** 特殊页面的显示名；没登记的退回 `special:<页面名>` */
 const PAGE_LABELS: Record<string, string> = {
-  all: "全部页面 · 正在这里",
+  all: "全部页面（当前页）",
   newtab: "新标签页",
   settings: "设置",
 };
@@ -67,7 +67,7 @@ onMounted(async () => {
         笔记 <span class="all__count">{{ notes.length }}</span>
       </h2>
       <p v-if="notes.length === 0" class="all__hint">
-        还没有任何笔记。去 <code>special:newtab</code> 建一篇。
+        还没有笔记。可在 <code>special:newtab</code> 新建。
       </p>
       <ul v-else class="all__list">
         <li v-for="note in notes" :key="note.key">

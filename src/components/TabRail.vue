@@ -165,7 +165,7 @@ function initialOf(tab: { address: string; title: string }) {
   padding: 10px 8px;
   border-right: 1px solid var(--divider);
   /* 只要上下滚动条：overflow-y 一旦不是 visible，x 轴就会被算成 auto，
-     于是出现那条莫名的左右滚动条。这里显式关掉 x 轴。 */
+     于是会出现多余的横向滚动条。这里显式关掉 x 轴。 */
   overflow-x: hidden;
   overflow-y: auto;
 }

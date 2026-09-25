@@ -266,7 +266,7 @@ watch(() => props.title, load);
             type="button"
             @click="emit('open-revision', selectedShort)"
           >
-            打开这一版 @{{ selectedShort }}
+            打开这一版 @view-{{ selectedShort }}
           </button>
 
           <button
