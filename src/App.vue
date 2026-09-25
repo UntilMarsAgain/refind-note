@@ -333,7 +333,7 @@ function closeTab(index: number) {
 
 /** 草稿提醒被忽略过一次（换地址会重新出现） */
 const draftHintDismissed = ref(false);
-/** 删除时顺手回收悬置数据 */
+/** 删除时同时回收孤立数据块与已作废的草稿 */
 const deleteWithGc = ref(false);
 /** 地址栏解析出的错误（比如缩写写错了）；以前这类错误被悄悄吞掉了 */
 const addressError = ref("");
@@ -484,7 +484,7 @@ async function discardDraft() {
   try {
     await invoke("discard_draft", { title: current.title });
     draftText.value = current.markdown;
-    editorStatus.value = "草稿已丢弃，已回到上一次提交的内容";
+    editorStatus.value = "草稿已丢弃，已恢复为上一次提交的内容";
   } catch (error) {
     editorStatus.value = `丢弃失败：${String(error)}`;
   } finally {
@@ -546,7 +546,7 @@ async function renameCurrent(nextTitle: string) {
       });
     }
     await navigate(`${renamed.title}@edit`);
-    editorStatus.value = `已改名为「${renamed.title}」（改名本身记为一版）`;
+    editorStatus.value = `已改名为「${renamed.title}」；本次改名记为一版`;
   } catch (error) {
     editorStatus.value = `改名失败：${String(error)}`;
   } finally {
@@ -1224,12 +1224,12 @@ function onAction(name: string) {
             <section class="confirm">
               <h2 class="confirm__title">删除《{{ note.title }}》？</h2>
               <p class="confirm__body">
-                历史一条都不会丢：会写一条删除标记，文件挪进 <code>trash/</code>，
-                暂未提供恢复界面，但数据都还在，可以手工搬回。
+                将写入一条删除标记，并把笔记文件移入 <code>trash/</code>，
+                历史版本不会丢失。当前不提供恢复入口；如需取回，可在文件系统中手动移回 notes/ 目录。
               </p>
               <label class="confirm__opt">
                 <input v-model="deleteWithGc" type="checkbox" />
-                顺手回收悬置数据
+                同时回收孤立数据块与已作废的草稿
               </label>
               <div class="confirm__actions">
                 <button type="button" @click="cancelConfirm">取消</button>
@@ -1253,7 +1253,7 @@ function onAction(name: string) {
               </h2>
               <p class="confirm__body">
                 内容取自 <code>{{ note.title }}@view-{{ rollbackTarget.shortId }}</code>
-                ，作为<strong>新提交</strong>写上去；旧版本一条不改，历史里会多出一版。
+                ，作为<strong>一次新的提交</strong>写入；原有版本不会被修改，历史中会新增一版。
               </p>
               <div class="confirm__actions">
                 <button type="button" @click="cancelConfirm">取消</button>
@@ -1276,7 +1276,7 @@ function onAction(name: string) {
               <span class="revbar__text">
                 正在查看历史版本
                 <code>{{ note.title }}@{{ revisionView.shortId }}</code>
-                （第 {{ revisionView.rev }} 版，不是最新提交）
+                （第 {{ revisionView.rev }} 版，非最新提交）
               </span>
               <span class="revbar__actions">
                 <button
@@ -1343,17 +1343,17 @@ function onAction(name: string) {
   <div v-if="errorNotice" class="error-cover" @click.self="dismissNotices">
     <p class="notice notice--error">
       <span>{{ errorNotice }}</span>
-      <button type="button" @click="dismissNotices">知道了</button>
+      <button type="button" @click="dismissNotices">关闭</button>
     </p>
   </div>
 
   <!-- 状态提示：顶部悬挂条（只是提醒，不挡正文） -->
   <div v-if="hintNotice" class="hint-bar">
-    <span>这篇笔记有未提交的草稿（当前显示的是最新提交）</span>
+    <span>此笔记存在未提交的草稿；当前显示的是最新提交。</span>
     <span class="hint-bar__actions">
       <button type="button" @click="openDraftPreview">预览</button>
       <button type="button" @click="onAction('edit')">编辑</button>
-      <button type="button" @click="draftHintDismissed = true">知道了</button>
+      <button type="button" @click="draftHintDismissed = true">关闭</button>
     </span>
   </div>
 
