@@ -21,6 +21,10 @@ pub enum VaultError {
     NameTaken(String),
     /// 数据本身坏了：补丁与基准对不上、增量链断裂等
     Corrupt(String),
+    /// 用缩写 ID 找版本时撞上了多个（像 git 那样报歧义，不要猜）
+    AmbiguousRevision { prefix: String, matches: usize },
+    /// 地址栏那一行本身写错了
+    BadAddress(String),
 }
 
 impl std::fmt::Display for VaultError {
@@ -39,6 +43,11 @@ impl std::fmt::Display for VaultError {
             Self::RevisionNotFound { title, rev } => write!(f, "《{title}》没有版本 {rev}"),
             Self::NameTaken(t) => write!(f, "《{t}》已经存在，换一个名字"),
             Self::Corrupt(why) => write!(f, "数据损坏：{why}"),
+            Self::AmbiguousRevision { prefix, matches } => write!(
+                f,
+                "「{prefix}」这个缩写对上了 {matches} 个版本，请多写几位"
+            ),
+            Self::BadAddress(why) => write!(f, "{why}"),
         }
     }
 }

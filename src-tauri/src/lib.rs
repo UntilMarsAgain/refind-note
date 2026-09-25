@@ -9,7 +9,7 @@ mod title;
 
 use std::sync::{Mutex, MutexGuard};
 use storage::{
-    DiffResult, Draft, GcReport, LoadOutcome, Note, NoteSummary, RevisionContent, RevisionSummary,
+    Address, DiffResult, Draft, GcReport, LoadOutcome, Note, NoteSummary, RevisionContent, RevisionSummary,
     Vault, VaultSettings,
 };
 use tauri::Manager;
@@ -194,6 +194,22 @@ fn note_revision(title: String, rev: u64) -> Result<RevisionContent, String> {
         .map_err(|error| error.to_string())
 }
 
+/// 解析地址栏那一行。前端只按返回的 `kind` 分发，不自己解析。
+#[tauri::command]
+fn parse_address(input: String, current: Option<String>) -> Result<Address, String> {
+    open()?
+        .parse_address(&input, current.as_deref())
+        .map_err(|error| error.to_string())
+}
+
+/// 把版本引用（数字版本号或 commit ID 缩写）解析成版本号
+#[tauri::command]
+fn resolve_revision(title: String, reference: String) -> Result<u64, String> {
+    open()?
+        .resolve_revision(&title, &reference)
+        .map_err(|error| error.to_string())
+}
+
 /// 对比两个版本，逐行返回差异
 #[tauri::command]
 fn compare_revisions(title: String, from: u64, to: u64) -> Result<DiffResult, String> {
@@ -255,7 +271,9 @@ pub fn run() {
             compare_revisions,
             gc,
             validate_title,
-            revert_note
+            revert_note,
+            resolve_revision,
+            parse_address
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

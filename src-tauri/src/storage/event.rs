@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
+use super::atomic::hash_bytes;
 use super::DEFAULT_MIME;
 
 // ---------------------------------------------------------------- 事件
@@ -193,6 +194,66 @@ pub fn fold(events: &[Event]) -> NoteState {
 
     state.draft = pending_draft;
     state
+}
+
+/// 一个版本的**稳定 ID**（git 式 commit id）。
+///
+/// 刻意不把 ID 写进日志：它完全由事件自身的判别信息决定，读的时候算出来即可 ——
+/// 这与 git「对象内容决定哈希」是同一个办法，日志里也不会多出一个必须同步维护的字段。
+///
+/// ⚠️ 代价与 git 相同：这个派生规则一旦改动，旧的 ID 就全变了。所以这里的字段
+/// 只许加、不许改含义。
+pub fn revision_id(event: &Event) -> String {
+    let identity = match event {
+        Event::Meta { at, ns, title } => format!("meta:{at}:{ns}:{title}"),
+        Event::Rev {
+            at,
+            rev,
+            blob,
+            bytes,
+            encoding,
+            base_rev,
+            mime,
+            parent,
+            ns,
+            title,
+            summary,
+            content_hash,
+            ..
+        } => format!(
+            "rev:{rev}:{at}:{blob}:{bytes}:{encoding}:{base_rev:?}:{content_hash}:{mime}:{parent:?}:{ns:?}:{title:?}:{summary:?}"
+        ),
+        Event::Auto {
+            at,
+            rev,
+            blob,
+            bytes,
+            encoding,
+            base_rev,
+            mime,
+            on,
+            content_hash,
+            ..
+        } => format!(
+            "auto:{rev}:{at}:{blob}:{bytes}:{encoding}:{base_rev:?}:{content_hash}:{mime}:{on}"
+        ),
+        Event::Del { at, rev, summary } => format!("del:{rev}:{at}:{summary:?}"),
+    };
+
+    hash_bytes(identity.as_bytes())
+}
+
+/// 事件对应的版本号；只有带正文的事件（提交 / 草稿）才算可跳转的版本
+pub fn revision_of(event: &Event) -> Option<u64> {
+    match event {
+        Event::Rev { rev, .. } | Event::Auto { rev, .. } => Some(*rev),
+        _ => None,
+    }
+}
+
+/// 展示用的短 ID（git 默认 7 位，这里给 8 位）
+pub fn short_revision_id(id: &str) -> String {
+    id.chars().take(8).collect()
 }
 
 /// 挂在某个提交上的全部草稿版本号（一次提交/改名会取代它们）

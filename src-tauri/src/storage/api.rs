@@ -62,6 +62,10 @@ pub struct RevisionSummary {
     pub delta: i64,
     /// `full` 或 `delta`：这一版内容是怎么存的
     pub encoding: String,
+    /// 完整 commit ID（界面上一般只显示缩写）
+    pub id: String,
+    /// 展示用的缩写
+    pub short_id: String,
     /// 本次提交取代了哪些草稿节点（只有 commit 才有）
     pub supersedes: Vec<u64>,
     pub summary: Option<String>,
@@ -100,6 +104,31 @@ pub struct DiffResult {
     pub inserted: usize,
     pub deleted: usize,
 }
+/// 地址栏那一行的解析结果。
+///
+/// 后端**解析到底**：哪篇笔记、哪一版、还是不存在。前端只按 `kind` 分发 ——
+/// 加新语法时在这里加变体，界面补一个分支即可。
+///
+/// 返回的 `title` / `short_id` 都是**规范全称**，界面直接拿来回显地址栏
+/// （所以用 `@缩写` 跳转之后，地址栏会显示成 `名称@缩写`）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum Address {
+    /// 空输入
+    Empty,
+    /// 打开一篇笔记（已确认存在）
+    Note { title: String },
+    /// 打开某一版；`title` 与 `short_id` 用于回显 `名称@缩写`
+    Revision {
+        title: String,
+        rev: u64,
+        id: String,
+        short_id: String,
+    },
+    /// 目标还不存在，交给「不存在 + 创建」那条路
+    Missing { title: String },
+}
+
 /// 一次回收的结果
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct GcReport {

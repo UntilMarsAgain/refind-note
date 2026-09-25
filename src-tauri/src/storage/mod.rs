@@ -26,12 +26,14 @@ mod error;
 mod event;
 
 pub use api::{
-    DiffResult, Draft, GcReport, LoadOutcome, Note, NoteSummary, RevisionContent, RevisionSummary,
+    Address, DiffResult, Draft, GcReport, LoadOutcome, Note, NoteSummary, RevisionContent, RevisionSummary,
     VaultSettings,
 };
 pub use config::VaultConfig;
 pub use error::VaultError;
-pub use event::{drafts_of, fold, next_rev, Event};
+pub use event::{
+    drafts_of, fold, next_rev, revision_id, revision_of, short_revision_id, Event,
+};
 
 use atomic::{append_line, hash_bytes, write_atomic, BlobStore};
 use std::collections::HashSet;
@@ -586,6 +588,7 @@ impl Vault {
             };
 
             // 只有带正文的记录才谈得上「比上一条多了多少字节」
+            let id = revision_id(event);
             let has_content = matches!(event, Event::Rev { .. } | Event::Auto { .. });
             let delta = if has_content {
                 bytes as i64 - previous_bytes as i64
@@ -603,6 +606,8 @@ impl Vault {
                 bytes,
                 delta,
                 encoding: encoding.to_string(),
+                id: id.clone(),
+                short_id: short_revision_id(&id),
                 supersedes,
                 summary,
             });
@@ -703,6 +708,128 @@ impl Vault {
             markdown: markdown_text,
             html,
         })
+    }
+
+    /// 解析地址栏那一行，并**解析到底**。
+    ///
+    /// 放后端而不是前端：合法性（`@`、冒号、长度）、目标是否存在、缩写 ID 对应哪一版，
+    /// 这些知识全在后端；前端再实现一遍就是第二个真相来源。前端只按 `kind` 分发。
+    ///
+    /// 目前唯一的语法糖是 `@引用`（引用可以是数字版本号，也可以是 commit ID 缩写）。
+    /// 标题里不允许 `@`，所以按**最后一个** `@` 切是安全的。
+    pub fn parse_address(
+        &self,
+        input: &str,
+        current: Option<&str>,
+    ) -> Result<Address, VaultError> {
+        let raw = input.trim();
+        if raw.is_empty() {
+            return Ok(Address::Empty);
+        }
+
+        let (title_part, reference) = match raw.rfind('@') {
+            Some(index) => (raw[..index].trim(), Some(raw[index + 1..].trim().to_string())),
+            None => (raw, None),
+        };
+
+        let Some(reference) = reference.filter(|value| !value.is_empty()) else {
+            // 没有 @，或 @ 后面是空的：整串当标题（含 @ 的会被标题规则拒掉）
+            let parsed = self.table.parse(raw, self.config.capital_links)?;
+            let display = parsed.display(&self.table);
+            return Ok(if self.log_path(&Self::id_of(&parsed)).is_file() {
+                Address::Note { title: display }
+            } else {
+                Address::Missing { title: display }
+            });
+        };
+
+        // 只写 `@引用` 时按当前打开的笔记理解
+        let source = if !title_part.is_empty() {
+            title_part
+        } else if let Some(current) = current {
+            current
+        } else {
+            return Err(VaultError::BadAddress(
+                "只写 @ 引用时需要先打开一篇笔记".to_string(),
+            ));
+        };
+
+        let parsed = self.table.parse(source, self.config.capital_links)?;
+        let display = parsed.display(&self.table);
+        let id = Self::id_of(&parsed);
+        if !self.log_path(&id).is_file() {
+            // 笔记还没有建立，版本自然无从谈起
+            return Ok(Address::Missing { title: display });
+        }
+
+        let rev = self.resolve_revision(&display, &reference)?;
+        let events = self.read_events(&id)?;
+        let event = events
+            .iter()
+            .find(|event| revision_of(event) == Some(rev))
+            .ok_or_else(|| VaultError::RevisionNotFound {
+                title: display.clone(),
+                rev,
+            })?;
+        let full_id = revision_id(event);
+
+        Ok(Address::Revision {
+            title: display,
+            rev,
+            id: full_id.clone(),
+            short_id: short_revision_id(&full_id),
+        })
+    }
+
+    /// 把「版本引用」解析成版本号。
+    ///
+    /// 接受两种写法（与 git 一致的地方就在第二种）：
+    /// - 纯数字：就是版本号本身；
+    /// - 十六进制缩写：commit ID 的前缀，撞上多个就报歧义、绝不猜。
+    pub fn resolve_revision(&self, title: &str, reference: &str) -> Result<u64, VaultError> {
+        let (parsed, _) = self.locate(title)?;
+        let events = self.read_events(&Self::id_of(&parsed))?;
+        let reference = reference.trim();
+
+        if reference.is_empty() {
+            return Err(VaultError::RevisionNotFound {
+                title: parsed.title.clone(),
+                rev: 0,
+            });
+        }
+
+        // 纯数字：直接当版本号（存在性交给调用方去查内容）
+        if reference.chars().all(|ch| ch.is_ascii_digit()) {
+            return reference.parse::<u64>().map_err(|_| VaultError::RevisionNotFound {
+                title: parsed.title.clone(),
+                rev: 0,
+            });
+        }
+
+        let needle = reference.to_ascii_lowercase();
+        let mut matches: Vec<u64> = Vec::new();
+        for event in &events {
+            let rev = match event {
+                Event::Rev { rev, .. } | Event::Auto { rev, .. } => *rev,
+                // 删除标记没有内容，不作为可跳转的版本
+                _ => continue,
+            };
+            if revision_id(event).starts_with(&needle) {
+                matches.push(rev);
+            }
+        }
+
+        match matches.len() {
+            0 => Err(VaultError::RevisionNotFound {
+                title: parsed.title.clone(),
+                rev: 0,
+            }),
+            1 => Ok(matches[0]),
+            count => Err(VaultError::AmbiguousRevision {
+                prefix: reference.to_string(),
+                matches: count,
+            }),
+        }
     }
 
     /// 对比两个版本，逐行返回差异
@@ -1543,6 +1670,119 @@ mod tests {
         assert!(temp.vault.validate_title("").is_err());
         // 校验不该留下任何文件
         assert!(temp.root.join("notes").read_dir().unwrap().next().is_none());
+    }
+
+    /// 每个版本都有稳定 ID，数字与缩写两种引用都能解析
+    #[test]
+    fn revisions_have_short_ids_that_resolve() {
+        let temp = TempVault::new();
+        temp.vault.create("编号").unwrap();
+        temp.vault.commit("编号", "第一版", None, 0).unwrap();
+        temp.vault.commit("编号", "第二版", None, 1).unwrap();
+
+        let history = temp.vault.history("编号").unwrap();
+        let second = history.iter().find(|item| item.rev == 2).unwrap();
+        assert_eq!(second.id.len(), 64, "完整 ID 是 sha256");
+        assert_eq!(second.short_id.len(), 8);
+        assert!(second.id.starts_with(&second.short_id));
+
+        // ID 必须稳定：再查一次还是同一个
+        let again = temp.vault.history("编号").unwrap();
+        assert_eq!(
+            again.iter().find(|item| item.rev == 2).unwrap().id,
+            second.id
+        );
+
+        // 数字与缩写都能解析到同一个版本
+        assert_eq!(temp.vault.resolve_revision("编号", "2").unwrap(), 2);
+        assert_eq!(
+            temp.vault.resolve_revision("编号", &second.short_id).unwrap(),
+            2
+        );
+        assert_eq!(temp.vault.resolve_revision("编号", &second.id).unwrap(), 2);
+
+        // 对不上的缩写要给「找不到」，而不是猜一个
+        assert!(matches!(
+            temp.vault.resolve_revision("编号", "zzzzzzzz"),
+            Err(VaultError::RevisionNotFound { .. })
+        ));
+    }
+
+    /// 地址栏解析：标题、标题@数字、标题@缩写、只写 @缩写、不存在、歧义
+    #[test]
+    fn address_parsing_resolves_notes_and_revisions() {
+        let temp = TempVault::new();
+        temp.vault.create("地址").unwrap();
+        temp.vault.commit("地址", "第一版", None, 0).unwrap();
+        temp.vault.commit("地址", "第二版", None, 1).unwrap();
+
+        let second = temp
+            .vault
+            .history("地址")
+            .unwrap()
+            .into_iter()
+            .find(|item| item.rev == 2)
+            .unwrap();
+
+        // 只有标题 → 打开笔记
+        match temp.vault.parse_address("地址", None).unwrap() {
+            Address::Note { title } => assert_eq!(title, "地址"),
+            other => panic!("{other:?}"),
+        }
+
+        // 标题@缩写 → 解析成具体版本，并给出**规范全称**用于回显
+        match temp
+            .vault
+            .parse_address(&format!("地址@{}", second.short_id), None)
+            .unwrap()
+        {
+            Address::Revision {
+                title,
+                rev,
+                short_id,
+                ..
+            } => {
+                assert_eq!(title, "地址");
+                assert_eq!(rev, 2);
+                assert_eq!(short_id, second.short_id, "回显用的是缩写 ID");
+            }
+            other => panic!("{other:?}"),
+        }
+
+        // 标题@数字
+        match temp.vault.parse_address("地址@1", None).unwrap() {
+            Address::Revision { rev, .. } => assert_eq!(rev, 1),
+            other => panic!("{other:?}"),
+        }
+
+        // 只写 @缩写 → 按当前打开的笔记理解
+        match temp
+            .vault
+            .parse_address(&format!("@{}", second.short_id), Some("地址"))
+            .unwrap()
+        {
+            Address::Revision { rev, .. } => assert_eq!(rev, 2),
+            other => panic!("{other:?}"),
+        }
+        assert!(
+            temp.vault.parse_address("@1", None).is_err(),
+            "没有当前笔记时只写 @ 引用应当报错"
+        );
+
+        // 不存在的笔记 → 交给「不存在 + 创建」
+        match temp.vault.parse_address("没建过", None).unwrap() {
+            Address::Missing { title } => assert_eq!(title, "没建过"),
+            other => panic!("{other:?}"),
+        }
+
+        // 空输入
+        assert!(matches!(
+            temp.vault.parse_address("   ", None).unwrap(),
+            Address::Empty
+        ));
+
+        // 对不上的缩写必须是错误，不许猜
+        assert!(temp.vault.parse_address("地址@zzzz", None).is_err());
     }
 
     #[test]
