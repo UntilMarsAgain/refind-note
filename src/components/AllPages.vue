@@ -11,7 +11,16 @@ import { invoke } from "@tauri-apps/api/core";
 interface NoteSummary {
   key: string;
   title: string;
+  /** 指令页面的短名；普通页面是 null */
+  command: string | null;
 }
+
+/** 指令页面的标记文案；没登记的退回短名本身 */
+const COMMAND_LABELS: Record<string, string> = {
+  redirect: "重定向",
+  "random-redirect": "随机重定向",
+  unrecognized: "指令有问题",
+};
 
 const emit = defineEmits<{
   (e: "open", address: string): void;
@@ -77,7 +86,12 @@ onMounted(async () => {
             :title="note.key"
             @click="go(note.title, $event)"
           >
-            {{ note.title }}
+            <span class="all__name">{{ note.title }}</span>
+            <span
+              v-if="note.command"
+              class="all__cmd"
+              :class="{ 'all__cmd--bad': note.command === 'unrecognized' }"
+            >{{ COMMAND_LABELS[note.command] ?? note.command }}</span>
           </button>
         </li>
       </ul>
@@ -144,7 +158,9 @@ onMounted(async () => {
 }
 
 .all__link {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   width: 100%;
   padding: 5px 8px;
   border: 0;
@@ -157,6 +173,27 @@ onMounted(async () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 标题省略号只作用在标题上，标记不被压缩 */
+.all__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.all__cmd {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--code-bg);
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+/* 认不出的指令页面一打开就报错，用缺失链接的红色提醒 */
+.all__cmd--bad {
+  color: var(--link-missing);
 }
 
 .all__link:hover {

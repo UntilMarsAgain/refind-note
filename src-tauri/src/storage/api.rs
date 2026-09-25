@@ -12,6 +12,9 @@ pub struct NoteSummary {
     pub key: String,
     /// 显示标题
     pub title: String,
+    /// 指令页面的短名（`redirect` / `random-redirect` / `unrecognized`）；
+    /// 普通页面是 `null`。`special:all` 据此标注。
+    pub command: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

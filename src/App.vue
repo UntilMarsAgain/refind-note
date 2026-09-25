@@ -467,10 +467,12 @@ async function commitEditing(summary: string) {
   }
 
   busy.value = true;
+  // 先留一份原文：指令判断要用它，而它会随提交流程被清空
+  const markdown = draftText.value;
   try {
     const committed = await invoke<Note>("commit_note", {
       title: current.title,
-      markdown: draftText.value,
+      markdown,
       summary: summary || null,
       baseRev: current.rev,
     });
@@ -479,8 +481,12 @@ async function commitEditing(summary: string) {
     await refreshNotes();
     scrolled.value = false;
     scrollEl.value?.scrollTo({ top: 0 });
-    // 提交之后回到「阅读最新提交」这个地址 —— 状态变化同样只走地址
-    await navigate(committed.title);
+
+    // 提交之后回到「阅读最新提交」这个地址 —— 状态变化同样只走地址。
+    // 指令页面要落在 `@no-command` 上：否则刚提交完就被自己的重定向带走，
+    // 连"提交到底成没成"都看不清。判断交给后端（规则只有一处）。
+    const command = await invoke<string | null>("command_kind", { markdown });
+    await navigate(command ? `${committed.title}@no-command` : committed.title);
   } catch (error) {
     // 提交冲突会走到这里：不动用户正在编辑的内容，只把原因写在状态行
     editorStatus.value = `提交失败：${String(error)}`;

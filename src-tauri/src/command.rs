@@ -34,6 +34,20 @@ pub enum Command {
     Unrecognized(Option<String>),
 }
 
+impl Command {
+    /// 指令的短名，给界面标注用（`special:all` 据此把它们标出来）。
+    ///
+    /// 认不出的那一种也要有名字：**它最需要被找出来** —— 这种页面一打开就报错，
+    /// 用户得先在列表里看见它，才能进去改。
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Command::Redirect(_) => "redirect",
+            Command::RandomRedirect(_) => "random-redirect",
+            Command::Unrecognized(_) => "unrecognized",
+        }
+    }
+}
+
 /// 识别「指令页面」。返回 `None` 表示这不是指令页面（第一行不是标记）。
 pub fn command_of(markdown: &str) -> Option<Command> {
     let mut lines = markdown.lines();

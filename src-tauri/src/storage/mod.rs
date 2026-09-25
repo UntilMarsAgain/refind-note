@@ -655,14 +655,24 @@ impl Vault {
     // ------------------------------------------------------------ 读
 
     pub fn list_notes(&self) -> Result<Vec<NoteSummary>, VaultError> {
-        let mut out: Vec<NoteSummary> = self
-            .walk(&self.notes_dir())?
-            .into_iter()
-            .map(|parsed| NoteSummary {
+        let mut out: Vec<NoteSummary> = Vec::new();
+
+        for parsed in self.walk(&self.notes_dir())? {
+            let display = parsed.display(&self.table);
+            // 标注指令页面：要判定"第一行是不是标记"就得读一遍当前正文，
+            // 这是唯一的办法（代价是列表页对每篇笔记多一次读取）。
+            let command = match self.current_markdown(&display)? {
+                Some(markdown) => crate::command::command_of(&markdown)
+                    .map(|command| command.kind().to_string()),
+                None => None,
+            };
+            out.push(NoteSummary {
                 key: parsed.key(),
-                title: parsed.display(&self.table),
-            })
-            .collect();
+                title: display,
+                command,
+            });
+        }
+
         out.sort_by(|a, b| a.title.cmp(&b.title));
         Ok(out)
     }
@@ -3062,6 +3072,42 @@ mod tests {
             .unwrap();
         let error = empty_ns.vault.parse_address("别的空间").unwrap_err();
         assert!(error.to_string().contains("随机不到"), "{error}");
+    }
+
+    /// `special:all` 的列表要能看出哪些是指令页面（含认不出的那种）
+    #[test]
+    fn listing_marks_command_pages() {
+        let temp = TempVault::new();
+        temp.vault.create("目标").unwrap();
+        temp.vault.commit("目标", "正文", None, 0).unwrap();
+        temp.vault.create("重定向页").unwrap();
+        temp.vault
+            .commit("重定向页", "$$COMMAND$$\nREDIRECT: 目标\n", None, 0)
+            .unwrap();
+        temp.vault.create("随机页").unwrap();
+        temp.vault
+            .commit("随机页", "$$COMMAND$$\nRANDOM_REDIRECT\n", None, 0)
+            .unwrap();
+        temp.vault.create("坏指令").unwrap();
+        temp.vault
+            .commit("坏指令", "$$COMMAND$$\n不知道写什么\n", None, 0)
+            .unwrap();
+
+        let listed = temp.vault.list_notes().unwrap();
+        let kind_of = |title: &str| {
+            listed
+                .iter()
+                .find(|item| item.title == title)
+                .unwrap_or_else(|| panic!("列表里没有《{title}》"))
+                .command
+                .clone()
+        };
+
+        assert_eq!(kind_of("目标"), None);
+        assert_eq!(kind_of("重定向页").as_deref(), Some("redirect"));
+        assert_eq!(kind_of("随机页").as_deref(), Some("random-redirect"));
+        // 认不出的那种最需要被看见：一打开就报错，得先在列表里找到它
+        assert_eq!(kind_of("坏指令").as_deref(), Some("unrecognized"));
     }
 
     #[test]

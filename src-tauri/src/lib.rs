@@ -95,6 +95,16 @@ fn load_note_no_command(title: String) -> Result<LoadOutcome, String> {
         .map_err(|error| error.to_string())
 }
 
+/// 判断一段 markdown 是不是指令页面，返回指令短名。
+///
+/// 前端用它决定"提交之后落在哪个地址"：指令页面要落在 `@no-command` 上，
+/// 否则刚提交完就被自己的重定向带走。**判断规则只有一处**（`command.rs`），
+/// 前端不自己解释 `$$COMMAND$$`。
+#[tauri::command]
+fn command_kind(markdown: String) -> Option<String> {
+    crate::command::command_of(&markdown).map(|command| command.kind().to_string())
+}
+
 /// 渲染预览：与阅读视图同一个渲染器（编辑器右侧的预览区用它）
 #[tauri::command]
 fn render_markdown(markdown: String) -> Result<String, String> {
@@ -299,6 +309,7 @@ pub fn run() {
             special_pages,
             render_markdown,
             load_note_no_command,
+            command_kind,
             list_notes,
             load_note,
             create_note,
