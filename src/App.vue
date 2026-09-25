@@ -688,7 +688,6 @@ const localSection = ref("");
  * 规范里的例外：`@` 没找到对应版本时（无论是 `NAME@VERSION` 该页没这版，还是
  * `@VERSION` 全局没有），地址栏应当保留用户输入 —— 其余情况一律回显规范全称。
  */
-const rejectedAddress = ref("");
 
 /**
  * 地址栏显示的文本。
@@ -698,9 +697,6 @@ const rejectedAddress = ref("");
  */
 const addressText = computed(() => {
   // 例外：解析失败时显示用户写的原文
-  if (rejectedAddress.value) {
-    return rejectedAddress.value;
-  }
 
   const address = route.value;
   if (!address || address.kind === "empty") {
@@ -869,7 +865,6 @@ async function navigate(
   movement: "push" | "replace" | "history" | "restore" = "push",
 ) {
   addressError.value = "";
-  rejectedAddress.value = "";
 
   let address: Address;
   try {
@@ -956,7 +951,6 @@ async function doDelete() {
       await invoke("gc", { orphanBlobs: true, supersededDrafts: true });
     }
 
-    rejectedAddress.value = "";
     note.value = null;
     await refreshNotes();
 
