@@ -17,6 +17,8 @@ interface Settings {
   theme: string;
   accent: string;
   reading_width: number;
+  /** 界面缩放（1.0 = 100%） */
+  zoom: number;
 }
 
 const props = defineProps<{ settings: Settings; focus?: string }>();
@@ -33,7 +35,13 @@ const bundleName = import.meta.url.split("/").pop() ?? "";
  * 每个设置项的 id 是**地址的一部分**（`special:settings#accent` 能直接跳过去），
  * 因此它们等于对外接口：改名要同步改这里的 id 与文案。
  */
-const SECTION_IDS = ["theme", "accent", "reading-width", "delta-chain-limit"];
+const SECTION_IDS = [
+  "theme",
+  "accent",
+  "reading-width",
+  "zoom",
+  "delta-chain-limit",
+];
 
 /** 地址里带了哪个 id，就把哪一项高亮出来 */
 function isFocused(id: string): boolean {
@@ -87,6 +95,26 @@ function submitAccent() {
   } else {
     accentDraft.value = props.settings.accent;
   }
+}
+
+/**
+ * 缩放用百分比输入（界面上 100 = 1.0），存进设置时换算回倍数。
+ *
+ * 区间与 Ctrl + 滚轮一致（50%–300%），越界就夹住并把输入框改回夹后的值 ——
+ * 否则用户会看到一个"输入了却没生效"的数字。
+ */
+function submitZoom(event: Event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) {
+    return;
+  }
+  const value = Number.parseInt(target.value, 10);
+  if (!Number.isFinite(value)) {
+    return;
+  }
+  const percent = Math.min(300, Math.max(50, value));
+  target.value = String(percent);
+  emit("update", { zoom: percent / 100 });
 }
 
 function submitNumber(key: string, event: Event, min: number, max: number) {
@@ -179,6 +207,24 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
       />
       <span class="row__unit">px</span>
     </div>
+
+    <div id="zoom" class="row" :class="{ 'row--target': isFocused('zoom') }">
+      <span class="row__label">界面缩放</span>
+      <code class="row__id">#zoom</code>
+      <input
+        class="num"
+        type="number"
+        min="50"
+        max="300"
+        step="10"
+        :value="Math.round(settings.zoom * 100)"
+        @change="submitZoom"
+      />
+      <span class="row__unit">%</span>
+    </div>
+    <p class="settings__hint">
+      也可按住 Ctrl 滚轮随时调整。默认 100%。
+    </p>
 
     <h2 class="settings__section">存储</h2>
 
