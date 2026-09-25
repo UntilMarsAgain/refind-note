@@ -323,7 +323,7 @@ function submit() {
 
       <div class="editor__actions">
         <button
-          class="editor__preview-btn"
+          class="ebtn"
           type="button"
           title="不等静默，立刻渲染当前内容"
           @click="refreshPreviewNow"
@@ -624,29 +624,6 @@ function submit() {
 
 
 /*
- * 刷新预览。两个坑都踩过，记在这里：
- * 1. 它曾是 `.editor__bar` 的直接子元素，**不在按钮组的样式范围内** —— 已移进
- *    `.editor__actions`，选择器也带上该前缀提高特异性；
- * 2. 原来用简写 `background: transparent`，压缩后变成 `background: 0 0` ——
- *    那是**位置**不是颜色！背景色因此没被设上，按钮退回默认的浅色外观。
- *    改用长属性 `background-color`，压缩不会把它变成别的意思。
- */
-.editor__actions .editor__preview-btn {
-  padding: 5px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background-color: transparent;
-  color: var(--text);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.editor__actions .editor__preview-btn:hover {
-  background-color: var(--hover);
-  color: var(--text);
-}
-
-/*
  * 两栏各占剩余高度、各自滚动。
  *
  * 关键不是加 overflow，而是**高度要有确定来源**：根 `.editor` 已绝对定位为定高，
@@ -654,7 +631,9 @@ function submit() {
  * 中间没有任何一环由内容撑开，所以滚轮滚的必然是所在那一栏。
  */
 .editor__panes {
-  flex: 1 1 auto;
+  /* 基准必须是 0，不能是 auto：auto 的基准是**内容高度**，内容一高，两栏就被撑开、
+     再被容器裁掉 —— 表现就是"没有滚动条、底部被截断"。基准 0 时高度完全由可用空间决定。 */
+  flex: 1 1 0;
   height: auto;
   min-height: 0;
 }
