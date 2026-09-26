@@ -48,7 +48,8 @@ impl Vault {
                     format!("{} / {}", std::env::consts::OS, std::env::consts::ARCH),
                 ),
                 entry("仓库目录", self.root.display().to_string()),
-                entry("存储格式版本", self.config.format.to_string()),
+                entry("数据库模型版本", self.config.model_version.clone()),
+                entry("本程序认的模型版本", crate::storage::version::MODEL_VERSION),
                 entry("报告时间", now_iso()),
             ],
         )

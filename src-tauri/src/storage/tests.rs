@@ -2295,3 +2295,38 @@ fn render_report_describes_one_render() {
         .render_report(".a { }\n", Some("template:样式.css"));
     assert_eq!(code.language, "css");
 }
+
+/// 模型版本：大版本不同拒绝打开，仓库比程序新也拒绝；版本号本身可读
+///
+/// "更旧的同大版本可以就地升级"这条分支在程序当前是 1.0.0 时造不出真实输入
+/// （1.0.0 就是最小的 1.x），所以它由 `version::decide` 的单元测试覆盖 —— 结论一致。
+#[test]
+fn model_version_gates_opening() {
+    let temp = TempVault::new();
+    let config_path = temp.root.join("vault.json");
+    let original = fs::read_to_string(&config_path).unwrap();
+    assert!(
+        original.contains("\"model_version\""),
+        "vault.json 里应当写着模型版本：{original}"
+    );
+
+    // 大版本不同：拒绝，并说明只能重建
+    fs::write(&config_path, original.replace("\"1.0.0\"", "\"2.0.0\"")).unwrap();
+    let message = Vault::open(&temp.root)
+        .err()
+        .expect("大版本不同应当拒绝打开")
+        .to_string();
+    assert!(message.contains("从头重建"), "{message}");
+
+    // 仓库比程序新（降级了程序）：拒绝，但建议升级程序而不是重建
+    fs::write(&config_path, original.replace("\"1.0.0\"", "\"1.9.9\"")).unwrap();
+    let message = Vault::open(&temp.root)
+        .err()
+        .expect("仓库比程序新应当拒绝打开")
+        .to_string();
+    assert!(message.contains("请升级程序"), "{message}");
+
+    // 改回来：照常打开
+    fs::write(&config_path, &original).unwrap();
+    assert!(Vault::open(&temp.root).is_ok());
+}

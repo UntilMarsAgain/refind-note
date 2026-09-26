@@ -308,7 +308,8 @@ pub struct GcReport {
 pub struct VaultSettings {
     /// 仓库根目录（界面上显示出来，方便直接去看文件）
     pub root: String,
-    pub format: u32,
+    /// 数据库模型版本（`大.中.小`；语义见 `storage::version`）
+    pub model_version: String,
     /// 标题首字母是否强制大写（对应 MediaWiki 的 $wgCapitalLinks）
     pub capital_links: bool,
     pub max_title_bytes: usize,

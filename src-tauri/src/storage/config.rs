@@ -15,7 +15,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VaultConfig {
-    pub format: u32,
+    /// 数据库模型版本（语义见 `storage::version`）
+    pub model_version: String,
     /// 标题首字母是否强制大写（对应 MediaWiki 的 $wgCapitalLinks）
     pub capital_links: bool,
     pub max_title_bytes: usize,
@@ -68,7 +69,7 @@ impl Default for Appearance {
 impl Default for VaultConfig {
     fn default() -> Self {
         Self {
-            format: 1,
+            model_version: super::version::MODEL_VERSION.to_string(),
             capital_links: true,
             max_title_bytes: crate::title::MAX_TITLE_BYTES,
             delta_chain_limit: 32,

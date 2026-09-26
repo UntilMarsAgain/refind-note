@@ -29,6 +29,7 @@ mod event;
 mod debug;
 mod namespaces;
 mod trash;
+mod version;
 
 pub use api::{
     Address, CommandInfo, DiffResult, Draft, GcReport, LoadOutcome, MaintenanceReport, Note,
@@ -126,6 +127,22 @@ impl Vault {
                 config
             }
         };
+
+        // 数据库模型版本：大版本不同只能从头重建；仓库更旧则就地升级并记下来。
+        // 这一步在读取任何笔记之前做 —— 判定没过就什么都不碰。
+        let mut config = config;
+        match crate::storage::version::check(&config.model_version) {
+            Ok(crate::storage::version::Compatibility::Same) => {}
+            Ok(crate::storage::version::Compatibility::Upgrade { from }) => {
+                eprintln!(
+                    "[vault] 模型版本从 {from} 升级到 {}",
+                    crate::storage::version::MODEL_VERSION
+                );
+                config.model_version = crate::storage::version::MODEL_VERSION.to_string();
+                write_atomic(&config_path, &serde_json::to_vec_pretty(&config)?)?;
+            }
+            Err(why) => return Err(VaultError::ModelVersion(why)),
+        }
 
         // 界面偏好单独一个文件；不存在就写一份默认的
         let preferences_path = root.join("preferences.json");
@@ -547,7 +564,7 @@ impl Vault {
         let appearance = self.preferences();
         VaultSettings {
             root: self.root.display().to_string(),
-            format: self.config.format,
+            model_version: self.config.model_version.clone(),
             capital_links: self.config.capital_links,
             max_title_bytes: self.config.max_title_bytes,
             delta_chain_limit: self.config.delta_chain_limit,

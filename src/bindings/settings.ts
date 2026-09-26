@@ -4,7 +4,8 @@
 
 export interface VaultSettings {
   root: string;
-  format: number;
+  /** 数据库模型版本（`大.中.小`）；语义见 src-tauri/src/storage/version.rs */
+  model_version: string;
   capital_links: boolean;
   max_title_bytes: number;
   delta_chain_limit: number;

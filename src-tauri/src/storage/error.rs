@@ -27,6 +27,9 @@ pub enum VaultError {
     BadAddress(String),
     /// 版本 ID 撞车了：宁可拒绝写入，也不要留下两个「同一个 ID」的版本
     IdCollision(String),
+    /// 数据库模型版本对不上（大版本不同，或仓库比程序新）。
+    /// 里面的那句话是**写给人看的**：说清发生了什么、该怎么办。
+    ModelVersion(String),
 }
 
 impl std::fmt::Display for VaultError {
@@ -59,6 +62,7 @@ impl std::fmt::Display for VaultError {
                 "「{prefix}」这个缩写对上了 {matches} 个版本，请多写几位"
             ),
             Self::BadAddress(why) => write!(f, "{why}"),
+            Self::ModelVersion(why) => write!(f, "{why}"),
             Self::IdCollision(id) => write!(
                 f,
                 "版本标识与已有版本重复（{id}…）。为安全起见拒绝写入，请先备份仓库。"
