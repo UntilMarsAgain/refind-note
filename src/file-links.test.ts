@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fileTargetOf } from "./file-links.ts";
+import { fileReferenceOf, fileTargetOf } from "./file-links.ts";
 
 test("相对地址当作仓库里的文件", () => {
   assert.equal(fileTargetOf("图片.png"), "图片.png");
@@ -24,4 +24,9 @@ test("绝对地址与程序自己的资源一律不动", () => {
   assert.equal(fileTargetOf(""), null);
   assert.equal(fileTargetOf("   "), null);
   assert.equal(fileTargetOf("#anchor"), null);
+});
+
+test("引用写法：图片写图，其它写链接", () => {
+  assert.equal(fileReferenceOf({ name: "桥.png", mime: "image/png" }), "![桥.png](桥.png)");
+  assert.equal(fileReferenceOf({ name: "说明.pdf", mime: "application/pdf" }), "[说明.pdf](说明.pdf)");
 });

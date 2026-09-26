@@ -38,7 +38,7 @@ pub use api::{
     Via, DebugReport, RenderReport,
 };
 pub use config::VaultConfig;
-pub use files::mime_of;
+pub use files::{decode_key, mime_of};
 pub use error::VaultError;
 pub use event::{
     drafts_of, fold, next_rev, revision_id, revision_of, short_revision_id, Event,

@@ -6,12 +6,15 @@
  * 数组再走一遍 IPC。磁盘上的名字与显示名是分开的（见后端 `storage/files.rs`），
  * 所以这里看到的文件名，就是笔记里引用时该写的名字。
  */
-import { onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { FolderOpen, Trash2, Upload } from "@lucide/vue";
 import type { FileEntry } from "../bindings";
+import { fileReferenceOf } from "../file-links";
+import { clipboardFiles } from "../paste-files";
+import { uploadPasted } from "../paste-upload";
 
 const files = ref<FileEntry[]>([]);
 const busy = ref(false);
@@ -34,10 +37,33 @@ function isImage(file: FileEntry): boolean {
   return file.mime.startsWith("image/");
 }
 
-/** 笔记里引用它时写什么：图片写 markdown 图，其它写成链接 */
-function referenceOf(file: FileEntry): string {
-  const name = file.name;
-  return isImage(file) ? `![${name}](${name})` : `[${name}](${name})`;
+/** 引用写法在 `file-links.ts` 里定义（编辑器那边用的是同一个） */
+const referenceOf = fileReferenceOf;
+
+/**
+ * 这一页开着时，Ctrl+V 直接把剪贴板里的图片收进仓库。
+ *
+ * 挂在窗口上而不是某个输入框：用户刚截完图，注意力在这一页上，不该先去找地方点一下。
+ */
+function onPaste(event: ClipboardEvent) {
+  const files = clipboardFiles(event);
+  if (files.length === 0) {
+    return;
+  }
+  event.preventDefault();
+  void pasteUpload(files);
+}
+
+async function pasteUpload(files: File[]) {
+  notice.value = "";
+  problem.value = "";
+  try {
+    const entries = await uploadPasted(files);
+    notice.value = "已收进仓库：" + entries.map((entry) => entry.name).join("、");
+    await refresh();
+  } catch (error) {
+    problem.value = String(error);
+  }
 }
 
 async function refresh() {
@@ -94,7 +120,12 @@ async function remove(file: FileEntry) {
   }
 }
 
-onMounted(refresh);
+onMounted(() => {
+  void refresh();
+  window.addEventListener("paste", onPaste);
+});
+
+onBeforeUnmount(() => window.removeEventListener("paste", onPaste));
 </script>
 
 <template>
@@ -111,6 +142,7 @@ onMounted(refresh);
     </header>
 
     <p class="files__hint">
+      点「上传文件」选本机文件，或者直接在**这一页**按 Ctrl+V 粘贴截图。
       文件存在仓库的 files/ 目录里，笔记中用文件名引用：图片写
       <code>![名字](名字)</code>；要对齐或限宽，写
       <code>::image src=名字 align=right width=320</code>。

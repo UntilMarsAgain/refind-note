@@ -6,7 +6,10 @@ import type { FileEntry } from "../bindings";
 import { checkTitle } from "../title";
 import { themeMode } from "../theme";
 import { applyLineNumbers, highlightCode } from "../code-blocks";
+import { fileReferenceOf } from "../file-links";
 import { decorateNoteHtml } from "../note-html";
+import { clipboardFiles } from "../paste-files";
+import { uploadPasted } from "../paste-upload";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   templateBlockLines,
@@ -492,6 +495,31 @@ onMounted(() => {
         templateHighlight,
         templateFold,
         EditorView.lineWrapping,
+        /**
+         * 粘贴上传：截图或复制的图片直接进仓库，并在光标处写好引用。
+         *
+         * 只接管"剪贴板里有文件"的情况；普通文字粘贴返回 `false`，照旧交给编辑器自己。
+         */
+        EditorView.domEventHandlers({
+          paste(event, view) {
+            const files = clipboardFiles(event);
+            if (files.length === 0) {
+              return false;
+            }
+            event.preventDefault();
+            fileProblem.value = null;
+            void uploadPasted(files)
+              .then((entries) => {
+                const text = entries.map((entry) => fileReferenceOf(entry)).join("\n");
+                view.dispatch(view.state.replaceSelection(text));
+                view.focus();
+              })
+              .catch((error) => {
+                fileProblem.value = String(error);
+              });
+            return true;
+          },
+        }),
         EditorView.updateListener.of((update) => {
           // 光标与选区：状态面板要报，而 CM6 只有编辑器自己知道
           if (update.selectionSet || update.docChanged) {
@@ -582,11 +610,7 @@ async function insertFile() {
     const references: string[] = [];
     for (const path of paths) {
       const entry = await invoke<FileEntry>("upload_file", { path });
-      references.push(
-        entry.mime.startsWith("image/")
-          ? `![${entry.name}](${entry.name})`
-          : `[${entry.name}](${entry.name})`,
-      );
+      references.push(fileReferenceOf(entry));
     }
     view?.dispatch(view.state.replaceSelection(references.join("\n")));
     view?.focus();
@@ -667,7 +691,7 @@ function submit() {
         <button
           class="ebtn"
           type="button"
-          title="上传文件，并在光标处插入引用"
+          title="上传文件，并在光标处插入引用（也可以直接 Ctrl+V 粘贴）"
           @click="insertFile"
         >
           <ImagePlus :size="14" :stroke-width="1.9" />

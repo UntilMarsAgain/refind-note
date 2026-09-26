@@ -66,6 +66,28 @@ fn upload_file(path: String) -> Result<FileEntry, String> {
         .map_err(|error| error.to_string())
 }
 
+/// 收进剪贴板里的内容（粘贴上传）。
+///
+/// 粘贴给的是**字节**，没有本机路径可用，所以走 Tauri 的二进制通道：`invoke` 的第一个
+/// 参数直接传 `Uint8Array`，命令这边从请求体里取。文件名放在请求头里（HTTP 头只能放
+/// ASCII），两端都用 URL 编码对齐 —— 与取件地址用的同一套编解码。
+#[tauri::command]
+fn upload_bytes(request: tauri::ipc::Request<'_>) -> Result<FileEntry, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("粘贴上传要走二进制通道，但没收到字节".to_string());
+    };
+    let name = request
+        .headers()
+        .get("x-file-name")
+        .and_then(|value| value.to_str().ok())
+        .map(storage::decode_key)
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "粘贴的文件".to_string());
+    open()?
+        .add_file(&name, bytes)
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 fn delete_file(id: String) -> Result<(), String> {
     open()?.delete_file(&id).map_err(|error| error.to_string())
@@ -591,6 +613,7 @@ pub fn run() {
             update_settings,
             list_files,
             upload_file,
+            upload_bytes,
             delete_file,
             special_pages,
             render_markdown,

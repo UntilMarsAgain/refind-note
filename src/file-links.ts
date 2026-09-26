@@ -29,3 +29,9 @@ export function fileTargetOf(source: string): string | null {
   }
   return trimmed;
 }
+
+/** 笔记里引用这个附件时该写什么：图片写 markdown 图，其它写成链接 */
+export function fileReferenceOf(file: { name: string; mime: string }): string {
+  const name = file.name;
+  return file.mime.startsWith("image/") ? `![${name}](${name})` : `[${name}](${name})`;
+}
