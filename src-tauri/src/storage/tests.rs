@@ -1283,7 +1283,9 @@ fn listing_marks_command_pages() {
     let redirect = info_of("重定向页").expect("重定向页应当有指令信息");
     assert_eq!(redirect.kind, "redirect");
     assert_eq!(redirect.label, "重定向");
-    assert!(redirect.detail.contains("重定向到"), "{}", redirect.detail);
+    assert!(redirect.detail.contains("跳到"), "{}", redirect.detail);
+    // 目标单独给出来，界面据此渲染成可点的链接（不再写进说明、也不再用书名号）
+    assert_eq!(redirect.argument, "目标");
 
     assert_eq!(info_of("随机页").unwrap().kind, "random-redirect");
 

@@ -1310,7 +1310,7 @@ impl Vault {
     fn guard_hops(&self, title: &str, hops: usize) -> Result<(), VaultError> {
         if hops >= MAX_REDIRECT_HOPS {
             return Err(VaultError::BadAddress(format!(
-                "重定向超过 {MAX_REDIRECT_HOPS} 跳，可能成环（停在《{title}》）"
+                "重定向超过 {MAX_REDIRECT_HOPS} 跳，可能成环（停在 {title}）"
             )));
         }
         Ok(())
@@ -1356,7 +1356,7 @@ impl Vault {
                 format!("命名空间 {ns}")
             };
             return Err(VaultError::BadAddress(format!(
-                "《{from}》随机不到页面：{label} 里没有别的页面"
+                "{from} 随机不到页面：{label} 里没有别的页面"
             )));
         }
 
@@ -1408,7 +1408,7 @@ impl Vault {
                 let random = command.spec.kind == "random-redirect";
                 match command
                     .chase(self, title)
-                    .map_err(|message| VaultError::BadAddress(format!("《{title}》{message}")))?
+                    .map_err(|message| VaultError::BadAddress(format!("{title} {message}")))?
                 {
                     Some(target) => Ok(Some(Chase { target, random })),
                     // 表里标明"不跳"的指令：当普通页面读
@@ -1418,11 +1418,11 @@ impl Vault {
             // 是指令页面，但指令本身有问题 —— **不能当普通页面读**：
             // 那样一条写坏的指令会静静显示成正文，谁也不知道它没生效。
             crate::command::Parsed::Empty => Err(VaultError::BadAddress(format!(
-                "《{title}》是指令页面，但没写指令（第二行应写成 {}）",
+                "{title} 是指令页面，但没写指令（第二行应写成 {}）",
                 crate::command::supported()
             ))),
             crate::command::Parsed::Unrecognized(line) => Err(VaultError::BadAddress(format!(
-                "《{title}》的指令认不出来：「{}」；目前支持 {}",
+                "{title} 的指令认不出来：「{}」；目前支持 {}",
                 line.trim(),
                 crate::command::supported()
             ))),
@@ -1488,7 +1488,7 @@ impl Vault {
 
         if reference.is_empty() {
             return Err(VaultError::BadAddress(format!(
-                "《{}》的版本引用是空的",
+                "{} 的版本引用是空的",
                 parsed.title
             )));
         }
@@ -1500,7 +1500,7 @@ impl Vault {
             if digits {
                 return reference.parse::<u64>().map_err(|_| {
                     VaultError::BadAddress(format!(
-                        "《{}》没有版本「{reference}」（数字已超出范围）",
+                        "{} 没有版本「{reference}」（数字已超出范围）",
                         parsed.title
                     ))
                 });

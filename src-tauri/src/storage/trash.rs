@@ -18,7 +18,7 @@ impl Vault {
         if let Some((prefix, _)) = title.split_once(':') {
             if self.table.lookup(prefix).is_none() {
                 return Err(VaultError::BadAddress(format!(
-                    "命名空间「{}」不存在，无法还原《{title}》",
+                    "命名空间「{}」不存在，无法还原 {title}",
                     prefix.trim()
                 )));
             }
@@ -38,7 +38,7 @@ impl Vault {
         if !state.deleted {
             // 文件在回收站里、却没有删除记录：状态不一致，先别动它
             return Err(VaultError::Corrupt(format!(
-                "《{display}》在回收站里，但没有删除记录，无法还原"
+                "{display} 在回收站里，但没有删除记录，无法还原"
             )));
         }
 

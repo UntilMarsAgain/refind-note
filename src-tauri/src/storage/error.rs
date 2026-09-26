@@ -35,24 +35,24 @@ impl std::fmt::Display for VaultError {
             Self::Io(e) => write!(f, "读写失败：{e}"),
             Self::Title(e) => write!(f, "{e}"),
             Self::Json(e) => write!(f, "数据格式错误：{e}"),
-            Self::NotFound(t) => write!(f, "找不到笔记《{t}》"),
-            Self::NotText(t) => write!(f, "《{t}》不是文本笔记，暂不能在编辑器里打开"),
+            Self::NotFound(t) => write!(f, "找不到笔记 {t}"),
+            Self::NotText(t) => write!(f, "{t} 不是文本笔记，暂不能在编辑器里打开"),
             Self::Conflict { expected, found } => write!(
                 f,
                 "提交冲突：草稿基于版本 {expected}，但链上当前是 {found}"
             ),
-            Self::Deleted(t) => write!(f, "《{t}》已被删除"),
+            Self::Deleted(t) => write!(f, "{t} 已被删除"),
             Self::RevisionNotFound { title, rev } => {
                 // rev 为 0 表示"给不出具体版本号"（例如按 commit ID 前缀没找到、
                 // 或引用的写法无法解析成版本号）。0 不是真实版本，不该打出来 ——
                 // 否则任何这类失败都会显示成"没有版本 0"。
                 if *rev == 0 {
-                    write!(f, "《{title}》没有这个版本")
+                    write!(f, "{title} 没有这个版本")
                 } else {
-                    write!(f, "《{title}》没有版本 {rev}")
+                    write!(f, "{title} 没有版本 {rev}")
                 }
             }
-            Self::NameTaken(t) => write!(f, "《{t}》已经存在，换一个名字"),
+            Self::NameTaken(t) => write!(f, "{t} 已经存在，换一个名字"),
             Self::Corrupt(why) => write!(f, "数据损坏：{why}"),
             Self::AmbiguousRevision { prefix, matches } => write!(
                 f,

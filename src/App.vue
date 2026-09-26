@@ -2,6 +2,7 @@
 // 地址的判别式**只有后端一处定义**：这份类型由 `cargo test` 从 Rust 导出到 src/bindings/
 import type { Address } from "./bindings";
 import type {
+  CommandInfo,
   Draft,
   LoadOutcome,
   Note,
@@ -677,11 +678,7 @@ async function runMaintenanceOnce() {
  * 短名、中文名、说明全部由后端那张指令表给出 —— 前端不解释 `$$COMMAND$$`，
  * 也不维护第二份命令清单。
  */
-const commandInfo = ref<{
-  kind: string;
-  label: string;
-  detail: string;
-} | null>(null);
+const commandInfo = ref<CommandInfo | null>(null);
 
 async function loadCommandInfo(title: string) {
   if (!title) {
@@ -1384,7 +1381,7 @@ function onAction(name: string) {
           <!-- 删除的二次确认：一页地址（`名称@delete`），不再是弹出框 -->
           <template v-else-if="mode === 'delete' && note">
             <section class="confirm">
-              <h2 class="confirm__title">删除《{{ note.title }}》？</h2>
+              <h2 class="confirm__title">删除 {{ note.title }}？</h2>
               <p class="confirm__body">
                 将写入一条删除标记，并把笔记文件移入 <code>trash/</code>，
                 历史版本不会丢失。当前不提供恢复入口；如需取回，可在文件系统中手动移回 notes/ 目录。
@@ -1473,6 +1470,15 @@ function onAction(name: string) {
             >
               <span class="cmdbar__label">{{ commandInfo.label }}</span>
               <span class="cmdbar__detail">{{ commandInfo.detail }}</span>
+              <!-- 重定向的目标做成链接：写进说明里就只能当文字看 -->
+              <button
+                v-if="commandInfo.kind === 'redirect' && commandInfo.argument"
+                class="cmdbar__link"
+                type="button"
+                @click="navigate(commandInfo.argument)"
+              >
+                {{ commandInfo.argument }}
+              </button>
               <button
                 v-if="commandInfo.kind !== 'unrecognized'"
                 class="cmdbar__run"
@@ -1871,6 +1877,19 @@ function onAction(name: string) {
 .cmdbar__detail {
   color: var(--text-dim);
   overflow-wrap: anywhere;
+}
+
+.cmdbar__link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link-blue);
+  font: inherit;
+  cursor: pointer;
+}
+
+.cmdbar__link:hover {
+  text-decoration: underline;
 }
 
 .cmdbar__run {

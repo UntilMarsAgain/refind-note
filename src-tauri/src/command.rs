@@ -142,9 +142,11 @@ fn chase_random_redirect(
 
 fn describe_redirect(command: &Command) -> String {
     if command.argument.is_empty() {
-        "重定向，但没写目标".to_string()
+        "没有写目标地址".to_string()
     } else {
-        format!("重定向到《{}》", command.argument)
+        // 目标本身由前端渲染成**可点的链接**（见 `CommandInfo::argument`），
+        // 所以这里不再重复写进说明文字，也不必用书名号把人名裹起来
+        "打开这一页会跳到".to_string()
     }
 }
 
@@ -224,6 +226,14 @@ impl Parsed {
             Parsed::Command(command) => Some(command.spec.label),
             Parsed::Empty | Parsed::Unrecognized(_) => Some("指令有问题"),
             Parsed::None => None,
+        }
+    }
+
+    /// 认出来的指令（没认出来时没有）
+    pub fn command(&self) -> Option<&Command> {
+        match self {
+            Parsed::Command(command) => Some(command),
+            _ => None,
         }
     }
 

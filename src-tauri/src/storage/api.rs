@@ -35,8 +35,12 @@ pub struct CommandInfo {
     pub kind: String,
     /// 中文名，界面直接显示
     pub label: String,
-    /// 一句人话说明（"重定向到《X》" / "认不出来：「…」"）
+    /// 一句人话说明（"打开这一页会跳到" / "认不出来：「…」"）
     pub detail: String,
+    /// 指令的原文参数（重定向的目标地址 / 随机跳转的命名空间）；没有参数时为空。
+    ///
+    /// 单独给出来，是为了让界面能把它渲染成**可点的链接** —— 写进 `detail` 就只能当文字。
+    pub argument: String,
 }
 
 impl CommandInfo {
@@ -46,6 +50,10 @@ impl CommandInfo {
             kind: parsed.kind()?.to_string(),
             label: parsed.label()?.to_string(),
             detail: parsed.describe(),
+            argument: parsed
+                .command()
+                .map(|command| command.argument.clone())
+                .unwrap_or_default(),
         })
     }
 }

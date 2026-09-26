@@ -37,7 +37,7 @@ const emit = defineEmits<{ (e: "open-via", title: string): void }>();
       <button
         class="via-hint__link"
         type="button"
-        :title="'打开《' + via.from + '》本身（不执行它的指令）'"
+        :title="'打开 ' + via.from + ' 本身（不执行它的指令）'"
         :style="{
           padding: 0,
           border: 0,
@@ -48,7 +48,7 @@ const emit = defineEmits<{ (e: "open-via", title: string): void }>();
         }"
         @click="emit('open-via', via.from)"
       >
-        《{{ via.from }}》
+        {{ via.from }}
       </button>
     </template>
   </p>

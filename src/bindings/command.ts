@@ -7,8 +7,10 @@ export interface CommandInfo {
   kind: string;
   /** 中文名，直接显示 */
   label: string;
-  /** 一句说明（悬停提示用） */
+  /** 一句说明 */
   detail: string;
+  /** 指令的原文参数（重定向的目标地址 / 随机跳转的命名空间）；没有参数时为空 */
+  argument: string;
 }
 
 /** `Note`：读一篇笔记的结果 */
