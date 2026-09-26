@@ -77,6 +77,14 @@ impl BlockRule for TemplateScanner {
         let (name, params) = Template::parse_header(state.get_line(start))?;
 
         // (相对块头的缩进, 行文本)：缩进要留着，块内容的层级靠它
+        // ---- 块边界在这里定规则 ----
+        //
+        // 编辑器里有一份**逐条一致的镜像**（`NoteEditor.vue` 的 `templateBlockEnd`），
+        // 用来在编辑时画出块的边界。改这里的规则要同时改那里，否则高亮会比渲染早收
+        // 或晚收 —— 编辑器与渲染各说各话，正是这套对齐要消灭的东西。
+        //
+        // 三条规则：更深算块内；不更深即结束；**空行不直接结束**，要往后看一行 ——
+        // 后面还有更深的内容，这个空行才算块内。
         let mut body_lines: Vec<(usize, &str)> = Vec::new();
         let mut line = start + 1;
         while line < state.line_max {
@@ -157,6 +165,25 @@ mod tests {
         let html = render("::note\n    两空格缩进之下\n      再深一层\n");
         assert!(html.contains("两空格缩进之下"), "{html}");
         assert!(html.contains("再深一层"), "{html}");
+    }
+
+    /// 空行**不直接结束块**：后面还有更深的内容，它就算块内。
+    ///
+    /// 这条是编辑器那份镜像最容易走样的地方（"空行即结束"看着更直觉），
+    /// 所以在这里钉死，改渲染规则时会先撞上它。
+    #[test]
+    fn blank_line_does_not_end_the_block_by_itself() {
+        let html = render("::quote\n  第一段\n\n  第二段\n块外\n");
+        assert!(html.contains("第一段"), "{html}");
+        assert!(html.contains("第二段"), "{html}");
+        // 两段都应当在同一个引用块里
+        assert_eq!(html.matches("<blockquote").count(), 1, "{html}");
+        let before = &html[..html.find("第二段").unwrap()];
+        let depth =
+            before.matches("<blockquote").count() - before.matches("</blockquote>").count();
+        assert_eq!(depth, 1, "第二段应当仍在块内：{html}");
+        // 不再是更深的那一行才结束
+        assert!(html.contains("<p>块外</p>"), "{html}");
     }
 
     #[test]

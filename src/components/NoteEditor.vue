@@ -174,34 +174,75 @@ const wikilinkMatcher = new MatchDecorator({
  * 模板块的高亮。
  *
  * CM6 的 markdown 语法不认识 `::名字`（那是本项目的扩展语法），所以在**视图层**加装饰：
- * 头行连同它下面**缩进更深**的行一起标出来，与后端"缩进就是边界"的规则对齐。
- * 同样只加样式、不改文档 —— 保存下来的仍是原文，渲染依旧由后端负责。
+ * 头行连同属于这个块的行一起标出来。只加样式、不改文档 —— 保存下来的仍是原文，
+ * 渲染依旧由后端负责。
  *
- * 这里是**简化版**：空行即结束（后端还会往后看一行，决定那个空行算不算块内）。
- * 编辑时看个大概够了；真正的裁定在后端。
+ * **边界规则与后端逐条一致**（`storage` 里的模板块扫描器）：
+ *
+ * 1. 头行之后，缩进更深（非空）的行属于块内；
+ * 2. 遇到缩进不更深的行，块到此为止；
+ * 3. 空行**不直接结束块** —— 要往后看一行：后面还有更深的内容，这个空行就算块内，
+ *    否则它属于块外。
+ *
+ * 第 3 条不能省：渲染那边就是这么算的，这里若按"空行即结束"，高亮就会比渲染**早收**，
+ * 于是编辑器与渲染各说各话 —— 那正是这个面板和这套对齐规则要消灭的东西。
  */
+function headIndent(text: string): number {
+  return text.length - text.trimStart().length;
+}
+
+function isBlank(text: string): boolean {
+  return text.trim().length === 0;
+}
+
+/** 块的最后一行（含）；不含在块内的行不返回 */
+function templateBlockEnd(
+  doc: { lines: number; line: (number: number) => { text: string } },
+  start: number,
+  markerIndent: number,
+): number {
+  let last = start;
+  for (let number = start + 1; number <= doc.lines; number += 1) {
+    const text = doc.line(number).text;
+    if (isBlank(text)) {
+      // 往后找第一个非空行：它更深就把这个空行收进来，否则到此为止
+      let next = number + 1;
+      while (next <= doc.lines && isBlank(doc.line(next).text)) {
+        next += 1;
+      }
+      if (next > doc.lines || headIndent(doc.line(next).text) <= markerIndent) {
+        break;
+      }
+      last = number;
+      continue;
+    }
+    if (headIndent(text) <= markerIndent) {
+      break;
+    }
+    last = number;
+  }
+  return last;
+}
+
 function buildTemplateDecorations(view: EditorView): DecorationSet {
   const doc = view.state.doc;
   const ranges: { from: number; to: number; head: boolean }[] = [];
 
   for (let number = 1; number <= doc.lines; number += 1) {
     const line = doc.line(number);
-    if (!/^::\S/.test(line.text.trimStart())) {
+    // 头行：`::名字`。名字里不该有空白、`=` 或 `:`（与后端 parse_header 同一条规矩），
+    // 也允许用引号包住带空格的名字。
+    if (!/^::(?:"[^"]*"|'[^']*'|[^\s:=]+)/.test(line.text.trimStart())) {
       continue;
     }
     ranges.push({ from: line.from, to: line.to, head: true });
 
-    const indent = line.text.length - line.text.trimStart().length;
-    for (let next = number + 1; next <= doc.lines; next += 1) {
-      const row = doc.line(next);
-      if (row.text.trim().length === 0) {
-        break;
-      }
-      if (row.text.length - row.text.trimStart().length <= indent) {
-        break;
-      }
+    const last = templateBlockEnd(doc, number, headIndent(line.text));
+    for (let inner = number + 1; inner <= last; inner += 1) {
+      const row = doc.line(inner);
       ranges.push({ from: row.from, to: row.to, head: false });
     }
+    number = last;
   }
 
   ranges.sort((a, b) => a.from - b.from);
