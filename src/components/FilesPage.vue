@@ -12,6 +12,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { FolderOpen, Trash2, Upload } from "@lucide/vue";
 import type { FileEntry } from "../bindings";
+import { openMenu } from "../context-menu";
 import { fileReferenceOf } from "../file-links";
 import { clipboardFiles } from "../paste-files";
 import { uploadPasted } from "../paste-upload";
@@ -108,6 +109,21 @@ async function copyReference(file: FileEntry) {
   }
 }
 
+/** 文件行上的右键：常用动作都在这里，免得每次都要把鼠标挪到右边的按钮上 */
+function onRowMenu(event: MouseEvent, file: FileEntry) {
+  event.preventDefault();
+  event.stopPropagation();
+  openMenu(event, [
+    { label: "复制引用", run: () => copyReference(file) },
+    { label: "删除", danger: true, run: () => askDelete(file) },
+  ]);
+}
+
+/** 删除前先进入"等确认"状态：右键点删除也不该立刻删掉 */
+function askDelete(file: FileEntry) {
+  confirming.value = file.id;
+}
+
 async function remove(file: FileEntry) {
   problem.value = "";
   try {
@@ -156,7 +172,12 @@ onBeforeUnmount(() => window.removeEventListener("paste", onPaste));
     </p>
 
     <ul v-else class="files__list">
-      <li v-for="file in files" :key="file.id" class="files__item">
+      <li
+        v-for="file in files"
+        :key="file.id"
+        class="files__item"
+        @contextmenu="onRowMenu($event, file)"
+      >
         <div class="files__thumb">
           <img v-if="isImage(file)" :src="file.url" :alt="file.name" />
           <span v-else class="files__ext">{{ file.name.split(".").pop() }}</span>

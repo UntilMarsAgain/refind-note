@@ -8,6 +8,7 @@ import {
   Trash2,
   X,
 } from "@lucide/vue";
+import { openMenu } from "../context-menu";
 import { PREFERENCE_KEYS, readFlag, writeFlag } from "../settings";
 import { initialOf } from "../title";
 
@@ -35,6 +36,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: "select", index: number): void;
   (e: "close", index: number): void;
+  (e: "close-others", index: number): void;
   (e: "new-tab"): void;
   /** 拖放调整顺序 */
   (e: "move", from: number, to: number): void;
@@ -88,6 +90,20 @@ function onDrop(index: number) {
 
 /** 默认收起；展开状态记进界面偏好，下次打开保持原样 */
 const collapsed = ref(readFlag(PREFERENCE_KEYS.railCollapsed, true));
+
+/**
+ * 标签页上的右键：关闭 / 关闭其它。
+ *
+ * 中键关闭是浏览器时代的习惯（上面已经有了），右键这两项是给"一口气关掉一堆"用的。
+ */
+function onTabMenu(event: MouseEvent, index: number) {
+  event.preventDefault();
+  event.stopPropagation();
+  openMenu(event, [
+    { label: "关闭标签页", run: () => emit("close", index) },
+    { label: "关闭其它标签页", run: () => emit("close-others", index) },
+  ]);
+}
 
 function toggle() {
   collapsed.value = !collapsed.value;
@@ -149,6 +165,7 @@ function toggle() {
             type="button"
             :title="tab.address"
             @click="emit('select', index)"
+            @contextmenu="onTabMenu($event, index)"
           >
             <span class="rail__initial">{{ initialOf(tab.title || tab.address) }}</span>
             <span class="rail__text">{{ tab.title || tab.address }}</span>

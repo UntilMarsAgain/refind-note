@@ -11,6 +11,8 @@ import type {
   VaultSettings,
 } from "./bindings";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { type MenuItem, closeMenu, openMenu } from "./context-menu";
 import { invoke } from "@tauri-apps/api/core";
 import FloatingTools from "./components/FloatingTools.vue";
 import HistoryView from "./components/HistoryView.vue";
@@ -21,6 +23,7 @@ import AllPages from "./components/AllPages.vue";
 import AppMenu from "./components/AppMenu.vue";
 import DebugPage from "./components/DebugPage.vue";
 import FilesPage from "./components/FilesPage.vue";
+import ContextMenu from "./components/ContextMenu.vue";
 import ImageViewer from "./components/ImageViewer.vue";
 import GcPage from "./components/GcPage.vue";
 import TrashPage from "./components/TrashPage.vue";
@@ -243,6 +246,16 @@ function moveTab(from: number, to: number) {
  * 只在**这一条路径**上自增 —— 点加号新建、启动时新建都不该抖（那本来就有明确的动作）。
  */
 const shakeTick = ref(0);
+
+/** 关闭其它标签页：只留下点中的那一个（它是右键菜单里的一项） */
+function closeOtherTabs(index: number) {
+  const keep = tabs.value[index];
+  if (!keep) {
+    return;
+  }
+  tabs.value = [keep];
+  activeTab.value = 0;
+}
 
 function closeTab(index: number) {
   if (tabs.value.length <= 1) {
@@ -514,6 +527,52 @@ watch(draftText, () => {
   autosaveTimer = window.setTimeout(() => void saveDraft(), AUTOSAVE_DELAY_MS);
 });
 
+/** 输入框/文本域：只有这两个的"复制、粘贴"值得给一项 */
+function isTextField(target: EventTarget | null): target is HTMLInputElement | HTMLTextAreaElement {
+  return (
+    target instanceof HTMLInputElement ||
+    (target instanceof HTMLTextAreaElement && true)
+  );
+}
+
+/** 输入框里的右键：系统那份被我们拦掉了，这两项得自己补上 */
+function textFieldItems(field: HTMLInputElement | HTMLTextAreaElement): MenuItem[] {
+  const start = field.selectionStart ?? 0;
+  const end = field.selectionEnd ?? 0;
+  const selected = field.value.slice(start, end);
+  return [
+    {
+      label: selected ? "复制选中的内容" : "复制全部内容",
+      run: () => writeText(selected || field.value),
+    },
+    {
+      label: "粘贴",
+      run: async () => {
+        const text = await readText();
+        field.setRangeText(text, start, end, "end");
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+      },
+    },
+  ];
+}
+
+/**
+ * 右键：**一律先拦掉**。
+ *
+ * WebView 自带的那份（Reload / Back / Inspect）对这个应用毫无意义，留着只会让人觉得
+ * "右键这件事没做"。拦掉之后，能给出动作的地方由各自的面板负责（笔记正文与附件、
+ * 标签页、文件列表 —— 它们各自 `preventDefault` 并停止冒泡），其余场合只处理
+ * 输入框里的复制粘贴，再其余就什么都不弹。
+ */
+function onContextMenu(event: MouseEvent) {
+  event.preventDefault();
+  if (isTextField(event.target)) {
+    openMenu(event, textFieldItems(event.target));
+    return;
+  }
+  closeMenu();
+}
+
 /**
  * Ctrl+W（macOS 上是 Cmd+W）关掉当前标签页。
  *
@@ -532,10 +591,14 @@ function onGlobalKey(event: KeyboardEvent) {
   closeTab(activeTab.value);
 }
 
-onBeforeUnmount(() => window.removeEventListener("keydown", onGlobalKey));
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", onGlobalKey);
+  window.removeEventListener("contextmenu", onContextMenu);
+});
 
 onMounted(async () => {
   window.addEventListener("keydown", onGlobalKey);
+  window.addEventListener("contextmenu", onContextMenu);
   try {
     const settings = await invoke<VaultSettings>("get_settings");
     vaultSettings.value = settings;
@@ -1318,6 +1381,7 @@ function onAction(name: string) {
         :shake-tick="shakeTick"
         @select="selectTab"
         @close="closeTab"
+        @close-others="closeOtherTabs"
         @new-tab="openNewTab"
         @settings="openSettings"
         @trash="openTrash"
@@ -1610,6 +1674,7 @@ function onAction(name: string) {
 
     <!-- 大图查看器：全局只挂这一份，阅读视图与编辑器预览共用 -->
     <ImageViewer />
+    <ContextMenu />
 </template>
 
 <style scoped>
