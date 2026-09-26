@@ -1599,18 +1599,67 @@ fn renaming_a_namespace_moves_nothing() {
     assert!(temp.vault.rename_namespace("special", "别的").is_err());
 }
 
+/// 默认就有两个跨站命名空间：`zhwiki` 与 `qw`
+#[test]
+fn default_cross_site_namespaces() {
+    let temp = TempVault::new();
+    let table = temp.vault.namespaces();
+
+    let zhwiki = table
+        .iter()
+        .find(|item| item.name == "zhwiki")
+        .expect("应当默认有 zhwiki");
+    assert!(!zhwiki.storable, "跨站命名空间：页面在别的站上");
+    assert_eq!(
+        zhwiki.site.as_deref(),
+        Some("https://zh.wikipedia.org/wiki/$1")
+    );
+    assert_eq!(zhwiki.aliases, vec!["中文维基百科".to_string()]);
+
+    let qw = table
+        .iter()
+        .find(|item| item.name == "qw")
+        .expect("应当默认有 qw");
+    assert_eq!(
+        qw.site.as_deref(),
+        Some("https://www.qiuwenbaike.cn/wiki/$1")
+    );
+    assert_eq!(qw.aliases, vec!["求闻百科".to_string()]);
+}
+
+/// 删掉默认的跨站命名空间之后**不会自己回来** —— "默认就有"不等于"删不掉"
+#[test]
+fn deleting_a_default_namespace_sticks() {
+    let mut temp = TempVault::new();
+    temp.vault.delete_namespace("zhwiki").unwrap();
+    assert!(
+        !temp
+            .vault
+            .namespaces()
+            .iter()
+            .any(|item| item.name == "zhwiki"),
+        "删掉之后就没了"
+    );
+
+    // 从磁盘重新读一次（模拟重开应用）：不该把它补回来
+    let text = fs::read_to_string(temp.root.join("namespaces.json")).unwrap();
+    let mut table: NamespaceTable = serde_json::from_str(&text).unwrap();
+    assert!(!table.sow_defaults(), "已经播过种，不该再补");
+    assert!(
+        !table.items.iter().any(|item| item.name == "zhwiki"),
+        "重开之后也不该回来"
+    );
+    assert!(
+        table.items.iter().any(|item| item.name == "qw"),
+        "没删的那条还在"
+    );
+}
+
 /// 跨站链接：前缀配了站点地址 → 渲染成带 href 的绿链，不在本仓库里查页面
 #[test]
 fn interwiki_links_point_at_another_site() {
-    let mut temp = TempVault::new();
-    temp.vault
-        .add_namespace(
-            "zhwiki",
-            Vec::new(),
-            Some("https://zh.wikipedia.org/wiki/$1".to_string()),
-        )
-        .unwrap();
-
+    let temp = TempVault::new();
+    // `zhwiki` 是默认就有的跨站命名空间（见下面的 default_cross_site_namespaces），不必自己加
     let item = temp
         .vault
         .namespaces()

@@ -90,6 +90,12 @@ impl Namespace {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NamespaceTable {
     pub items: Vec<Namespace>,
+    /// 默认的跨站命名空间是否已经播过种。
+    ///
+    /// 有了这个标记，"默认就有"与"删得掉"才能同时成立：老仓库升级上来时补一次，
+    /// 之后用户删掉它们就不会自己回来。老文件里没有这个字段 → 默认 false → 补一次。
+    #[serde(default)]
+    pub defaults_sown: bool,
 }
 
 impl Default for NamespaceTable {
@@ -109,7 +115,7 @@ impl NamespaceTable {
     /// 以后允许用户创建命名空间时，把新项加进这个数组即可：路径（`notes/<id>/`）、
     /// 显示标题拼装、以及「冒号前缀不是已知命名空间就报错」这条规则都已经预留好了。
     pub fn builtin() -> Self {
-        Self {
+        let mut table = Self {
             items: vec![
                 // 主命名空间：没有前缀，用 "0" 占位
                 Namespace {
@@ -130,7 +136,53 @@ impl NamespaceTable {
                     site: None,
                 },
             ],
+            defaults_sown: false,
+        };
+        table.sow_defaults();
+        table
+    }
+
+    /// 默认就有的两个**跨站**命名空间。
+    ///
+    /// 它们与其它命名空间没有任何特殊之处：可以改名、可以清空、可以删除 ——
+    /// 删掉之后不会自己回来（见 [`NamespaceTable::sow_defaults`]）。
+    pub fn defaults() -> [Namespace; 2] {
+        [
+            Namespace {
+                id: "zhwiki".to_string(),
+                name: "zhwiki".to_string(),
+                aliases: vec!["中文维基百科".to_string()],
+                storable: false,
+                site: Some("https://zh.wikipedia.org/wiki/$1".to_string()),
+            },
+            Namespace {
+                id: "qw".to_string(),
+                name: "qw".to_string(),
+                aliases: vec!["求闻百科".to_string()],
+                storable: false,
+                site: Some("https://www.qiuwenbaike.cn/wiki/$1".to_string()),
+            },
+        ]
+    }
+
+    /// 把默认的跨站命名空间**播一次种**，返回是否改动了这张表。
+    ///
+    /// 只在还没有播过的时候做（老仓库升级上来时补一次），做完就置位 —— 于是用户删掉它们
+    /// 之后不会自己回来。名字或别名已被占用就跳过这一条：不能因为播种而制造重复。
+    pub fn sow_defaults(&mut self) -> bool {
+        if self.defaults_sown {
+            return false;
         }
+        for item in Self::defaults() {
+            let taken = self.get(&item.id).is_some()
+                || self.lookup(&item.name).is_some()
+                || item.aliases.iter().any(|alias| self.lookup(alias).is_some());
+            if !taken {
+                self.items.push(item);
+            }
+        }
+        self.defaults_sown = true;
+        true
     }
 
     pub fn get(&self, id: &str) -> Option<&Namespace> {

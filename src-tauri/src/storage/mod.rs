@@ -138,7 +138,7 @@ impl Vault {
             };
 
         let namespaces_path = root.join("namespaces.json");
-        let table: NamespaceTable = match fs::read_to_string(&namespaces_path) {
+        let mut table: NamespaceTable = match fs::read_to_string(&namespaces_path) {
             Ok(text) => serde_json::from_str(&text)?,
             Err(_) => {
                 let table = NamespaceTable::builtin();
@@ -146,6 +146,10 @@ impl Vault {
                 table
             }
         };
+        // 老仓库升级上来时补一次默认的跨站命名空间；播过之后就不再动，用户删掉的不会回来
+        if table.sow_defaults() {
+            write_atomic(&namespaces_path, &serde_json::to_vec_pretty(&table)?)?;
+        }
 
         Ok(Self {
             blobs: BlobStore::new(root.join("blobs")),
