@@ -26,8 +26,8 @@ mod error;
 mod event;
 
 pub use api::{
-    Address, DiffResult, Draft, GcReport, LoadOutcome, MaintenanceReport, Note, NoteSummary,
-    PurgeReport, RevisionContent, RevisionSummary, TrashEntry, VaultSettings,
+    Address, CommandInfo, DiffResult, Draft, GcReport, LoadOutcome, MaintenanceReport, Note,
+    NoteSummary, PurgeReport, RevisionContent, RevisionSummary, TrashEntry, VaultSettings, Via,
 };
 pub use config::VaultConfig;
 pub use error::VaultError;
@@ -675,8 +675,7 @@ impl Vault {
             // 标注指令页面：要判定"第一行是不是标记"就得读一遍当前正文，
             // 这是唯一的办法（代价是列表页对每篇笔记多一次读取）。
             let command = match self.current_markdown(&display)? {
-                Some(markdown) => crate::command::command_of(&markdown)
-                    .map(|command| command.kind().to_string()),
+                Some(markdown) => CommandInfo::from_parsed(&crate::command::parse(&markdown)),
                 None => None,
             };
             out.push(NoteSummary {
@@ -953,11 +952,16 @@ impl Vault {
     ///
     /// 版本在**这篇笔记内**解析（数字版本号或 commit ID 缩写都行）。
     pub fn parse_address(&self, input: &str) -> Result<Address, VaultError> {
-        self.parse_address_at(input, 0)
+        self.parse_address_at(input, 0, None)
     }
 
     /// 真正的解析。`hops` 是已经跟过几跳重定向（对外一律从 0 起步）。
-    fn parse_address_at(&self, input: &str, hops: usize) -> Result<Address, VaultError> {
+    fn parse_address_at(
+        &self,
+        input: &str,
+        hops: usize,
+        via: Option<Via>,
+    ) -> Result<Address, VaultError> {
         let raw = input.trim();
         if raw.is_empty() {
             return Ok(Address::Empty);
@@ -1000,8 +1004,15 @@ impl Vault {
             if page == "random" {
                 self.guard_hops(&format!("special:{page}"), hops)?;
                 // 没有"当前页"要排除，传空串即可（没有笔记会叫这个名字）
-                let target = self.random_title(None, "")?;
-                return self.parse_address_at(&target, hops + 1);
+                let target = self.pick_random_title(None, "")?;
+                return self.parse_address_at(
+                    &target,
+                    hops + 1,
+                    Some(Via {
+                        from: format!("special:{page}"),
+                        random: true,
+                    }),
+                );
             }
 
             return Ok(Address::Special {
@@ -1062,7 +1073,12 @@ impl Vault {
         if state.eq_ignore_ascii_case("no-command") {
             let is_command = self
                 .current_markdown(&display)?
-                .map(|markdown| crate::command::command_of(&markdown).is_some())
+                .map(|markdown| {
+                    !matches!(
+                        crate::command::parse(&markdown),
+                        crate::command::Parsed::None
+                    )
+                })
                 .unwrap_or(false);
 
             // 一般页面：这个状态没有意义 —— 回显时裁掉，当作没写
@@ -1070,6 +1086,7 @@ impl Vault {
                 return Ok(Address::Note {
                     address: compose_address(&display, None, section.as_deref()),
                     title: display,
+                    via: None,
                     code_block: false,
                 });
             }
@@ -1078,6 +1095,7 @@ impl Vault {
             return Ok(Address::Note {
                 address: compose_address(&display, Some("no-command"), section.as_deref()),
                 title: display,
+                via: None,
                 code_block: true,
             });
         }
@@ -1091,14 +1109,23 @@ impl Vault {
             // 默认：看最新提交
             ("", _) | ("view", None) => {
                 // 指令页面：**只有这一路跟重定向**。@edit / @history / @delete 操作的是
-                // 这一页本身，跟着跳走会让人删错页面。跳数上限在 redirect_target 里把关。
-                if let Some(target) = self.command_target(&display, hops)? {
-                    return self.parse_address_at(&target, hops + 1);
+                // 这一页本身，跟着跳走会让人删错页面。跳数上限在 command_target 里把关。
+                if let Some(chase) = self.command_target(&display, hops)? {
+                    // 记下"从哪儿来"：落到目标页后，标题下方要提示（随机跳转不写名字）
+                    return self.parse_address_at(
+                        &chase.target,
+                        hops + 1,
+                        Some(Via {
+                            from: display.clone(),
+                            random: chase.random,
+                        }),
+                    );
                 }
 
                 Ok(Address::Note {
                     address: compose_address(&display, None, section.as_deref()),
                     title: display,
+                    via,
                     code_block: false,
                 })
             }
@@ -1130,12 +1157,20 @@ impl Vault {
                 // （只裁 view —— rollback 不是默认状态，不能省）。
                 if head == "view" && rev == fold(&events).rev {
                     // 看最新提交等价于"直接看这篇"，所以同样要跟重定向
-                    if let Some(target) = self.command_target(&display, hops)? {
-                        return self.parse_address_at(&target, hops + 1);
+                    if let Some(chase) = self.command_target(&display, hops)? {
+                        return self.parse_address_at(
+                            &chase.target,
+                            hops + 1,
+                            Some(Via {
+                                from: display.clone(),
+                                random: chase.random,
+                            }),
+                        );
                     }
                     return Ok(Address::Note {
                         address: compose_address(&display, None, section.as_deref()),
                         title: display,
+                        via,
                         code_block: false,
                     });
                 }
@@ -1403,7 +1438,7 @@ impl Vault {
     ///
     /// 会**排除发起随机的那一页自己** —— 否则小仓库里很容易随机到自己，
     /// 然后一路跟到跳数上限，变成一次莫名其妙的失败。
-    fn random_title(&self, namespace: Option<&str>, from: &str) -> Result<String, VaultError> {
+    fn pick_random_title(&self, namespace: Option<&str>, from: &str) -> Result<String, VaultError> {
         let ns: i32 = match namespace.map(str::trim) {
             None | Some("") => 0,
             Some(text) => text.parse::<i32>().map_err(|_| {
@@ -1461,37 +1496,48 @@ impl Vault {
     /// 返回 `Ok(None)` 表示它根本不是指令页面，照常阅读。
     /// `hops` 是已经跟过的跳数：到上限就报错 —— 成环时给一句能看懂的提示，
     /// 总好过递归到栈溢出。
-    fn command_target(&self, title: &str, hops: usize) -> Result<Option<String>, VaultError> {
+    fn command_target(&self, title: &str, hops: usize) -> Result<Option<Chase>, VaultError> {
         let Some(markdown) = self.current_markdown(title)? else {
             return Ok(None);
         };
-        match crate::command::command_of(&markdown) {
+
+        // 指令怎么解析、跳到哪，全由 `command.rs` 那张表决定。这里只做仓库这边的两件事：
+        // 跳数上限，以及把随机能力（`CommandEnv`）递给指令。
+        match crate::command::parse(&markdown) {
             // 不是指令页面：照常阅读
-            None => Ok(None),
-            Some(crate::command::Command::Redirect(target)) if !target.is_empty() => {
+            crate::command::Parsed::None => Ok(None),
+            crate::command::Parsed::Command(command) => {
                 self.guard_hops(title, hops)?;
-                Ok(Some(target))
-            }
-            // 随机跳转：每次解析都重掷 —— 这正是它存在的意义
-            Some(crate::command::Command::RandomRedirect(namespace)) => {
-                self.guard_hops(title, hops)?;
-                Ok(Some(self.random_title(namespace.as_deref(), title)?))
+                let random = command.spec.kind == "random-redirect";
+                match command
+                    .chase(self, title)
+                    .map_err(|message| VaultError::BadAddress(format!("《{title}》{message}")))?
+                {
+                    Some(target) => Ok(Some(Chase { target, random })),
+                    // 表里标明"不跳"的指令：当普通页面读
+                    None => Ok(None),
+                }
             }
             // 是指令页面，但指令本身有问题 —— **不能当普通页面读**：
             // 那样一条写坏的指令会静静显示成正文，谁也不知道它没生效。
-            Some(crate::command::Command::Redirect(_)) => Err(VaultError::BadAddress(format!(
-                "《{title}》的 REDIRECT 没有写目标地址（第二行应写成 REDIRECT: 地址）"
+            crate::command::Parsed::Empty => Err(VaultError::BadAddress(format!(
+                "《{title}》是指令页面，但没写指令（第二行应写成 {}）",
+                crate::command::supported()
             ))),
-            Some(crate::command::Command::Unrecognized(line)) => Err(VaultError::BadAddress(match line {
-                Some(line) => format!(
-                    "《{title}》的指令认不出来：「{}」；目前支持 REDIRECT: 地址 与 RANDOM_REDIRECT",
-                    line.trim()
-                ),
-                None => format!(
-                    "《{title}》是指令页面，但没写指令（第二行应写成 REDIRECT: 地址）"
-                ),
-            })),
+            crate::command::Parsed::Unrecognized(line) => Err(VaultError::BadAddress(format!(
+                "《{title}》的指令认不出来：「{}」；目前支持 {}",
+                line.trim(),
+                crate::command::supported()
+            ))),
         }
+    }
+
+    /// 这一页的指令信息（`@no-command` 顶部提示、列表标注都用它）
+    pub fn command_info(&self, title: &str) -> Result<Option<CommandInfo>, VaultError> {
+        let Some(markdown) = self.current_markdown(title)? else {
+            return Ok(None);
+        };
+        Ok(CommandInfo::from_parsed(&crate::command::parse(&markdown)))
     }
 
     /// 按 `@no-command` 读一篇指令页面：正文**包成一个代码块**再渲染。
@@ -1520,7 +1566,10 @@ impl Vault {
         rev: u64,
     ) -> Result<RevisionContent, VaultError> {
         let mut content = self.revision(title, rev)?;
-        if crate::command::command_of(&content.markdown).is_some() {
+        if !matches!(
+            crate::command::parse(&content.markdown),
+            crate::command::Parsed::None
+        ) {
             let resolver = self.resolver(None);
             content.html = markdown::render_with(
                 &markdown::fence_code(&content.markdown),
@@ -2086,6 +2135,21 @@ pub(crate) const SPECIAL_PAGES: [&str; 6] =
 ///
 /// 这是**仓库的跟跳策略**，不是指令语法 —— 语法在 [`crate::command`]。
 const MAX_REDIRECT_HOPS: usize = 8;
+
+/// 一条指令把这一页指向了哪里。
+struct Chase {
+    target: String,
+    /// 是否随机跳转（决定提示语是"重定向自 X"还是"来自随机重定向"）
+    random: bool,
+}
+
+/// 把仓库的随机能力交给指令表：指令只知道"要随机挑一篇"，怎么挑是这里的事。
+impl crate::command::CommandEnv for Vault {
+    fn random_title(&self, namespace: Option<&str>, from: &str) -> Result<String, String> {
+        self.pick_random_title(namespace, from)
+            .map_err(|error| error.to_string())
+    }
+}
 
 /// 解析 RFC3339 时间。坏数据一律当作"解析不出"，由调用方决定怎么办。
 fn parse_iso(text: &str) -> Option<time::OffsetDateTime> {
@@ -3096,10 +3160,15 @@ mod tests {
                 title,
                 address,
                 code_block,
+                via,
             } => {
                 assert_eq!(title, "目标");
                 assert_eq!(address, "目标");
                 assert!(!code_block);
+                // 跟重定向来的要带上"从哪儿来"：标题下方据此提示
+                let via = via.expect("跟重定向来的应当有来源");
+                assert_eq!(via.from, "指令页");
+                assert!(!via.random, "这是重定向，不是随机跳转");
             }
             other => panic!("{other:?}"),
         }
@@ -3110,10 +3179,12 @@ mod tests {
                 title,
                 address,
                 code_block,
+                via,
             } => {
                 assert_eq!(title, "指令页");
                 assert_eq!(address, "指令页@no-command");
                 assert!(code_block);
+                assert!(via.is_none(), "直接打开 @no-command 没有来源");
             }
             other => panic!("{other:?}"),
         }
@@ -3374,7 +3445,7 @@ mod tests {
             .unwrap();
 
         let listed = temp.vault.list_notes().unwrap();
-        let kind_of = |title: &str| {
+        let info_of = |title: &str| {
             listed
                 .iter()
                 .find(|item| item.title == title)
@@ -3383,11 +3454,20 @@ mod tests {
                 .clone()
         };
 
-        assert_eq!(kind_of("目标"), None);
-        assert_eq!(kind_of("重定向页").as_deref(), Some("redirect"));
-        assert_eq!(kind_of("随机页").as_deref(), Some("random-redirect"));
+        assert!(info_of("目标").is_none(), "普通页面没有指令信息");
+
+        // 短名、中文名、说明**全部来自后端那张指令表** —— 前端不再自己维护一份清单
+        let redirect = info_of("重定向页").expect("重定向页应当有指令信息");
+        assert_eq!(redirect.kind, "redirect");
+        assert_eq!(redirect.label, "重定向");
+        assert!(redirect.detail.contains("重定向到"), "{}", redirect.detail);
+
+        assert_eq!(info_of("随机页").unwrap().kind, "random-redirect");
+
         // 认不出的那种最需要被看见：一打开就报错，得先在列表里找到它
-        assert_eq!(kind_of("坏指令").as_deref(), Some("unrecognized"));
+        let broken = info_of("坏指令").unwrap();
+        assert_eq!(broken.kind, "unrecognized");
+        assert_eq!(broken.label, "指令有问题");
     }
 
     /// 回收站清单：删过的笔记按删除时间倒序列出，并带上"删了多久"

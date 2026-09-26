@@ -1,87 +1,250 @@
-//! 指令页面的**语法**。
+//! 指令的**一张表**。
 //!
-//! 这里只回答一个问题：**这一页是不是指令页面，指令是什么**。
-//! 至于"拿到指令之后怎么办"（跟重定向、跳几跳、怎么报错）属于仓库的策略，在
-//! [`crate::storage`] 里 —— 语法与执行分开，改语法不必动存储，反之亦然。
+//! 设计目标只有一句：**加一条新指令，只改这一处**。
 //!
-//! 语法只有两条：
+//! 一条指令需要的东西全写在同一个 [`CommandSpec`] 里 —— 前缀（怎么写）、短名与中文名
+//! （界面怎么标）、参数规则（能不能带冒号参数）、跳到哪（怎么执行）、人话说明（提示怎么写）。
+//! 报错时那句"目前支持……"也由表生成，不再手写一份。
 //!
-//! - **第一行**忽略末尾空白后等于 `$$COMMAND$$` → 这一页是指令页面，其余内容是指令；
-//! - 第二行写成 `REDIRECT: <内部地址>` → 一条重定向指令。
+//! 语法与执行仍然分开：这里只说"指令要什么"，具体能力（比如"在某命名空间里随机挑一篇"）
+//! 由实现方通过 [`CommandEnv`] 提供，所以指令表不必知道仓库长什么样。
 
 /// 指令页面的标记：正文**第一行**（忽略末尾空白）等于它，就认为这是一页指令。
 const COMMAND_MARKER: &str = "$$COMMAND$$";
 
-/// 指令 `REDIRECT: 内部地址`（写在第 2 行）
-const REDIRECT_PREFIX: &str = "REDIRECT:";
-
-/// 指令 `RANDOM_REDIRECT[: 命名空间ID]`；不写参数就是在主命名空间里随机
-const RANDOM_REDIRECT_PREFIX: &str = "RANDOM_REDIRECT";
-
-/// 一页指令的内容（只有第一行是标记时才算）
-#[derive(Debug, Clone, PartialEq)]
-pub enum Command {
-    /// `REDIRECT: <内部地址>`
-    Redirect(String),
-    /// `RANDOM_REDIRECT[: 命名空间ID]`。`None` = 主命名空间。
-    ///
-    /// 命名空间参数保留成字符串：**合法性由上层判定**（它才知道命名空间表长什么样），
-    /// 解析层只负责把它切出来。
-    RandomRedirect(Option<String>),
-    /// 是指令页面，但没认出指令。`None` 表示压根没有第二行。
-    ///
-    /// 带上原文是为了报错时能把"写错的那一行"显示出来 —— 只说"认不出来"没用。
-    Unrecognized(Option<String>),
+/// 指令执行时需要的仓库能力。
+///
+/// 指令本身不知道仓库长什么样 —— 它只声明"我要在某个命名空间里随机挑一篇"，
+/// 由实现方决定怎么挑。
+pub trait CommandEnv {
+    /// 在某个命名空间里随机挑一篇笔记的标题（`None` = 主命名空间）。
+    /// `from` 是发起这条指令的页面标题（随机时要排除它自己）。
+    fn random_title(&self, namespace: Option<&str>, from: &str) -> Result<String, String>;
 }
 
-impl Command {
-    /// 指令的短名，给界面标注用（`special:all` 据此把它们标出来）。
+/// 前缀之后怎么读参数。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Argument {
+    /// 前缀之后的全部内容就是参数，可以空着
+    Rest,
+    /// 可选 `: 参数`：前缀之后要么结束、要么跟冒号
     ///
-    /// 认不出的那一种也要有名字：**它最需要被找出来** —— 这种页面一打开就报错，
-    /// 用户得先在列表里看见它，才能进去改。
-    pub fn kind(&self) -> &'static str {
-        match self {
-            Command::Redirect(_) => "redirect",
-            Command::RandomRedirect(_) => "random-redirect",
-            Command::Unrecognized(_) => "unrecognized",
-        }
+    /// 这一条同时挡住误认：`RANDOM_REDIRECTX` 后面既不是结束也不是冒号，于是不算这条指令。
+    OptionalColon,
+}
+
+/// 一条指令的全部定义。
+#[derive(Debug)]
+pub struct CommandSpec {
+    /// 写在第二行的前缀（匹配时不区分大小写）
+    pub prefix: &'static str,
+    /// 界面上的短名
+    pub kind: &'static str,
+    /// 界面上的中文名
+    pub label: &'static str,
+    /// 参数规则
+    pub argument: Argument,
+    /// 这条指令跳到哪。`None` = 不跳（将来会有只产生副作用的指令）
+    pub chase: Option<fn(&dyn CommandEnv, &Command, &str) -> Result<String, String>>,
+    /// 界面上那句人话说明
+    pub describe: fn(&Command) -> String,
+}
+
+/// 相等比较只看**表里声明的那些字段**。
+///
+/// 刻意不派生：`chase` / `describe` 是函数指针，比较它们没有意义（编译器也会警告）。
+impl PartialEq for CommandSpec {
+    fn eq(&self, other: &Self) -> bool {
+        self.prefix == other.prefix
+            && self.kind == other.kind
+            && self.label == other.label
+            && self.argument == other.argument
     }
 }
 
-/// 识别「指令页面」。返回 `None` 表示这不是指令页面（第一行不是标记）。
-pub fn command_of(markdown: &str) -> Option<Command> {
+/// 一条认出来的指令：定义 + 原文参数
+#[derive(Debug, Clone, PartialEq)]
+pub struct Command {
+    pub spec: &'static CommandSpec,
+    pub argument: String,
+}
+
+/// 解析结果
+#[derive(Debug, Clone, PartialEq)]
+pub enum Parsed {
+    /// 不是指令页面（第一行不是标记）
+    None,
+    /// 是指令页面，但没有第二行
+    Empty,
+    /// 是指令页面，第二行认不出来（带上那一行原文，报错时要说清是哪一行）
+    Unrecognized(String),
+    /// 认出来了
+    Command(Command),
+}
+
+// ------------------------------------------------------------ 指令表本体
+
+/// `REDIRECT: <内部地址>`
+static REDIRECT: CommandSpec = CommandSpec {
+    prefix: "REDIRECT:",
+    kind: "redirect",
+    label: "重定向",
+    argument: Argument::Rest,
+    chase: Some(chase_redirect),
+    describe: describe_redirect,
+};
+
+/// `RANDOM_REDIRECT[: 命名空间ID]`
+static RANDOM_REDIRECT: CommandSpec = CommandSpec {
+    prefix: "RANDOM_REDIRECT",
+    kind: "random-redirect",
+    label: "随机重定向",
+    argument: Argument::OptionalColon,
+    chase: Some(chase_random_redirect),
+    describe: describe_random_redirect,
+};
+
+/// **指令总表。加新指令只改这里。**
+pub static COMMANDS: &[&CommandSpec] = &[&REDIRECT, &RANDOM_REDIRECT];
+
+/// 报错时给人看的清单。**由表生成** —— 手写第二份必然有一天会与表不符。
+pub fn supported() -> String {
+    COMMANDS
+        .iter()
+        .map(|spec| spec.prefix)
+        .collect::<Vec<_>>()
+        .join("、")
+}
+
+// ------------------------------------------------------------ 各指令的执行与说明
+
+fn chase_redirect(_env: &dyn CommandEnv, command: &Command, _from: &str) -> Result<String, String> {
+    // "没有目标就是错的"是这条指令自己的要求，写在它旁边
+    if command.argument.is_empty() {
+        return Err("REDIRECT 没有写目标地址".to_string());
+    }
+    Ok(command.argument.clone())
+}
+
+fn chase_random_redirect(
+    env: &dyn CommandEnv,
+    command: &Command,
+    from: &str,
+) -> Result<String, String> {
+    let namespace = command.argument.trim();
+    let namespace = if namespace.is_empty() {
+        None
+    } else {
+        Some(namespace)
+    };
+    env.random_title(namespace, from)
+}
+
+fn describe_redirect(command: &Command) -> String {
+    if command.argument.is_empty() {
+        "重定向，但没写目标".to_string()
+    } else {
+        format!("重定向到《{}》", command.argument)
+    }
+}
+
+fn describe_random_redirect(command: &Command) -> String {
+    let namespace = command.argument.trim();
+    if namespace.is_empty() {
+        "每次打开随机跳到主命名空间的某一篇".to_string()
+    } else {
+        format!("每次打开随机跳到命名空间 {namespace} 的某一篇")
+    }
+}
+
+// ------------------------------------------------------------ 解析
+
+/// 识别「指令页面」。
+pub fn parse(markdown: &str) -> Parsed {
     let mut lines = markdown.lines();
-    if lines.next()?.trim_end() != COMMAND_MARKER {
-        return None;
+    if lines.next().map(str::trim_end) != Some(COMMAND_MARKER) {
+        return Parsed::None;
     }
 
     let Some(second) = lines.next() else {
-        return Some(Command::Unrecognized(None));
+        return Parsed::Empty;
     };
     let second = second.trim_end();
 
-    if let Some(rest) = strip_prefix_ci(second, REDIRECT_PREFIX) {
-        return Some(Command::Redirect(rest.trim().to_string()));
-    }
-
-    if let Some(rest) = strip_prefix_ci(second, RANDOM_REDIRECT_PREFIX) {
+    for spec in COMMANDS {
+        let Some(rest) = strip_prefix_ci(second, spec.prefix) else {
+            continue;
+        };
         let rest = rest.trim_start();
-        if rest.is_empty() {
-            return Some(Command::RandomRedirect(None));
+
+        match spec.argument {
+            Argument::Rest => {
+                return Parsed::Command(Command {
+                    spec,
+                    argument: rest.to_string(),
+                });
+            }
+            Argument::OptionalColon => {
+                if rest.is_empty() {
+                    return Parsed::Command(Command {
+                        spec,
+                        argument: String::new(),
+                    });
+                }
+                if let Some(argument) = rest.strip_prefix(':') {
+                    return Parsed::Command(Command {
+                        spec,
+                        argument: argument.trim().to_string(),
+                    });
+                }
+            }
         }
-        // 前缀后面必须结束或跟冒号：否则 `RANDOM_REDIRECTX` 也会被当成这条指令
-        if let Some(namespace) = rest.strip_prefix(':') {
-            let namespace = namespace.trim();
-            return Some(Command::RandomRedirect(if namespace.is_empty() {
-                None
-            } else {
-                Some(namespace.to_string())
-            }));
-        }
-        return Some(Command::Unrecognized(Some(second.to_string())));
+        // 这一条不符（例如 `RANDOM_REDIRECTX`）：交给后面的指令继续试
     }
 
-    Some(Command::Unrecognized(Some(second.to_string())))
+    Parsed::Unrecognized(second.to_string())
+}
+
+impl Parsed {
+    /// 界面标注用的短名；`None` 表示这根本不是指令页面
+    pub fn kind(&self) -> Option<&'static str> {
+        match self {
+            Parsed::Command(command) => Some(command.spec.kind),
+            // 认不出的也要有名字：**它最需要被找出来**，一打开就报错
+            Parsed::Empty | Parsed::Unrecognized(_) => Some("unrecognized"),
+            Parsed::None => None,
+        }
+    }
+
+    /// 界面显示用的中文名
+    pub fn label(&self) -> Option<&'static str> {
+        match self {
+            Parsed::Command(command) => Some(command.spec.label),
+            Parsed::Empty | Parsed::Unrecognized(_) => Some("指令有问题"),
+            Parsed::None => None,
+        }
+    }
+
+    /// 一句人话说明
+    pub fn describe(&self) -> String {
+        match self {
+            Parsed::Command(command) => (command.spec.describe)(command),
+            Parsed::Empty => "写了标记，但没写指令".to_string(),
+            Parsed::Unrecognized(line) => format!("认不出来：「{}」", line.trim()),
+            Parsed::None => String::new(),
+        }
+    }
+
+}
+
+impl Command {
+    /// 跳到哪。`Ok(None)` = 这条指令不跳。
+    pub fn chase(&self, env: &dyn CommandEnv, from: &str) -> Result<Option<String>, String> {
+        match self.spec.chase {
+            Some(chase) => chase(env, self, from).map(Some),
+            None => Ok(None),
+        }
+    }
 }
 
 /// 大小写不敏感的前缀剥离。
@@ -99,82 +262,121 @@ fn strip_prefix_ci<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{command_of, Command};
+    use super::*;
+
+    fn parse_ok(markdown: &str) -> Command {
+        match parse(markdown) {
+            Parsed::Command(command) => command,
+            other => panic!("应当认出指令，得到 {other:?}"),
+        }
+    }
 
     /// 第一行末尾的空白要忽略
     #[test]
     fn marker_ignores_trailing_whitespace() {
-        assert_eq!(
-            command_of("$$COMMAND$$   \nREDIRECT: 目标\n"),
-            Some(Command::Redirect("目标".to_string()))
-        );
+        let command = parse_ok("$$COMMAND$$   \nREDIRECT: 目标\n");
+        assert_eq!(command.spec.kind, "redirect");
+        assert_eq!(command.argument, "目标");
     }
 
     /// 第一行不是标记 → 不是指令页面（哪怕第二行写了 REDIRECT）
     #[test]
     fn needs_the_marker_on_the_first_line() {
-        assert_eq!(command_of("前言\nREDIRECT: 目标\n"), None);
+        assert_eq!(parse("前言\nREDIRECT: 目标\n"), Parsed::None);
     }
 
     /// 前缀大小写不敏感
     #[test]
     fn redirect_prefix_is_case_insensitive() {
-        assert_eq!(
-            command_of("$$COMMAND$$\nredirect: 目标\n"),
-            Some(Command::Redirect("目标".to_string()))
-        );
+        assert_eq!(parse_ok("$$COMMAND$$\nredirect: 目标\n").argument, "目标");
     }
 
-    /// 只有标记、没有第二行 → 认不出来（`None` 表示"压根没写"）
+    /// 只有标记、没有第二行
     #[test]
     fn marker_without_second_line() {
-        assert_eq!(
-            command_of("$$COMMAND$$\n"),
-            Some(Command::Unrecognized(None))
-        );
+        assert_eq!(parse("$$COMMAND$$\n"), Parsed::Empty);
     }
 
     /// **多字节安全**：第二行以中文开头时不能按字节切
     #[test]
     fn multi_byte_second_line_does_not_panic() {
         assert_eq!(
-            command_of("$$COMMAND$$\n重定向到某处\n"),
-            Some(Command::Unrecognized(Some("重定向到某处".to_string())))
+            parse("$$COMMAND$$\n重定向到某处\n"),
+            Parsed::Unrecognized("重定向到某处".to_string())
         );
     }
 
     /// RANDOM_REDIRECT：可带参数、可不带；冒号后空着 = 主命名空间
     #[test]
     fn random_redirect_forms() {
-        assert_eq!(
-            command_of("$$COMMAND$$\nRANDOM_REDIRECT\n"),
-            Some(Command::RandomRedirect(None))
-        );
-        assert_eq!(
-            command_of("$$COMMAND$$\nRANDOM_REDIRECT: 3\n"),
-            Some(Command::RandomRedirect(Some("3".to_string())))
-        );
-        assert_eq!(
-            command_of("$$COMMAND$$\nRANDOM_REDIRECT:\n"),
-            Some(Command::RandomRedirect(None))
-        );
+        assert_eq!(parse_ok("$$COMMAND$$\nRANDOM_REDIRECT\n").argument, "");
+        assert_eq!(parse_ok("$$COMMAND$$\nRANDOM_REDIRECT: 3\n").argument, "3");
+        assert_eq!(parse_ok("$$COMMAND$$\nRANDOM_REDIRECT:\n").argument, "");
     }
 
     /// 前缀后面必须结束或跟冒号：`RANDOM_REDIRECTX` 不是这条指令
     #[test]
     fn random_redirect_needs_a_boundary() {
         assert_eq!(
-            command_of("$$COMMAND$$\nRANDOM_REDIRECTX\n"),
-            Some(Command::Unrecognized(Some("RANDOM_REDIRECTX".to_string())))
+            parse("$$COMMAND$$\nRANDOM_REDIRECTX\n"),
+            Parsed::Unrecognized("RANDOM_REDIRECTX".to_string())
         );
     }
 
     /// 目标为空照样解析成空串（"这是错误"由上层判定，解析层不替它决定）
     #[test]
     fn redirect_without_target_parses_as_empty() {
+        assert_eq!(parse_ok("$$COMMAND$$\nREDIRECT:\n").argument, "");
+    }
+
+    /// 界面标注：三种情况都要有短名与中文名
+    #[test]
+    fn kind_and_label_cover_every_case() {
+        assert_eq!(parse("正文\n").kind(), None, "不是指令页面就没有标注");
+        assert_eq!(parse("$$COMMAND$$\nREDIRECT: X\n").kind(), Some("redirect"));
         assert_eq!(
-            command_of("$$COMMAND$$\nREDIRECT:\n"),
-            Some(Command::Redirect(String::new()))
+            parse("$$COMMAND$$\nRANDOM_REDIRECT\n").kind(),
+            Some("random-redirect")
         );
+        assert_eq!(parse("$$COMMAND$$\n").kind(), Some("unrecognized"));
+        assert_eq!(parse("$$COMMAND$$\n$$COMMAND$$\n").kind(), Some("unrecognized"));
+
+        for markdown in [
+            "$$COMMAND$$\nREDIRECT: X\n",
+            "$$COMMAND$$\nRANDOM_REDIRECT\n",
+            "$$COMMAND$$\n",
+            "$$COMMAND$$\n乱写\n",
+        ] {
+            let parsed = parse(markdown);
+            assert!(parsed.label().is_some(), "{markdown:?} 应当有中文名");
+            assert!(!parsed.describe().is_empty(), "{markdown:?} 应当有说明");
+        }
+    }
+
+    /// **表要自洽**：短名与前缀都不许重复，说明与跳转都得写全 ——
+    /// 这是"加新指令只改一处"的安全网，漏写立刻在这里失败。
+    #[test]
+    fn command_table_is_self_consistent() {
+        for spec in COMMANDS {
+            assert!(!spec.prefix.is_empty(), "{} 缺前缀", spec.kind);
+            assert!(!spec.kind.is_empty(), "{} 缺短名", spec.prefix);
+            assert!(!spec.label.is_empty(), "{} 缺中文名", spec.kind);
+        }
+
+        for (index, spec) in COMMANDS.iter().enumerate() {
+            for other in &COMMANDS[index + 1..] {
+                assert_ne!(spec.kind, other.kind, "短名重复");
+                assert_ne!(spec.prefix, other.prefix, "前缀重复");
+                // 前缀互为开头时，先写的会永远抢到匹配，必须避免
+                assert!(
+                    !spec.prefix.starts_with(other.prefix) && !other.prefix.starts_with(spec.prefix),
+                    "前缀互为前缀：{} / {}",
+                    spec.prefix,
+                    other.prefix
+                );
+            }
+        }
+
+        assert!(supported().contains("REDIRECT"), "报错清单要由表生成");
     }
 }

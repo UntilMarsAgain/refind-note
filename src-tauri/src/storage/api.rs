@@ -12,9 +12,42 @@ pub struct NoteSummary {
     pub key: String,
     /// 显示标题
     pub title: String,
-    /// 指令页面的短名（`redirect` / `random-redirect` / `unrecognized`）；
-    /// 普通页面是 `null`。`special:all` 据此标注。
-    pub command: Option<String>,
+    /// 指令信息（短名 / 中文名 / 一句说明）；普通页面是 `null`。
+    /// `special:all` 据此标注，**不必在前端再维护一份命令清单**。
+    pub command: Option<CommandInfo>,
+}
+
+/// 是通过哪条指令来到这一页的（跟过重定向的阅读路径会带上）。
+#[derive(Debug, Clone, Serialize)]
+pub struct Via {
+    /// 来源页面标题；随机跳转时它是**发起随机的页面**，不是目标
+    pub from: String,
+    /// 是否随机跳转：提示语据此写成"来自随机重定向"
+    pub random: bool,
+}
+
+/// 一条指令页面的对外信息。
+///
+/// 全部来自后端那张指令表（`command.rs`），前端只负责显示 —— 加新指令时前端不用改。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CommandInfo {
+    /// 短名：`redirect` / `random-redirect` / `unrecognized`
+    pub kind: String,
+    /// 中文名，界面直接显示
+    pub label: String,
+    /// 一句人话说明（"重定向到《X》" / "认不出来：「…」"）
+    pub detail: String,
+}
+
+impl CommandInfo {
+    /// 从解析结果生成；不是指令页面就没有信息
+    pub fn from_parsed(parsed: &crate::command::Parsed) -> Option<Self> {
+        Some(CommandInfo {
+            kind: parsed.kind()?.to_string(),
+            label: parsed.label()?.to_string(),
+            detail: parsed.describe(),
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -127,6 +160,8 @@ pub enum Address {
     Note {
         title: String,
         address: String,
+        /// 是通过哪条指令来到这一页的（直接打开时为 `null`）
+        via: Option<Via>,
         /// 指令页面 + `@no-command`：正文要包成**代码块**显示（不执行指令）
         code_block: bool,
     },

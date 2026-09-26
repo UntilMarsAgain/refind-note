@@ -11,7 +11,7 @@ mod title;
 
 use std::sync::{Mutex, MutexGuard};
 use storage::{
-    Address, DiffResult, Draft, GcReport, LoadOutcome, MaintenanceReport, Note, NoteSummary,
+    Address, CommandInfo, DiffResult, Draft, GcReport, LoadOutcome, MaintenanceReport, Note, NoteSummary,
     PurgeReport, RevisionContent, RevisionSummary, TrashEntry, Vault, VaultSettings,
 };
 use tauri::Manager;
@@ -97,6 +97,14 @@ fn special_pages() -> Vec<String> {
 fn load_note_no_command(title: String) -> Result<LoadOutcome, String> {
     open()?
         .load_code_blocked(&title)
+        .map_err(|error| error.to_string())
+}
+
+/// 某一页的指令信息（`@no-command` 顶部提示用）
+#[tauri::command]
+fn command_info(title: String) -> Result<Option<CommandInfo>, String> {
+    open()?
+        .command_info(&title)
         .map_err(|error| error.to_string())
 }
 
@@ -204,7 +212,7 @@ fn purge_trash(older_than_days: i64) -> Result<PurgeReport, String> {
 /// 前端不自己解释 `$$COMMAND$$`。
 #[tauri::command]
 fn command_kind(markdown: String) -> Option<String> {
-    crate::command::command_of(&markdown).map(|command| command.kind().to_string())
+    crate::command::parse(&markdown).kind().map(str::to_string)
 }
 
 /// 渲染预览：与阅读视图同一个渲染器（编辑器右侧的预览区用它）
@@ -412,6 +420,7 @@ pub fn run() {
             render_markdown,
             load_note_no_command,
             command_kind,
+            command_info,
             list_trash,
             purge_trash,
             restore_note,
