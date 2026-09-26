@@ -561,6 +561,12 @@ mod tests {
 
         assert!(html.contains("<table>"), "表格插件应当生效");
         assert!(html.contains("wikilink"), "示例里应当演示内部链接");
+        // 示例里演示了模板块：必须真的渲染成引用块，而不是漏成代码块或普通段落
+        assert!(
+            html.contains(r#"<blockquote class="quote">"#),
+            "示例里的 ::quote 应当生效"
+        );
+        assert!(html.contains("quote__origin"), "示例里的署名应当渲染出来");
 
         let mut checked = 0;
         for line in SEED_MARKDOWN.lines() {

@@ -67,6 +67,13 @@ static MARKDOWN: LazyLock<MarkdownIt> = LazyLock::new(|| {
     md.block
         .remove_rule::<markdown_it::plugins::cmark::block::lheading::LHeadingScanner>();
 
+    // 移除缩进代码块（四空格开头）。
+    //
+    // 缩进在这个项目里有了别的用途：**模板块的边界**。两者会互相干扰 ——
+    // 一个缩进的模板块很容易先被当成代码块收走。代码块请用围栏写法。
+    md.block
+        .remove_rule::<markdown_it::plugins::cmark::block::code::CodeScanner>();
+
     markdown_it::plugins::extra::add(&mut md);
     markdown_it::plugins::extra::heading_anchors::add(&mut md, slugify_heading);
 
@@ -148,6 +155,16 @@ mod tests {
         // 用 r##"..."## 而不是 r#"..."#：内容里出现了 "# 序列，
         // 那正好是后者的结束分隔符，会把字符串提前截断。
         assert!(html.contains(r##"href="#%E8%A1%A8%E6%A0%BC""##), "{html}");
+    }
+
+    /// 缩进代码块语法已关闭：四空格开头不再是代码块。
+    ///
+    /// 关掉它是因为缩进现在专用于**模板块的边界**，两者会互相干扰。
+    #[test]
+    fn indented_code_blocks_are_disabled() {
+        let html = render("    四个空格开头\n");
+        assert!(!html.contains("<pre"), "不该再被当成代码块：{html}");
+        assert!(html.contains("四个空格开头"), "{html}");
     }
 
     /// raw HTML 必须被转义：前端是用 v-html 注入的，这里等于 XSS 边界
