@@ -13,6 +13,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import type { Draft, RenderReport } from "../bindings";
+import { isBlank, templateMarks } from "../template-blocks";
 
 const props = defineProps<{
   /** 当前标题 */
@@ -36,6 +37,49 @@ const busy = ref(false);
 const problem = ref("");
 const notice = ref("");
 const layout = ref<[string, string][]>([]);
+
+/**
+ * 模板块：编辑器**实际**会怎么标。
+ *
+ * 用的是编辑器同一个纯函数，所以这里报的就是屏幕上该出现的东西 ——
+ * 于是"屏幕与这里不一致"与"这里本身就错"能分开看。
+ *
+ * 空白一律显示成 `·`：这一类问题十有八九藏在看不见的空格里
+ * （上一轮那条孤零零的色块，就是一行"带空白的空行"）。
+ */
+const blockRows = computed<[string, string][]>(() => {
+  const lines = props.markdown.split("\n");
+  const first = new Map<number, { head: boolean; start: number; end: number }>();
+  for (const mark of templateMarks(lines)) {
+    first.set(mark.line, mark);
+  }
+  return lines.map((text, index) => {
+    const mark = first.get(index);
+    const kind = mark
+      ? mark.head
+        ? "头行"
+        : "块内"
+      : isBlank(text)
+        ? "空行（不标）"
+        : "—";
+    const range = mark ? mark.start + "–" + mark.end : "—";
+    const shown = text.replace(/ /g, "·").replace(/\t/g, "→");
+    return ["第 " + index + " 行 ｜ " + kind + " ｜ 列 " + range, shown === "" ? "（空）" : shown];
+  });
+});
+
+/** DOM 里到底有没有这些类、样式算出来是什么 —— 区分"规则错"与"样式没生效" */
+const markDom = ref("（未测）");
+
+function measureMarks() {
+  const heads = document.querySelectorAll(".cm-template-head").length;
+  const bodies = document.querySelectorAll(".cm-template-body").length;
+  const sample = document.querySelector(".cm-template-body");
+  const style = sample ? getComputedStyle(sample) : null;
+  markDom.value =
+    ".cm-template-head " + heads + " 个、.cm-template-body " + bodies + " 个" +
+    (style ? "；首个块内标记底色 " + style.backgroundColor : "；没有块内标记");
+}
 /** 草稿的落盘时间只有后端知道：收一次，顺带把"存过没有"说清 */
 const draftInfo = ref("（未收集）");
 
@@ -84,6 +128,7 @@ function measureLayout(): [string, string][] {
 
 function refreshLayout() {
   layout.value = measureLayout();
+  measureMarks();
 }
 
 async function collect() {
@@ -125,6 +170,18 @@ function flatten(): string {
     lines.push(report.value.html);
     lines.push("");
   }
+  lines.push("【模板块标记】");
+  lines.push("  " + markDom.value);
+  for (const [label, value] of blockRows.value) {
+    lines.push("  " + label + "：" + value);
+  }
+  lines.push("");
+  lines.push("【模板块标记】");
+  lines.push("  " + markDom.value);
+  for (const [label, value] of blockRows.value) {
+    lines.push("  " + label + "：" + value);
+  }
+  lines.push("");
   lines.push("【布局实测】");
   for (const [label, value] of layout.value) {
     lines.push("  " + label + "：" + value);
@@ -233,6 +290,34 @@ onBeforeUnmount(() => {
       <summary>渲染出的 HTML（{{ report.html_bytes }} 字节）</summary>
       <pre>{{ report.html }}</pre>
     </details>
+
+    <table class="state__table">
+      <caption>模板块（编辑器实际会怎么标）</caption>
+      <tbody>
+        <tr>
+          <th>DOM 里的标记</th>
+          <td>{{ markDom }}</td>
+        </tr>
+        <tr v-for="[label, value] in blockRows" :key="label">
+          <th class="state__mono">{{ label }}</th>
+          <td class="state__mono">{{ value }}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <table class="state__table">
+      <caption>模板块（编辑器实际会怎么标）</caption>
+      <tbody>
+        <tr>
+          <th>DOM 里的标记</th>
+          <td>{{ markDom }}</td>
+        </tr>
+        <tr v-for="[label, value] in blockRows" :key="label">
+          <th class="state__mono">{{ label }}</th>
+          <td class="state__mono">{{ value }}</td>
+        </tr>
+      </tbody>
+    </table>
 
     <table class="state__table">
       <caption>布局实测</caption>
