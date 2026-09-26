@@ -31,6 +31,9 @@ const editingId = ref("");
 const editingName = ref("");
 /** 已按过一次"确认"的破坏性操作（`清空:<标识>` / `删除:<标识>`） */
 const armed = ref("");
+/** 正在编辑站点地址的那一项，以及它的草稿 */
+const siteId = ref("");
+const siteDraft = ref("");
 /** 正在编辑别名的那一项，以及它的草稿（点保存才落盘） */
 const aliasId = ref("");
 const aliasDraft = ref<string[]>([]);
@@ -157,11 +160,30 @@ function dropAlias(alias: string) {
   aliasDraft.value = aliasDraft.value.filter((value) => value !== alias);
 }
 
+function startSite(item: Namespace) {
+  siteId.value = item.id;
+  siteDraft.value = item.site ?? "";
+  armed.value = "";
+}
+
+async function saveSite(item: Namespace) {
+  await act(item.id, () =>
+    invoke<Namespace[]>("update_namespace", {
+      key: item.id,
+      aliases: item.aliases,
+      // 清空 = 不再是跨站命名空间，变回本仓库的内容命名空间
+      site: siteDraft.value.trim() || null,
+    }),
+  );
+  siteId.value = "";
+}
+
 async function saveAliases(item: Namespace) {
   await act(item.id, () =>
-    invoke<Namespace[]>("update_namespace_aliases", {
+    invoke<Namespace[]>("update_namespace", {
       key: item.id,
       aliases: aliasDraft.value,
+      site: item.site,
     }),
   );
   aliasId.value = "";
@@ -224,7 +246,6 @@ function remove(item: Namespace) {
           <span>标识</span>
           <span>别名</span>
           <span>类型 / 跨站地址</span>
-          <span class="ns__head-actions">操作</span>
         </div>
 
         <div
@@ -258,8 +279,24 @@ function remove(item: Namespace) {
           </div>
 
           <div class="ns__cell ns__cell--actions">
+            <!-- 站点地址编辑：清空即变回内容命名空间 -->
+            <template v-if="siteId === item.id">
+              <input
+                v-model="siteDraft"
+                class="ns__input ns__input--wide"
+                type="text"
+                placeholder="站点地址模板，页面名以 $1 占位"
+                @keydown.enter.prevent="saveSite(item)"
+                @keydown.esc="siteId = ''"
+              />
+              <button class="ns__btn ns__btn--primary" type="button" @click="saveSite(item)">
+                保存
+              </button>
+              <button class="ns__btn" type="button" @click="siteId = ''">取消</button>
+            </template>
+
             <!-- 别名编辑：草稿 + 保存（点保存才落盘，避免每敲一下就发一次请求） -->
-            <template v-if="aliasId === item.id">
+            <template v-else-if="aliasId === item.id">
               <span class="ns__chips">
                 <span v-for="alias in aliasDraft" :key="alias" class="ns__chip">
                   {{ alias }}
@@ -309,6 +346,16 @@ function remove(item: Namespace) {
                 @click="startAliases(item)"
               >
                 别名
+              </button>
+              <!-- 站址：保留的两个不是"内容在别处"，不给它们配 -->
+              <button
+                v-if="!isReserved(item)"
+                class="ns__btn"
+                type="button"
+                :disabled="busy === item.id"
+                @click="startSite(item)"
+              >
+                站址
               </button>
               <!-- 主命名空间只不能改名与删除；special 只能配别名 -->
               <button
@@ -446,8 +493,7 @@ function remove(item: Namespace) {
     minmax(84px, 0.9fr)   /* 名称 */
     minmax(56px, 0.5fr)   /* 标识 */
     minmax(84px, 1fr)     /* 别名 */
-    minmax(130px, 1.5fr)  /* 类型 / 跨站地址 */
-    248px;                /* 操作：够放四个按钮，再宽就交给下面的折行 */
+    minmax(130px, 1.5fr); /* 类型 / 跨站地址 */
   gap: 8px 14px;
   align-items: center;
   padding: 9px 12px;
@@ -487,9 +533,12 @@ function remove(item: Namespace) {
 }
 
 .ns__cell--actions {
+  /* 操作**独占一行**：按钮有五个（别名 / 站址 / 改名 / 清空 / 删除），
+     挤在 248px 的数据列里会被压扁、换行也难看，甚至看不全。 */
+  grid-column: 1 / -1;
   justify-content: flex-end;
-  /* 中等宽度下按钮先在自己这一格内换行，而不是被容器裁掉 */
   flex-wrap: wrap;
+  margin-top: 2px;
 }
 
 .ns__name {
