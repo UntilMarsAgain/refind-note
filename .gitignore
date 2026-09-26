@@ -24,3 +24,11 @@ dist-ssr
 *.sw?
 
 /target/
+
+# 打包产物：本地构建用，不进仓库（也不上传 AUR）
+packaging/src/
+packaging/pkg/
+packaging/*.pkg.tar.zst
+packaging/*.pkg.tar.zst.sig
+packaging/refind-note-*.tar.gz
+packaging/.SRCINFO

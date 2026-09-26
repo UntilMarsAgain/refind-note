@@ -1,0 +1,78 @@
+# Maintainer: 本地打包（**未发布到 AUR**）
+#
+# 按 Tauri 的 AUR 指南写的 PKGBUILD（https://tauri.app/distribute/aur/），
+# 但只在本机构建：source 是本地源码包，不指向任何发布地址，页面上也不会出现这个包。
+#
+# 用法：
+#   packaging/build-package.sh                     # 打包
+#   sudo pacman -U packaging/refind-note-*.pkg.tar.zst   # 安装
+#
+# 从源码构建而不是解包现成的 .deb：本项目的发布形式就是这个 PKGBUILD，
+# 没有别的产物可解 —— 这样也少一层"解包出来的东西和源码不一致"的可能。
+
+pkgname=refind-note
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="重逢笔记：把笔记当文件管理的本地笔记程序（Markdown、模板块、附件、版本历史）"
+arch=('x86_64')
+# 许可证：仓库里还没有 LICENSE 文件，所以按 custom 如实标注，不替作者认领一个
+license=('custom')
+options=('!strip' '!emptydirs')
+install=${pkgname}.install
+
+# 运行时依赖：Tauri 应用在 Linux 上要这一套（见 AUR 指南的依赖列表）
+depends=(
+  'cairo'
+  'desktop-file-utils'
+  'gdk-pixbuf2'
+  'glib2'
+  'gtk3'
+  'hicolor-icon-theme'
+  # 指南给的列表里写的是 `libsoup`，那是 webkit2gtk-4.0 时代的名字；
+  # 现在 webkit2gtk-4.1 用的是 libsoup3（这台机器上就只有它）
+  'libsoup3'
+  'pango'
+  'webkit2gtk-4.1'
+)
+makedepends=('cargo' 'nodejs' 'pnpm' 'rust')
+
+source=("${pkgname}-${pkgver}.tar.gz" "${pkgname}.desktop" "${pkgname}.install")
+# 本地源码包，每次打包都是当场生成的：校验和只能跳过，
+# 因为它随工作区变化（`build-package.sh` 会先让工作区是干净的）
+sha256sums=('SKIP' 'SKIP' 'SKIP')
+
+build() {
+  cd "$srcdir/${pkgname}-${pkgver}"
+
+  # 产物**必须落在 $srcdir 里**。
+  #
+  # 不钉住的话，Tauri 的 CLI 会按它自己认定的项目根去放（第一次跑下来落到了仓库的
+  # `target/`），而 `package()` 是从 `$srcdir` 取的 —— 于是构建成功、打包却找不到文件。
+  # 顺带这也让"从源码包构建"这件事自洽：一个 PKGBUILD 不该写到自己目录之外。
+  export CARGO_TARGET_DIR="$srcdir/target"
+
+  # 前端依赖。pnpm 的存储是共享的，所以这一步通常只有链接的开销
+  pnpm install --frozen-lockfile
+
+  # 只构建程序本身：deb / rpm / AppImage 的打包器在这里用不上，
+  # 分发给 Arch 的形式就是这个 PKGBUILD
+  pnpm tauri build --no-bundle
+}
+
+package() {
+  cd "$srcdir/${pkgname}-${pkgver}"
+
+  # 可执行文件
+  install -Dm755 "target/release/${pkgname}" "$pkgdir/usr/bin/${pkgname}"
+
+  # 开始菜单项
+  install -Dm644 "$srcdir/${pkgname}.desktop" "$pkgdir/usr/share/applications/${pkgname}.desktop"
+
+  # 图标按 hicolor 的尺寸约定放：桌面环境自己挑合适的那一档
+  install -Dm644 'src-tauri/icons/32x32.png' \
+    "$pkgdir/usr/share/icons/hicolor/32x32/apps/${pkgname}.png"
+  install -Dm644 'src-tauri/icons/128x128.png' \
+    "$pkgdir/usr/share/icons/hicolor/128x128/apps/${pkgname}.png"
+  install -Dm644 'src-tauri/icons/128x128@2x.png' \
+    "$pkgdir/usr/share/icons/hicolor/256x256/apps/${pkgname}.png"
+}

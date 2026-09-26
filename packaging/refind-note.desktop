@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=重逢笔记
+Name[en]=Refind Note
+Comment=把笔记当文件管理的本地笔记程序
+Comment[en]=A local note app that treats notes as files
+Exec=refind-note
+Icon=refind-note
+Terminal=false
+Categories=Office;TextEditor;Utility;
+Keywords=note;markdown;wiki;笔记;
+# 让任务栏/窗口列表把窗口归到这个图标上，而不是显示一个无名条目
+StartupWMClass=refind-note

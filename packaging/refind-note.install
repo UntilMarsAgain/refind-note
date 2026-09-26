@@ -1,0 +1,15 @@
+# 装完、升级、卸载之后刷新桌面数据库与图标缓存。
+#
+# 不刷新的话，开始菜单里可能要等下一次登录才看得到这个程序 —— 那会让人以为没装上。
+post_install() {
+  update-desktop-database -q
+  gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor 2>/dev/null || true
+}
+
+post_upgrade() {
+  post_install
+}
+
+post_remove() {
+  post_install
+}
