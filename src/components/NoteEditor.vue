@@ -84,6 +84,15 @@ const appTheme = EditorView.theme(
       color: "var(--text)",
     },
     /* 自定义的 [[内部链接]] 装饰（CM6 生成的元素不在 scoped 作用域里，只能写在这里） */
+    // 模板块：头行看得出是"一次模板调用"，块内的行淡染一层，边界一目了然
+    ".cm-template-head": {
+      color: "var(--syntax-keyword)",
+      fontWeight: "600",
+    },
+    ".cm-template-body": {
+      color: "var(--text)",
+      backgroundColor: "var(--accent-tint)",
+    },
     ".cm-wikilink": {
       color: "var(--accent)",
       borderBottom: "1px dotted var(--accent)",
@@ -97,6 +106,19 @@ const appTheme = EditorView.theme(
         !window.matchMedia("(prefers-color-scheme: light)").matches),
   },
 );
+
+/**
+ * 与后端渲染器对齐的 markdown 解析。
+ *
+ * 后端关掉了两种写法，编辑器这边必须跟着关，否则**高亮会说谎**：
+ *
+ * - Setext 标题（`标题` 下一行写 `===` 或 `---`）：后端已不再把它解析成标题；
+ * - 缩进代码块（四空格开头）：那个缩进后端留给了**模板块的边界**。
+ *
+ * 不关的后果很具体：编辑器把一段文字画成标题或代码，渲染出来却是普通段落。
+ */
+const syncedMarkdown = () =>
+  markdown({ extensions: [{ remove: ["SetextHeading", "IndentedCode"] }] });
 
 const appHighlight = HighlightStyle.define([
   { tag: tags.heading, color: "var(--syntax-title)", fontWeight: "600" },
@@ -148,6 +170,66 @@ const wikilinkMatcher = new MatchDecorator({
   decoration: Decoration.mark({ class: "cm-wikilink" }),
 });
 
+/**
+ * 模板块的高亮。
+ *
+ * CM6 的 markdown 语法不认识 `::名字`（那是本项目的扩展语法），所以在**视图层**加装饰：
+ * 头行连同它下面**缩进更深**的行一起标出来，与后端"缩进就是边界"的规则对齐。
+ * 同样只加样式、不改文档 —— 保存下来的仍是原文，渲染依旧由后端负责。
+ *
+ * 这里是**简化版**：空行即结束（后端还会往后看一行，决定那个空行算不算块内）。
+ * 编辑时看个大概够了；真正的裁定在后端。
+ */
+function buildTemplateDecorations(view: EditorView): DecorationSet {
+  const doc = view.state.doc;
+  const ranges: { from: number; to: number; head: boolean }[] = [];
+
+  for (let number = 1; number <= doc.lines; number += 1) {
+    const line = doc.line(number);
+    if (!/^::\S/.test(line.text.trimStart())) {
+      continue;
+    }
+    ranges.push({ from: line.from, to: line.to, head: true });
+
+    const indent = line.text.length - line.text.trimStart().length;
+    for (let next = number + 1; next <= doc.lines; next += 1) {
+      const row = doc.line(next);
+      if (row.text.trim().length === 0) {
+        break;
+      }
+      if (row.text.length - row.text.trimStart().length <= indent) {
+        break;
+      }
+      ranges.push({ from: row.from, to: row.to, head: false });
+    }
+  }
+
+  ranges.sort((a, b) => a.from - b.from);
+  return Decoration.set(
+    ranges.map((range) =>
+      Decoration.mark({
+        class: range.head ? "cm-template-head" : "cm-template-body",
+      }).range(range.from, range.to),
+    ),
+    true,
+  );
+}
+
+const templateHighlight = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+    constructor(view: EditorView) {
+      this.decorations = buildTemplateDecorations(view);
+    }
+    update(update: ViewUpdate) {
+      if (update.docChanged || update.viewportChanged) {
+        this.decorations = buildTemplateDecorations(update.view);
+      }
+    }
+  },
+  { decorations: (plugin) => plugin.decorations },
+);
+
 const wikilinkHighlight = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet;
@@ -174,6 +256,31 @@ let view: EditorView | null = null;
  * 表格、内部链接、代码高亮与正文逐字一致，不会出现"预览好看、提交后变样"。
  */
 const preview = ref("");
+/**
+ * 光标与选区。
+ *
+ * 只有编辑器自己知道（CM6 的状态不在 props 里），所以在这里算好交给「状态」面板 ——
+ * "我想确认光标到底在第几行"这类问题不必靠数。
+ */
+const cursorText = ref("第 1 行，第 1 列");
+const selectionText = ref("未选中");
+
+function updateCursor(state: EditorState) {
+  const range = state.selection.main;
+  const head = state.doc.lineAt(range.head);
+  cursorText.value =
+    "第 " + head.number + " 行，第 " + (range.head - head.from + 1) + " 列";
+  const selected = range.to - range.from;
+  if (selected === 0) {
+    selectionText.value = "未选中";
+    return;
+  }
+  const anchor = state.doc.lineAt(range.anchor);
+  selectionText.value =
+    "选中 " + selected + " 字符，跨 " +
+    (Math.abs(anchor.number - head.number) + 1) + " 行";
+}
+
 /** 预览那一层（行号加在它上面；预览故意不做高亮：每次输入都会重跑） */
 const previewEl = ref<HTMLElement | null>(null);
 
@@ -339,13 +446,18 @@ onMounted(() => {
           ? cssLanguage()
           : props.language === "html"
             ? htmlLanguage()
-            : markdown(),
+            : syncedMarkdown(),
         // 顺序有讲究：主题与高亮都要排在 basicSetup **之后**，才能盖掉它的浅色默认值
         appTheme,
         syntaxHighlighting(appHighlight),
         wikilinkHighlight,
+        templateHighlight,
         EditorView.lineWrapping,
         EditorView.updateListener.of((update) => {
+          // 光标与选区：状态面板要报，而 CM6 只有编辑器自己知道
+          if (update.selectionSet || update.docChanged) {
+            updateCursor(update.state);
+          }
           if (!update.docChanged) {
             return;
           }
@@ -357,6 +469,9 @@ onMounted(() => {
     }),
   });
 
+  if (view) {
+    updateCursor(view.state);
+  }
   void refreshPreview(props.modelValue);
 
 });
@@ -624,6 +739,8 @@ function submit() {
       :markdown="modelValue"
       :language="language"
       :status="status"
+      :cursor="cursorText"
+      :selection="selectionText"
     />
 
   </section>

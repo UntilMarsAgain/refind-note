@@ -12,7 +12,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import type { RenderReport } from "../bindings";
+import type { Draft, RenderReport } from "../bindings";
 
 const props = defineProps<{
   /** 当前标题 */
@@ -25,6 +25,10 @@ const props = defineProps<{
   language: string | null;
   /** 编辑器的状态行文案（已保存草稿 / 提交冲突 / 失败原因） */
   status: string;
+  /** 光标位置（CM6 的状态，只有编辑器自己知道） */
+  cursor: string;
+  /** 选区（同上） */
+  selection: string;
 }>();
 
 const report = ref<RenderReport | null>(null);
@@ -32,6 +36,23 @@ const busy = ref(false);
 const problem = ref("");
 const notice = ref("");
 const layout = ref<[string, string][]>([]);
+/** 草稿的落盘时间只有后端知道：收一次，顺带把"存过没有"说清 */
+const draftInfo = ref("（未收集）");
+
+async function loadDraft() {
+  try {
+    const draft = await invoke<Draft | null>("load_draft", { title: props.title });
+    if (!draft) {
+      draftInfo.value = "没有（与已提交的一致，或还没存过）";
+      return;
+    }
+    const at = new Date(draft.at);
+    const shown = Number.isNaN(at.getTime()) ? draft.at : at.toLocaleString();
+    draftInfo.value = "有，落盘于 " + shown + "（基于版本 " + draft.base_rev + "）";
+  } catch (error) {
+    draftInfo.value = "读不出来：" + String(error);
+  }
+}
 
 /**
  * 布局实测。
@@ -70,6 +91,7 @@ async function collect() {
   problem.value = "";
   notice.value = "";
   refreshLayout();
+  void loadDraft();
   try {
     report.value = await invoke<RenderReport>("render_report", {
       markdown: props.markdown,
@@ -131,11 +153,16 @@ const editRows = computed<[string, string][]>(() => [
   ["地址", props.address],
   ["语言", props.language ?? "markdown"],
   ["规模", props.markdown.length + " 字符 / " + props.markdown.split("\n").length + " 行"],
+  ["光标", props.cursor],
+  ["选区", props.selection],
+  // 草稿是后端的账，收一次才知道（见 loadDraft）
+  ["草稿", draftInfo.value],
   ["状态行", props.status || "（无）"],
 ]);
 
 onMounted(() => {
   refreshLayout();
+  void loadDraft();
   window.addEventListener("resize", refreshLayout);
 });
 
