@@ -564,6 +564,7 @@ pub fn run() {
         //      都有会话总线，日常够用。
         //   2. 只在**连会话总线地址都解析不到**时插件内部会 panic（连不上总线本身
         //      是被正常处理的）。真遇到无总线的环境，再换成自实现的锁文件方案。
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();

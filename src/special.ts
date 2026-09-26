@@ -7,7 +7,7 @@
  * 不会因为忘了登记而从界面上消失。
  */
 import type { Component } from "vue";
-import { Dices, List, Plus, Settings, Stethoscope, Trash2, Wrench } from "@lucide/vue";
+import { Dices, FolderOpen, List, Plus, Settings, Stethoscope, Trash2, Wrench } from "@lucide/vue";
 
 export interface SpecialPageMeta {
   /** 显示名 */
@@ -28,6 +28,12 @@ export const SPECIAL_META: Record<string, SpecialPageMeta> = {
   all: { label: "全部页面", tip: "列出所有笔记", icon: List, group: "导航" },
   random: { label: "随机条目", tip: "随机跳到一篇笔记", icon: Dices, group: "导航" },
   newtab: { label: "新标签页", tip: "打开一个空白标签页", icon: Plus, group: "导航" },
+  files: {
+    label: "文件",
+    tip: "浏览、上传、管理附件",
+    icon: FolderOpen,
+    group: "导航",
+  },
   settings: { label: "设置", tip: "外观与存储设置", icon: Settings, group: "工具" },
   debug: {
     label: "诊断",

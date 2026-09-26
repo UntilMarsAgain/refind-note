@@ -12,3 +12,4 @@ export type * from "./settings";
 export type * from "./namespace";
 export type * from "./trash";
 export type * from "./task";
+export type * from "./files";

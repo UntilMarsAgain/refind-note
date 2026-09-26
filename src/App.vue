@@ -20,6 +20,7 @@ import SettingsPage from "./components/SettingsPage.vue";
 import AllPages from "./components/AllPages.vue";
 import AppMenu from "./components/AppMenu.vue";
 import DebugPage from "./components/DebugPage.vue";
+import FilesPage from "./components/FilesPage.vue";
 import GcPage from "./components/GcPage.vue";
 import TrashPage from "./components/TrashPage.vue";
 import TaskBar from "./components/TaskBar.vue";
@@ -1363,6 +1364,11 @@ function onAction(name: string) {
         :via="viaOf"
         @open-via="openVia"
       />
+
+      <!--
+        文件：附件的浏览、上传与管理。与别的系统页面同类，所以放在同一串分支里。
+      -->
+      <FilesPage v-else-if="mode === 'special' && specialPage === 'files'" />
 
           <!-- 编辑中：不显示页头，操作都在编辑器自己那一行里 -->
           <NoteEditor

@@ -1,0 +1,309 @@
+<script setup lang="ts">
+/**
+ * `special:files` —— 附件的浏览、管理与上传。
+ *
+ * 上传走系统文件选择器给的本机路径：Rust 端直接读文件，不让几 MB 的图片转成 JSON
+ * 数组再走一遍 IPC。磁盘上的名字与显示名是分开的（见后端 `storage/files.rs`），
+ * 所以这里看到的文件名，就是笔记里引用时该写的名字。
+ */
+import { onMounted, ref } from "vue";
+import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { FolderOpen, Trash2, Upload } from "@lucide/vue";
+import type { FileEntry } from "../bindings";
+
+const files = ref<FileEntry[]>([]);
+const busy = ref(false);
+const notice = ref("");
+const problem = ref("");
+/** 正在等第二次确认的那个附件：删除不可撤销，值得多问一句 */
+const confirming = ref("");
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) {
+    return bytes + " B";
+  }
+  if (bytes < 1024 * 1024) {
+    return (bytes / 1024).toFixed(1) + " KiB";
+  }
+  return (bytes / (1024 * 1024)).toFixed(1) + " MiB";
+}
+
+function isImage(file: FileEntry): boolean {
+  return file.mime.startsWith("image/");
+}
+
+/** 笔记里引用它时写什么：图片写 markdown 图，其它写成链接 */
+function referenceOf(file: FileEntry): string {
+  const name = file.name;
+  return isImage(file) ? `![${name}](${name})` : `[${name}](${name})`;
+}
+
+async function refresh() {
+  problem.value = "";
+  try {
+    files.value = await invoke<FileEntry[]>("list_files");
+  } catch (error) {
+    problem.value = String(error);
+  }
+}
+
+async function upload() {
+  busy.value = true;
+  notice.value = "";
+  problem.value = "";
+  try {
+    const picked = await open({ multiple: true, title: "选择要上传的文件" });
+    const paths = Array.isArray(picked) ? picked : picked ? [picked] : [];
+    if (paths.length === 0) {
+      return;
+    }
+    const names: string[] = [];
+    for (const path of paths) {
+      const entry = await invoke<FileEntry>("upload_file", { path });
+      names.push(entry.name);
+    }
+    notice.value = "已收进仓库：" + names.join("、");
+    await refresh();
+  } catch (error) {
+    problem.value = String(error);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function copyReference(file: FileEntry) {
+  try {
+    await writeText(referenceOf(file));
+    notice.value = "已复制引用：" + referenceOf(file);
+  } catch (error) {
+    problem.value = "复制失败：" + String(error);
+  }
+}
+
+async function remove(file: FileEntry) {
+  problem.value = "";
+  try {
+    await invoke("delete_file", { id: file.id });
+    notice.value = "已删除：" + file.name;
+    confirming.value = "";
+    await refresh();
+  } catch (error) {
+    problem.value = String(error);
+  }
+}
+
+onMounted(refresh);
+</script>
+
+<template>
+  <section class="files">
+    <header class="files__head">
+      <div class="files__lead">
+        <FolderOpen :size="20" />
+        <span>{{ files.length }} 个文件</span>
+      </div>
+      <button class="files__upload" :disabled="busy" @click="upload">
+        <Upload :size="16" />
+        {{ busy ? "上传中…" : "上传文件" }}
+      </button>
+    </header>
+
+    <p class="files__hint">
+      文件存在仓库的 files/ 目录里，笔记中用文件名引用：图片写
+      <code>![名字](名字)</code>；要对齐或限宽，写
+      <code>::image src=名字 align=right width=320</code>。
+    </p>
+
+    <p v-if="notice" class="files__notice">{{ notice }}</p>
+    <p v-if="problem" class="files__problem">{{ problem }}</p>
+
+    <p v-if="files.length === 0" class="files__empty">
+      还没有文件。点「上传文件」选一个，它就会出现在这里。
+    </p>
+
+    <ul v-else class="files__list">
+      <li v-for="file in files" :key="file.id" class="files__item">
+        <div class="files__thumb">
+          <img v-if="isImage(file)" :src="file.url" :alt="file.name" />
+          <span v-else class="files__ext">{{ file.name.split(".").pop() }}</span>
+        </div>
+
+        <div class="files__meta">
+          <p class="files__name">{{ file.name }}</p>
+          <p class="files__sub">
+            {{ formatSize(file.size) }} · {{ file.mime }} · {{ file.uploaded }}
+          </p>
+          <code class="files__ref">{{ referenceOf(file) }}</code>
+        </div>
+
+        <div class="files__actions">
+          <button @click="copyReference(file)">复制引用</button>
+          <template v-if="confirming === file.id">
+            <button class="files__danger" @click="remove(file)">确认删除</button>
+            <button @click="confirming = ''">取消</button>
+          </template>
+          <button v-else class="files__danger" @click="confirming = file.id">
+            <Trash2 :size="15" />
+            删除
+          </button>
+        </div>
+      </li>
+    </ul>
+  </section>
+</template>
+
+<style scoped>
+.files {
+  padding: 4px 0 32px;
+}
+
+.files__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.files__lead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+}
+
+.files__upload {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--accent-solid);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.files__upload:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.files__hint {
+  margin: 0 0 16px;
+  color: var(--text-dim);
+  font-size: 0.92em;
+  line-height: 1.7;
+}
+
+.files__hint code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.files__notice {
+  margin: 0 0 12px;
+  color: var(--text-dim);
+}
+
+.files__problem {
+  margin: 0 0 12px;
+  color: var(--danger);
+}
+
+.files__empty {
+  color: var(--text-dim);
+}
+
+.files__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.files__item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.files__thumb {
+  flex: none;
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.files__thumb img {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.files__ext {
+  color: var(--text-dim);
+  font-size: 0.8em;
+  text-transform: uppercase;
+}
+
+.files__meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.files__name {
+  margin: 0 0 4px;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.files__sub {
+  margin: 0 0 6px;
+  color: var(--text-dim);
+  font-size: 0.85em;
+}
+
+.files__ref {
+  color: var(--text-dim);
+  font-size: 0.85em;
+  word-break: break-all;
+}
+
+.files__actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.files__actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* 红色只给破坏性操作 */
+.files__danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+</style>

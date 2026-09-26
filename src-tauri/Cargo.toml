@@ -26,6 +26,7 @@ tauri-plugin-single-instance = "2"
 # 代码块的复制按钮用它，而不是 navigator.clipboard：
 # webview 里的 Web 剪贴板 API 在 Linux 上不保证可用，插件才是官方可靠路径。
 tauri-plugin-clipboard-manager = "2"
+tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # default-features 里含 syntect，它把代码高亮配色以内联 style 写死，
