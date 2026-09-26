@@ -33,7 +33,15 @@
   --accent-soft: #a8c6ef;
   /* 主题色的低透明度版本：给"底色淡染"用（主题色本身不透明，直接当底色会与文字撞） */
   --accent-tint: rgba(91, 141, 214, 0.16);
-  /* 指向尚未建立的笔记的内部链接（MediaWiki 意义上的「红链」） */
+  /*
+   * 链接颜色**钉死**，不跟主题色走。
+   *
+   * 三种颜色各有含义（见 note.css）：蓝=有对应页面的内部链接与外链；红=红链（页面不存在）；
+   * 绿=跨站链接。含义不该因为用户换了主题色而变，所以它们不从 --accent 派生。
+   * 深浅主题各给一组，只为对比度，不是为了跟主题色。
+   */
+  --link-blue: #a8c6ef;
+  --link-green: #8ac48f;
   --link-missing: #e2645c;
   /* 版本对比里增删行的底色 */
   --diff-add-bg: rgba(90, 160, 110, 0.18);
@@ -85,6 +93,8 @@
   --accent: #2f6fc4;
   --accent-soft: #5f93d8;
   --accent-tint: rgba(47, 111, 196, 0.14);
+  --link-blue: #2f6fc4;
+  --link-green: #2f7a4a;
   --link-missing: #b02a2a;
   --diff-add-bg: rgba(60, 160, 90, 0.16);
   --diff-del-bg: rgba(200, 70, 70, 0.12);

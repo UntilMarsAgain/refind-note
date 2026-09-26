@@ -86,7 +86,8 @@
 }
 
 .note-body a {
-  color: var(--accent-soft);
+  /* 钉死的蓝：内部链接（页面存在）与外链都用它，不跟主题色走 */
+  color: var(--link-blue);
   text-decoration: none;
   border-bottom: 1px solid transparent;
   cursor: pointer;
@@ -109,6 +110,12 @@
    （见 markdown/syntax/wikilink.rs），前端只负责上色。 */
 .note-body a.wikilink[data-missing="true"] {
   color: var(--link-missing);
+}
+
+/* 绿链：跨站（interwiki）链接。前缀在命名空间配置里登记过站点地址时，
+   Rust 端渲染成带 data-interwiki 的链接，不再查本仓库有没有这一页。 */
+.note-body a.wikilink[data-interwiki="true"] {
+  color: var(--link-green);
 }
 
 /* ---------- 列表 ---------- */

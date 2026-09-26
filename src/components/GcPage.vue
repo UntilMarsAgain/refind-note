@@ -11,6 +11,8 @@ import { invoke } from "@tauri-apps/api/core";
 
 const orphanBlobs = ref(true);
 const supersededDrafts = ref(true);
+/** 先清空回收站：那些笔记的内容块这时才成为孤块，可以一并回收 */
+const purgeTrashFirst = ref(false);
 /** 已提交的任务 id（提交本身是瞬时的，所以这里只用来给一句反馈） */
 const submitted = ref<number | null>(null);
 const error = ref("");
@@ -26,6 +28,7 @@ async function run() {
     submitted.value = await invoke<number>("submit_gc", {
       orphanBlobs: orphanBlobs.value,
       supersededDrafts: supersededDrafts.value,
+      purgeTrashFirst: purgeTrashFirst.value,
     });
   } catch (reason) {
     error.value = String(reason);
@@ -57,6 +60,18 @@ async function run() {
           <span class="gc__text">
             <strong>已被取代的草稿</strong>
             <em>提交时被取代、之后不会再被读到的草稿节点。</em>
+          </span>
+        </label>
+      </li>
+      <li>
+        <label class="gc__option">
+          <input v-model="purgeTrashFirst" type="checkbox" />
+          <span class="gc__text">
+            <strong>先清空回收站</strong>
+            <em>
+              回收站里的笔记先全部删掉，它们的内容块这时才成为孤块，可以顺带回收。
+              这一步<strong>不可撤销</strong>（回收站里那些笔记将不再能还原）。
+            </em>
           </span>
         </label>
       </li>

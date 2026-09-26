@@ -136,17 +136,36 @@ fn purge_trash_entry(title: String) -> Result<(), String> {
 
 /// 提交一次内容块回收（后台执行；进度与结果见任务栏）
 #[tauri::command]
-fn submit_gc(orphan_blobs: bool, superseded_drafts: bool) -> u64 {
+fn submit_gc(orphan_blobs: bool, superseded_drafts: bool, purge_trash_first: bool) -> u64 {
     tasks::submit("回收内容块", move || {
         let _guard = write_guard();
         let vault = open()?;
+
+        // 先清空回收站：那些笔记的内容块此时才成为孤块，接着这次回收一并清掉。
+        // `purge_trash(0)` 的语义就是"全部清掉"（0 天前的都算）。
+        let purged = if purge_trash_first {
+            Some(
+                vault
+                    .purge_trash(0)
+                    .map_err(|error| error.to_string())?
+                    .removed,
+            )
+        } else {
+            None
+        };
+
         let report = vault
             .gc(orphan_blobs, superseded_drafts)
             .map_err(|error| error.to_string())?;
-        Ok(format!(
+
+        let recycled = format!(
             "回收内容块 {} 个、草稿节点 {} 个，释放 {} 字节",
             report.removed_blobs, report.removed_drafts, report.freed_bytes
-        ))
+        );
+        Ok(match purged {
+            Some(count) => format!("清空回收站 {count} 条；{recycled}"),
+            None => recycled,
+        })
     })
 }
 
