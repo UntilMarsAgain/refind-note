@@ -7,6 +7,7 @@ export type * from "./address";
 export type * from "./note";
 export type * from "./history";
 export type * from "./command";
+export type * from "./debug";
 export type * from "./settings";
 export type * from "./namespace";
 export type * from "./trash";

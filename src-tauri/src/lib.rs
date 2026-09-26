@@ -13,6 +13,7 @@ use std::sync::{Mutex, MutexGuard};
 use storage::{
     Address, CommandInfo, Namespace, DiffResult, Draft, GcReport, LoadOutcome, MaintenanceReport, Note, NoteSummary,
     PurgeReport, RevisionContent, RevisionSummary, TrashEntry, Vault, VaultSettings,
+    DebugReport,
 };
 use tauri::Manager;
 
@@ -129,28 +130,14 @@ fn add_namespace(
     Ok(vault.namespaces())
 }
 
-/// 调试：把渲染过程里的关键事实摊开 —— 解析器看到哪些模板页、渲染出了什么。
+/// 诊断报告（`special:debug`）：把仓库现在是什么样摊开成可读的分段。
 ///
-/// 只用于排查问题（前端那个折叠面板是唯一调用点）：
-/// "模板页明明在，取用却是空的"、"::css 到底产出了什么"这类问题，看这份报告最快。
+/// 它是一项功能而不是调试残留 —— 排查"模板取不到""页面去哪了""占了多少空间"时，
+/// 这里是唯一能一次看全的地方。`address` 给当前地址，报告里会多一段"当前页"。
 #[tauri::command]
-fn debug_render(markdown: String) -> Result<String, String> {
+fn debug_report(address: Option<String>) -> Result<DebugReport, String> {
     let vault = open()?;
-
-    let names = vault.template_names();
-    let mut out = String::new();
-    out.push_str(&format!("【模板命名空间里的页面】{} 个\n", names.len()));
-    for (name, bytes) in &names {
-        out.push_str(&format!("  {name}（{bytes} 字节）\n"));
-    }
-    if names.is_empty() {
-        out.push_str("  （一个都没有：检查页面是否在 template: 下、是否已提交）\n");
-    }
-
-    out.push_str("\n【渲染结果】\n");
-    out.push_str(&vault.render(&markdown));
-    out.push('\n');
-    Ok(out)
+    Ok(vault.debug_report(address.as_deref()))
 }
 
 /// 改一个命名空间的别名与站点地址（别名增删、站址修改都用它，一次给一整套）
@@ -536,7 +523,7 @@ pub fn run() {
             namespaces,
             add_namespace,
             rename_namespace,
-            debug_render,
+            debug_report,
             update_namespace,
             empty_namespace,
             delete_namespace,

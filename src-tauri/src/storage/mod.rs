@@ -26,12 +26,14 @@ mod diff;
 mod error;
 mod event;
 
+mod debug;
 mod namespaces;
 mod trash;
 
 pub use api::{
     Address, CommandInfo, DiffResult, Draft, GcReport, LoadOutcome, MaintenanceReport, Note,
     NoteSummary, PurgeReport, RevisionContent, RevisionSummary, TrashEntry, VaultSettings, Via,
+    DebugReport,
 };
 pub use config::VaultConfig;
 pub use error::VaultError;
@@ -2067,8 +2069,8 @@ pub fn default_root() -> Result<PathBuf, VaultError> {
 ///
 /// 刻意用 `get(..n)`：直接切 `&value[..n]` 会在多字节字符中间 panic。
 /// 现有的特殊页面。不在这里面的 `special:` 地址直接报「不存在」。
-pub(crate) const SPECIAL_PAGES: [&str; 6] =
-    ["newtab", "settings", "all", "random", "gc", "trash"];
+pub(crate) const SPECIAL_PAGES: [&str; 7] =
+    ["newtab", "settings", "all", "random", "gc", "trash", "debug"];
 
 /// 重定向最多跟几跳。超过就报错，而不是让 A→B→A 这类环无限递归。
 ///

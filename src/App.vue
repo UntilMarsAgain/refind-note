@@ -19,6 +19,7 @@ import NewTab from "./components/NewTab.vue";
 import SettingsPage from "./components/SettingsPage.vue";
 import AllPages from "./components/AllPages.vue";
 import AppMenu from "./components/AppMenu.vue";
+import DebugPage from "./components/DebugPage.vue";
 import GcPage from "./components/GcPage.vue";
 import TrashPage from "./components/TrashPage.vue";
 import TaskBar from "./components/TaskBar.vue";
@@ -1350,6 +1351,17 @@ function onAction(name: string) {
         :via="viaOf"
         @open-via="openVia"
         @open="openFromList"
+      />
+
+      <!--
+        诊断：把仓库现状摊开。它与别的系统页面同类，所以放在同一串分支里 ——
+        地址栏写 special:debug 就能到，索引页也会列出它。
+      -->
+      <DebugPage
+        v-else-if="mode === 'special' && specialPage === 'debug'"
+        :address="addressText"
+        :via="viaOf"
+        @open-via="openVia"
       />
 
           <!-- 编辑中：不显示页头，操作都在编辑器自己那一行里 -->

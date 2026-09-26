@@ -75,6 +75,29 @@ pub struct Note {
     pub modified: String,
 }
 
+/// 诊断报告里的一行：一个标签配一个值
+#[derive(Debug, Clone, Serialize)]
+pub struct DebugEntry {
+    pub label: String,
+    /// 值可以是多行（比如渲染出的 HTML）
+    pub value: String,
+}
+
+/// 诊断报告里的一段
+#[derive(Debug, Clone, Serialize)]
+pub struct DebugSection {
+    pub title: String,
+    pub entries: Vec<DebugEntry>,
+}
+
+/// 诊断报告：仓库当前是什么样（`special:debug`）
+///
+/// 分段给出，是为了让它**可读**：一屏能扫完，而不是一段糊在一起的日志。
+#[derive(Debug, Clone, Serialize)]
+pub struct DebugReport {
+    pub sections: Vec<DebugSection>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Draft {
     pub markdown: String,

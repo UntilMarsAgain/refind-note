@@ -5,7 +5,6 @@ import { Check, Pencil, Save, Trash2, X } from "@lucide/vue";
 import { checkTitle } from "../title";
 import { themeMode } from "../theme";
 import { applyLineNumbers } from "../code-blocks";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { codeLineNumbers } from "../settings";
 // `codemirror` 是元包（提供 basicSetup 等），EditorState 由 @codemirror/state 提供 ——
 // 后者必须作为**直接依赖**安装：pnpm 的严格 node_modules 下，传递依赖不可直接导入。
@@ -404,77 +403,6 @@ const languageLabel = computed(() => {
   }
 });
 
-/**
- * 调试面板：把"渲染与布局的事实"摊开，方便复制出来排查。
- *
- * 设置成可选中（`userSelect: text`）不是小事：这些数字只能眼看，不能复制的话，
- * 报问题的人就只能手抄，抄错一位就得再问一轮。
- */
-const debugText = ref("");
-const debugBusy = ref(false);
-
-const debugButtonStyle = {
-  padding: "4px 10px",
-  border: "1px solid var(--border)",
-  borderRadius: "6px",
-  background: "var(--surface)",
-  color: "var(--text)",
-  font: "inherit",
-  cursor: "pointer",
-};
-
-/** 布局那部分的实测值：宽度到底被谁卡住，看这几个数就知道 */
-function measureReport(): string {
-  const panes = panesEl.value;
-  if (!panes) {
-    return "（编辑器还没上屏）";
-  }
-  const column = panes.closest(".app__column") as HTMLElement | null;
-  const lines = [
-    "【布局实测】",
-    "window.innerWidth = " + window.innerWidth,
-    "devicePixelRatio = " + window.devicePixelRatio,
-    ".app__column clientWidth = " + (column ? column.clientWidth : -1),
-    ".editor__panes clientWidth = " + panes.clientWidth,
-    "  computed flexDirection = " + getComputedStyle(panes).flexDirection,
-    "  stacked = " + stacked.value,
-    "  阈值 = " + STACK_BREAKPOINT + " / " + UNSTACK_BREAKPOINT,
-  ];
-  Array.from(panes.children).forEach((child, index) => {
-    const element = child as HTMLElement;
-    lines.push(
-      "  第 " + (index + 1) + " 栏 clientWidth = " + element.clientWidth +
-        "，computed flex = " + getComputedStyle(element).flex,
-    );
-  });
-  return lines.join("\n");
-}
-
-async function refreshDebug() {
-  debugBusy.value = true;
-  try {
-    const report = await invoke<string>("debug_render", { markdown: props.modelValue });
-    debugText.value = measureReport() + "\n" + report;
-  } catch (error) {
-    debugText.value = measureReport() + "\n【调试命令失败】" + String(error);
-  } finally {
-    debugBusy.value = false;
-  }
-}
-
-/** 复制（没有内容就先收集一次） */
-async function copyDebug() {
-  try {
-    if (!debugText.value) {
-      await refreshDebug();
-    }
-    await writeText(debugText.value);
-    debugText.value = debugText.value + "\n（已复制到剪贴板）";
-  } catch (error) {
-    console.error("复制调试信息失败:", error);
-  }
-}
-
 /** 词法问题（空、@、非法字符、过长）即时反馈，不打扰后端 */
 const renameProblem = ref<string | null>(null);
 
@@ -683,41 +611,6 @@ function submit() {
       </span>
     </p>
 
-    <!-- 排查模板与布局问题：默认收起，内容可选中复制（这个组件里 scoped 样式不生效，故用内联） -->
-    <details
-      :style="{ marginTop: '10px', color: 'var(--text-dim)', fontSize: '12.5px' }"
-    >
-      <summary :style="{ cursor: 'pointer', userSelect: 'none' }">调试信息</summary>
-      <div :style="{ display: 'flex', gap: '8px', margin: '8px 0' }">
-        <button
-          type="button"
-          :style="debugButtonStyle"
-          :disabled="debugBusy"
-          @click="refreshDebug"
-        >
-          {{ debugBusy ? "正在收集…" : "收集" }}
-        </button>
-        <button type="button" :style="debugButtonStyle" @click="copyDebug">复制</button>
-      </div>
-      <pre
-        :style="{
-          margin: 0,
-          padding: '10px 12px',
-          maxHeight: '320px',
-          overflow: 'auto',
-          border: '1px solid var(--border)',
-          borderRadius: '8px',
-          background: 'var(--surface)',
-          color: 'var(--text)',
-          fontSize: '12px',
-          lineHeight: 1.5,
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-all',
-          userSelect: 'text',
-          WebkitUserSelect: 'text',
-        }"
-      >{{ debugText || "点「收集」把当前渲染与布局的事实摊开。" }}</pre>
-    </details>
   </section>
 </template>
 

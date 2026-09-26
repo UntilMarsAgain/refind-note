@@ -105,6 +105,7 @@
 | `special:settings` | 设置：外观、存储、命名空间 |
 | `special:trash` | 回收站 |
 | `special:gc` | 数据库回收：清理无人引用的内容块与过期草稿 |
+| `special:debug` | 诊断：仓库现状、当前页的解析与渲染、界面实测 |
 
 ## 模板块
 

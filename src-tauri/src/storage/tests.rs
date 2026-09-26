@@ -2208,3 +2208,56 @@ fn unchanged_draft_is_not_saved_again() {
     );
     assert_eq!(draft_event_count(&temp.vault, "草稿页"), 1, "自动保存不该再追加");
 }
+
+/// 诊断报告：分段齐全，且能说清每条模板块的走向
+#[test]
+fn debug_report_covers_the_basics() {
+    let temp = TempVault::new();
+    temp.vault.create("有模板的一页").unwrap();
+    temp.vault
+        .commit(
+            "有模板的一页",
+            "::quote\n  内容\n::没有这个\n  内容\n",
+            None,
+            0,
+        )
+        .unwrap();
+
+    let report = temp.vault.debug_report(Some("有模板的一页"));
+    let titles: Vec<&str> = report.sections.iter().map(|s| s.title.as_str()).collect();
+    for expected in ["版本与环境", "设置", "命名空间", "内容与体积", "当前页"] {
+        assert!(titles.contains(&expected), "缺少 {expected}：{titles:?}");
+    }
+
+    // 探针要说清每条模板块的走向：内建的、查不到的
+    let current = report
+        .sections
+        .iter()
+        .find(|section| section.title == "当前页")
+        .unwrap();
+    let routes: Vec<&str> = current
+        .entries
+        .iter()
+        .filter(|entry| entry.label.starts_with("::"))
+        .map(|entry| entry.value.as_str())
+        .collect();
+    assert!(routes.iter().any(|route| *route == "内建模板"), "{routes:?}");
+    assert!(
+        routes.iter().any(|route| route.contains("未知模板")),
+        "{routes:?}"
+    );
+
+    // 模板页清单也要出现
+    let storage = report
+        .sections
+        .iter()
+        .find(|section| section.title == "内容与体积")
+        .unwrap();
+    assert!(
+        storage
+            .entries
+            .iter()
+            .any(|entry| entry.label.contains("模板页")),
+        "应当列出模板页"
+    );
+}
