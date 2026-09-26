@@ -169,8 +169,10 @@ onBeforeUnmount(() => window.clearInterval(timer));
   color: var(--accent);
 }
 
+/* 失败也用主题色：这一条是"任务结果"，不是危险操作 ——
+   红色留给会改数据的按钮（删除 / 清空）与真正的错误提示 */
 .taskbar__mark--bad {
-  color: var(--link-missing);
+  color: var(--accent);
 }
 
 .taskbar__label {

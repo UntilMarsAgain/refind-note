@@ -9,6 +9,7 @@ import type { NoteSummary } from "../bindings";
 import { computed, onMounted, ref } from "vue";
 import { labelOf } from "../special";
 import { invoke } from "@tauri-apps/api/core";
+import ViaHint from "./ViaHint.vue";
 
 
 
@@ -34,6 +35,9 @@ const props = defineProps<{
    * 别的特殊页面（如设置页）把这个位置用作条目锚点，那是各自的约定。
    */
   pageSection?: string;
+
+  /** 跟重定向来到这一页时的来源提示（空串 = 直接打开） */
+  via?: string;
 }>();
 
 const notes = ref<NoteSummary[]>([]);
@@ -109,6 +113,7 @@ onMounted(async () => {
 <template>
   <section class="all">
     <h1 class="all__title">全部页面</h1>
+    <ViaHint :hint="via ?? ''" />
 
     <p v-if="error" class="all__error">{{ error }}</p>
     <p v-else-if="loading" class="all__hint">正在读取…</p>

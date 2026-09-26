@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { VaultSettings } from "../bindings";
+import ViaHint from "./ViaHint.vue";
 /**
  * 设置页（`special:settings`）。
  *
@@ -12,7 +13,12 @@ import NamespaceManager from "./NamespaceManager.vue";
 import { BASE_ZOOM } from "../settings";
 
 
-const props = defineProps<{ settings: VaultSettings; focus?: string }>();
+const props = defineProps<{
+  settings: VaultSettings;
+  focus?: string;
+  /** 跟重定向来到这一页时的来源提示（空串 = 直接打开） */
+  via?: string;
+}>();
 
 /* 每个设置项的 id 是**地址的一部分**（`special:settings#accent` 能直接跳过去），
    因此它们等于对外接口：改名要同步改 id 与文案。滚动不再依赖白名单，
@@ -111,6 +117,7 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
 <template>
   <section class="settings">
     <h1 class="settings__title">设置</h1>
+    <ViaHint :hint="via ?? ''" />
     <p class="settings__where">
       外观存在 <code>{{ settings.root }}</code> 下的 <code>preferences.json</code>，
       存储相关的存在同目录的 <code>vault.json</code>

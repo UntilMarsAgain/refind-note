@@ -7,6 +7,12 @@ import { ref } from "vue";
  * 现在这里是**进入仓库的唯一入口**：刻意不列全部文档（那件事暂时不做），只给一个输入框，
  * 按名字打开。以后要放最近打开、搜索之类的，都回到这一页上加。
  */
+import ViaHint from "./ViaHint.vue";
+const props = defineProps<{
+  /** 跟重定向来到这一页时的来源提示（空串 = 直接打开） */
+  via?: string;
+}>();
+
 const emit = defineEmits<{ (e: "open", value: string): void }>();
 
 const typed = ref("");
@@ -22,6 +28,7 @@ function submit() {
 <template>
   <section class="newtab">
     <h1 class="newtab__title">新标签页</h1>
+    <ViaHint :hint="via ?? ''" />
     <p class="newtab__hint">
       输入笔记名打开；名字不存在时进入创建流程。地址栏同样可用。
     </p>

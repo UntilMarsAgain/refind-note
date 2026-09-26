@@ -8,6 +8,11 @@
  */
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import ViaHint from "./ViaHint.vue";
+const props = defineProps<{
+  /** 跟重定向来到这一页时的来源提示（空串 = 直接打开） */
+  via?: string;
+}>();
 
 const orphanBlobs = ref(true);
 const supersededDrafts = ref(true);
@@ -39,6 +44,7 @@ async function run() {
 <template>
   <section class="gc">
     <h1 class="gc__title">数据库回收</h1>
+    <ViaHint :hint="via ?? ''" />
     <p class="gc__lead">
       回收两类不再被引用的数据。<strong>历史版本引用的内容不会被回收</strong>，
       包括已删除笔记（在 <code>trash/</code> 里）所引用的。

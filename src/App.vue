@@ -21,7 +21,6 @@ import AppMenu from "./components/AppMenu.vue";
 import GcPage from "./components/GcPage.vue";
 import TrashPage from "./components/TrashPage.vue";
 import TaskBar from "./components/TaskBar.vue";
-import ViaHint from "./components/ViaHint.vue";
 import { applyAppearance as applyAppearanceTo } from "./composables/useAppearance";
 import { useLinkMenu } from "./composables/useLinkMenu";
 import { useZoom } from "./composables/useZoom";
@@ -1304,18 +1303,17 @@ function onAction(name: string) {
         }"
         @scroll.passive="onScroll"
       >
-      <!-- 特殊命名空间下的页面也要标出来源：与笔记页共用 ViaHint，文案与样式只写一次 -->
-      <ViaHint v-if="mode === 'special'" :hint="viaHint" />
-
         <div class="app__column" :class="{ 'app__column--wide': !limitWidth }">
           <!-- 特殊页面：由前端渲染（后端只负责把地址解析成 Special） -->
           <NewTab
         v-if="mode === 'special' && specialPage === 'newtab'"
+        :via="viaHint"
         @open="onSubmit"
       />
       <AllPages
         v-else-if="mode === 'special' && specialPage === 'all'"
         :page-section="allPagesSection"
+        :via="viaHint"
         @open="openFromList"
         @open-new="openTabWith"
         @page="goToAllPage"
@@ -1324,13 +1322,18 @@ function onAction(name: string) {
         v-else-if="mode === 'special' && specialPage === 'settings' && vaultSettings"
         :settings="vaultSettings"
         :focus="settingsFocus"
+        :via="viaHint"
         @update="updateSettings"
       />
-      <GcPage v-else-if="mode === 'special' && specialPage === 'gc'" />
+      <GcPage
+        v-else-if="mode === 'special' && specialPage === 'gc'"
+        :via="viaHint"
+      />
       <TrashPage
         v-else-if="mode === 'special' && specialPage === 'trash'"
         :keep-days="vaultSettings?.trash_keep_days ?? 30"
         :last-purge="vaultSettings?.last_trash_purge ?? ''"
+        :via="viaHint"
         @open="openFromList"
       />
 
