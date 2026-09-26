@@ -184,18 +184,86 @@ impl Vault {
         self.root.join("trash")
     }
 
-    /// 笔记文件路径。`id` 是**转义后的标题**（见 `crate::title::encode_for_path`）。
-    fn log_path(&self, id: &str) -> PathBuf {
+    /// 名字表里存的是**完整显示标题**（`help:甲`），而 `ParsedTitle.title` 是命名空间内的
+    /// **裸标题**（`甲`）。两种表示混用会出大问题：`display()` 会再拼一次前缀，变成
+    /// `help:help:甲`，下一次解析就撞上"标题里有冒号"。这里统一剥掉前缀，只此一处。
+    fn bare_title(display: &str, table: &NamespaceTable, ns: &str) -> String {
+        let Some((prefix, rest)) = display.split_once(':') else {
+            return display.to_string();
+        };
+        match table.lookup(prefix) {
+            // 前缀确实指向这个命名空间（含别名、大小写）→ 剥掉它
+            Some(item) if item.id == ns => rest.to_string(),
+            _ => display.to_string(),
+        }
+    }
+
+    /// 一篇笔记**将要**落在哪：新建时用（文件还不存在，只能按命名空间拼）。
+    ///
+    /// 命名空间在这里真正进入路径。以前 `log_path` 硬编码主命名空间，于是所有新笔记都落进
+    /// `notes/0/` —— 两跳寻址在"落到磁盘"这一跳就断了（`walk` 从目录名反推命名空间，
+    /// 看到的一律是 `0`，于是清空/删除命名空间永远找不到东西）。
+    fn note_path(&self, ns: &str, id: &str) -> PathBuf {
         self.notes_dir()
-            .join(MAIN_NAMESPACE_DIR)
+            .join(ns)
             .join(format!("{id}.{LOG_EXT}"))
+    }
+
+    /// 在某个目录下按 id 找现成的日志。
+    ///
+    /// 命名空间被删掉之后，标题前缀就解析不出标识了 —— 那时只有这个办法找得回它
+    /// （回收站里的记录还得能被清除，否则永久卡住）。
+    fn find_log(base: &Path, id: &str) -> Option<PathBuf> {
+        let file = format!("{id}.{LOG_EXT}");
+        for entry in fs::read_dir(base).ok()?.flatten() {
+            let candidate = entry.path().join(&file);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+        None
+    }
+
+    /// 某个 id 属于哪个命名空间：走**名字表**（id → 显示标题 → 前缀 → 表里的标识）。
+    ///
+    /// 新建的笔记在落盘前就登记了名字，所以这条路对 `append` / `read_events` 那些
+    /// 只拿得到 id 的地方都成立，不必给它们改签名。
+    fn ns_of_id(&self, id: &str) -> String {
+        let Ok(titles) = self.titles() else {
+            return MAIN_NAMESPACE_DIR.to_string();
+        };
+        let Some(display) = titles.notes.get(id).or_else(|| titles.trashed.get(id)) else {
+            return MAIN_NAMESPACE_DIR.to_string();
+        };
+        match display.split_once(':') {
+            Some((prefix, _)) => self
+                .table
+                .lookup(prefix)
+                .map(|item| item.id.clone())
+                .unwrap_or_else(|| MAIN_NAMESPACE_DIR.to_string()),
+            None => MAIN_NAMESPACE_DIR.to_string(),
+        }
+    }
+
+    /// 笔记文件路径。`id` 是生成出来的十六进制串，**推不出命名空间**，所以由名字表给。
+    fn log_path(&self, id: &str) -> PathBuf {
+        let path = self.note_path(&self.ns_of_id(id), id);
+        if path.is_file() {
+            return path;
+        }
+        Self::find_log(&self.notes_dir(), id).unwrap_or(path)
     }
 
     /// 已删除的笔记挪到这里：历史保留，将来可以接恢复
     fn trashed_path(&self, id: &str) -> PathBuf {
-        self.trash_dir()
-            .join(MAIN_NAMESPACE_DIR)
-            .join(format!("{id}.{LOG_EXT}"))
+        let path = self
+            .trash_dir()
+            .join(self.ns_of_id(id))
+            .join(format!("{id}.{LOG_EXT}"));
+        if path.is_file() {
+            return path;
+        }
+        Self::find_log(&self.trash_dir(), id).unwrap_or(path)
     }
 
     fn titles_path(&self) -> PathBuf {
@@ -231,9 +299,11 @@ impl Vault {
         loop {
             let seed = format!("{}:{}", now_iso(), salt);
             let id: String = hash_bytes(seed.as_bytes()).chars().take(16).collect();
+            // 名字表里没有、两个目录里也翻不到，才算没人用过这个 id
             if !titles.notes.contains_key(&id)
                 && !titles.trashed.contains_key(&id)
-                && !self.log_path(&id).exists()
+                && Self::find_log(&self.notes_dir(), &id).is_none()
+                && Self::find_log(&self.trash_dir(), &id).is_none()
             {
                 return id;
             }
@@ -258,7 +328,11 @@ impl Vault {
             .find(|(_, title)| *title == &display)
             .map(|(id, _)| id.clone())
             .unwrap_or_else(|| self.new_id(&titles));
-        Ok((parsed, self.log_path(&id)))
+        // 新建的笔记还没落盘，路径只能按解析出的命名空间拼
+        Ok((
+            parsed.clone(),
+            self.note_path(&parsed.ns, &id),
+        ))
     }
 
     /// 目录里现有的 id（文件名的真相；GC 与 prune 用）
@@ -409,7 +483,7 @@ impl Vault {
                     .unwrap_or_else(|| stem.to_string());
                 out.push(ParsedTitle {
                     ns: ns.clone(),
-                    title,
+                    title: Self::bare_title(&title, &self.table, &ns),
                 });
             }
         }
@@ -3822,6 +3896,57 @@ mod tests {
             Address::Note { title, .. } => assert_eq!(title, "help:入门"),
             other => panic!("{other:?}"),
         }
+    }
+
+    /// 两跳寻址：目录用**标识**，名字只用于显示与匹配
+    #[test]
+    fn namespaces_use_a_stable_id() {
+        let mut temp = TempVault::new();
+        temp.vault
+            .add_namespace("help", vec!["帮助".to_string()], None)
+            .unwrap();
+
+        let id = temp
+            .vault
+            .namespaces()
+            .into_iter()
+            .find(|item| item.name == "help")
+            .expect("新命名空间应当在表里")
+            .id;
+        assert_ne!(id, "help", "标识是生成的，不该等于名字");
+
+        for title in ["help:甲", "help:乙"] {
+            temp.vault.create(title).unwrap();
+            temp.vault.commit(title, "正文", None, 0).unwrap();
+        }
+        assert!(
+            temp.root.join("notes").join(&id).is_dir(),
+            "笔记应当落在以**标识**命名的目录里"
+        );
+        assert_eq!(temp.vault.load("help:甲").unwrap().title, "help:甲");
+
+        // 别名认得出同一页
+        match temp.vault.parse_address("帮助:甲").unwrap() {
+            Address::Note { title, .. } => assert_eq!(title, "help:甲"),
+            other => panic!("{other:?}"),
+        }
+
+        // 清空：按**名字**调用，内部换成标识；页面进回收站，命名空间还在
+        assert_eq!(temp.vault.empty_namespace("help").unwrap(), 2);
+        assert_eq!(temp.vault.list_trash().unwrap().len(), 2);
+
+        // 删除（已清空）：条目消失；还原明确报"命名空间不存在"
+        assert_eq!(temp.vault.delete_namespace("help").unwrap(), 0);
+        let error = temp.vault.restore_note("help:甲").unwrap_err();
+        assert!(error.to_string().contains("命名空间"), "{error}");
+
+        // 但那条记录必须还能被清掉（命名空间没了，只能按 id 找），否则永久卡在回收站里
+        temp.vault.purge_trash_entry("help:甲").unwrap();
+        assert_eq!(temp.vault.list_trash().unwrap().len(), 1);
+
+        // 保留名不可删
+        assert!(temp.vault.delete_namespace("special").is_err());
+        assert!(temp.vault.delete_namespace("0").is_err());
     }
 
     #[test]
