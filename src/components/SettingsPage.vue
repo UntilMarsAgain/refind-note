@@ -523,4 +523,60 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
   font-size: 12px;
   line-height: 1.6;
 }
+
+/* ---------- 设置页的外观 ----------
+ *
+ * 这一节**全是覆盖**，不动上面的结构与语义：只调整"看起来"的部分，
+ * 改坏了也不会影响设置项本身怎么工作。
+ */
+
+/* 收窄到一栏好读的宽度：设置项排到 1200px 宽只会显得空，控件离标签还特别远 */
+.settings {
+  max-width: 880px;
+}
+
+/* 标签固定宽度 —— 每一行的控件因此都从同一条竖线开始。
+   "看着乱"多半来自控件起点忽左忽右，而不是颜色和圆角。 */
+.row__label {
+  flex: 0 0 11em;
+}
+
+.row {
+  padding: 8px 10px;
+  margin: 1px 0;
+  border-radius: 8px;
+}
+
+/* 整行悬停时给一点底色：鼠标在长长一列里不容易跟丢自己在哪一行 */
+.row:hover {
+  background: var(--surface);
+}
+
+/* `#id` 是给 `special:settings#accent` 这类地址用的**锚点说明**，不是给人看的。
+   藏起来，`id` 仍挂在行上、跳转照旧（用法见示例笔记的「特殊页面」一节）。 */
+.row__id {
+  display: none;
+}
+
+.settings__section {
+  margin: 30px 0 10px;
+  font-size: 15px;
+  letter-spacing: 0.02em;
+}
+
+/* 说明文字缩进一点，跟它所解释的那一行对齐 */
+.settings__hint {
+  margin: 0 0 16px 10px;
+  max-width: 64em;
+}
+
+/* 数字输入不必太长，但别贴到边上 */
+.row input[type="number"] {
+  padding: 5px 8px;
+}
+
+/* 复选框那一行：勾选框与文字之间别挤在一起 */
+.row__check {
+  gap: 8px;
+}
 </style>

@@ -114,7 +114,7 @@
 | `special:all` | 全部页面，按前缀分组 |
 | `special:random` | 随机跳到一篇 |
 | `special:newtab` | 新标签页 |
-| `special:settings` | 设置：外观、存储、命名空间 |
+| `special:settings` | 设置：外观、存储、命名空间（每一项都有锚点，如 `special:settings#accent` 能直接跳到主题色） |
 | `special:trash` | 回收站 |
 | `special:gc` | 数据库回收：清理无人引用的内容块与过期草稿 |
 | `special:changes` | 最近更改：全仓库的提交，按时间倒序；勾选后可连**草稿**一起看 |
