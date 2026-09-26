@@ -46,14 +46,16 @@ const aliasInput = ref("");
 
 const newName = ref("");
 const newSite = ref("");
+/** 内部（内容命名空间）还是外部（跨站）：用选择框明确下来，而不是让用户猜那个地址栏要不要填 */
+const newKind = ref<"internal" | "external">("internal");
 
-/**
- * 即时例子：光说"命名空间名称"不好理解，看到"建好就能写 `help:入门`"就懂了。
- */
-const exampleAddress = computed(() => {
-  const name = newName.value.trim();
-  return name ? name + ":入门" : "help:入门";
-});
+/** 名称必填；选跨站时还要填站点地址模板 */
+const canCreate = computed(
+  () =>
+    busy.value !== "add" &&
+    newName.value.trim().length > 0 &&
+    (newKind.value === "internal" || newSite.value.trim().length > 0),
+);
 
 function labelOf(item: Namespace): string {
   return item.name || "（主）";
@@ -127,10 +129,11 @@ async function add() {
     const next = await invoke<Namespace[]>("add_namespace", {
       name: newName.value,
       aliases: [],
-      site: newSite.value.trim() || null,
+      site: newKind.value === "external" ? newSite.value.trim() || null : null,
     });
     newName.value = "";
     newSite.value = "";
+    newKind.value = "internal";
     return next;
   });
 }
@@ -215,15 +218,20 @@ function remove(item: Namespace) {
 <template>
   <div class="ns">
     <p class="ns__lead">
-      命名空间就是名称前缀（<code>帮助:入门</code>）。<strong>标识与名称分开</strong>，
-      所以改名不会移动任何文件。配了站点地址的是跨站命名空间，
-      <code>[[zhwiki:NASA]]</code> 会渲染成绿链。
+      命名空间是标题的前缀。<strong>标识与名称分开存放</strong>，因此改名不会移动任何文件。
+      配置了站点地址的命名空间用于跨站链接，其类型为外部。
     </p>
 
-    <p v-if="error" class="ns__error">{{ error }}</p>
-    <p v-else-if="loading" class="ns__hint">正在读取…</p>
+    <p v-if="loading" class="ns__hint">正在读取…</p>
 
     <template v-else>
+      <!-- 出错只报错，**不顶掉下面的列表与创建区** —— 以前它挤在 v-else 的位置上，
+           一旦创建失败，整个内容跟着消失，用户连改哪儿都看不到。 -->
+      <p v-if="error" class="ns__notice">
+        <strong>操作未完成</strong>
+        <span>{{ error }}</span>
+      </p>
+
       <div class="ns__table">
         <div class="ns__head-row" aria-hidden="true">
           <span>名称</span>
@@ -315,9 +323,11 @@ function remove(item: Namespace) {
               >
                 改名
               </button>
+              <!-- 清空与删除都会改数据：清空把页面移入回收站（可还原），
+                   删除连命名空间本身也不再保留。两者都用危险色标出来。 -->
               <button
                 v-if="canEmpty(item)"
-                class="ns__btn"
+                class="ns__btn ns__btn--danger"
                 type="button"
                 :disabled="busy === item.id"
                 @click="empty(item)"
@@ -341,46 +351,52 @@ function remove(item: Namespace) {
       <section class="ns__create">
         <h3 class="ns__create-title">新建命名空间</h3>
         <p class="ns__create-lead">
-          只需一个名称；建好之后就能写 <code>{{ exampleAddress }}</code>。
-          <strong>别名是另一回事</strong>：建好之后在上面的列表里点「别名」再加，可以加多个。
+          创建内容命名空间，或指向其它站点的跨站命名空间。别名在创建之后于列表中编辑。
         </p>
 
         <div class="ns__create-fields">
           <label class="ns__field">
-            <span>名称（必填）</span>
+            <span>名称</span>
             <input
               v-model="newName"
               class="ns__input"
               type="text"
-              placeholder="如 help"
               @keydown.enter.prevent="add"
             />
           </label>
 
-          <label class="ns__field ns__field--wide">
-            <span>跨站地址模板（可选；填了表示页面在别的站上）</span>
+          <label class="ns__field">
+            <span>类型</span>
+            <select v-model="newKind" class="ns__input">
+              <option value="internal">内容命名空间</option>
+              <option value="external">跨站命名空间</option>
+            </select>
+          </label>
+
+          <label v-if="newKind === 'external'" class="ns__field ns__field--wide">
+            <span>站点地址模板（页面名以 $1 占位）</span>
             <input
               v-model="newSite"
               class="ns__input"
               type="text"
-              placeholder="https://zh.wikipedia.org/wiki/$1"
+              @keydown.enter.prevent="add"
             />
           </label>
 
           <button
             class="ns__btn ns__btn--primary ns__btn--big"
             type="button"
-            :disabled="busy === 'add' || !newName.trim()"
+            :disabled="!canCreate"
             @click="add"
           >
-            创建命名空间
+            创建
           </button>
         </div>
 
         <p class="ns__hint">
-          名称不许重复（大小写与空白不影响判重），也不许含
-          <code>/</code> <code>:</code> <code>@</code> <code>#</code> 等符号。
-          清空与删除都会把里面的页面送进回收站。
+          名称与别名不得重复（忽略大小写与空白），且不得包含
+          <code>/</code> <code>:</code> <code>@</code> <code>#</code> 等字符。
+          清空与删除都会把页面移入回收站。
         </p>
       </section>
     </template>
@@ -489,7 +505,8 @@ function remove(item: Namespace) {
   padding: 0;
   border: 0;
   background-color: transparent;
-  color: var(--link-missing);
+  /* 去掉一个别名不是危险操作，不必用红 */
+  color: var(--text-dim);
   font-size: 12px;
   line-height: 1;
   cursor: pointer;
@@ -579,6 +596,13 @@ function remove(item: Namespace) {
   outline: 1px solid var(--accent);
 }
 
+select.ns__input {
+  /* 原生下拉在深色主题下会白底：显式给底色与文字色 */
+  background-color: var(--field-bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
 /* ---------- 按钮 ---------- */
 
 .ns__btn {
@@ -613,9 +637,24 @@ function remove(item: Namespace) {
   font-size: 13px;
 }
 
-.ns__error {
-  color: var(--link-missing);
-  font-size: 13px;
+.ns__notice {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-dim);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.ns__notice strong {
+  flex-shrink: 0;
+  font-weight: 500;
 }
 
 /* 窄窗口改成一列，别把表格挤成碎片 */
