@@ -7,7 +7,7 @@
  * 这里就有哪些；显示名与图标从 `special.ts` 取，没登记的会以 `special:<名字>`
  * 出现在「其它」里，不会因为忘了登记而消失。
  */
-import { computed, onBeforeUnmount, onMounted } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { FALLBACK_GROUP, metaOf, SPECIAL_GROUPS } from "../special";
 import { logoSrc } from "../theme";
 
@@ -16,6 +16,13 @@ const props = defineProps<{
   pages: string[];
   /** 站点名（顶栏那一行） */
   title: string;
+  /**
+   * 是否展开。
+   *
+   * 由父组件持有、这里只负责显示：组件**始终挂载**，出现与收起才能各自播完动画
+   * （父组件用 `v-if` 的话，卸载是立刻的，收起动画根本来不及播）。
+   */
+  open: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -25,10 +32,39 @@ const emit = defineEmits<{
 
 // Esc 关闭：这一版菜单不压暗页面，键盘出口要留一个
 function onKeydown(event: KeyboardEvent) {
-  if (event.key === "Escape") {
+  if (props.open && event.key === "Escape") {
     emit("close");
   }
 }
+
+/**
+ * 面板左侧留出标签栏：菜单不该盖住标签页。
+ *
+ * 宽度**当场量**而不是写死一个数 —— 标签栏会展开/收起（168px / 46px），
+ * 写死就会在其中一种状态下盖住它、或离得老远。
+ */
+const panelLeft = ref(8);
+
+function measureLeft() {
+  const rail = document.querySelector(".rail");
+  const right = rail?.getBoundingClientRect().right ?? 0;
+  panelLeft.value = Math.round(right) + 8;
+}
+
+/** 位置与宽度都跟着左边距走，窄窗口下也不会顶出屏幕 */
+const panelStyle = computed(() => ({
+  left: `${panelLeft.value}px`,
+  width: `min(520px, calc(100vw - ${panelLeft.value + 16}px))`,
+}));
+
+watch(
+  () => props.open,
+  (open) => {
+    if (open) {
+      measureLeft();
+    }
+  },
+);
 
 onMounted(() => window.addEventListener("keydown", onKeydown));
 onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
@@ -46,37 +82,42 @@ const groups = computed(() =>
 </script>
 
 <template>
-  <!-- 点面板外面收起；面板贴在标题栏左下角，是**下拉菜单**而不是整幅铺开 -->
-  <div class="menu-backdrop" @click.self="emit('close')">
-    <section class="menu">
-      <header class="menu__head">
-        <img class="menu__logo" :src="logoSrc" alt="" />
-        <h1 class="menu__title">{{ title }}</h1>
-      </header>
+  <!--
+    点面板外面收起；面板贴在标题栏下方、**标签栏右侧**（不盖住标签页）。
+    出现与收起都有动画：整块淡入淡出，面板自上而下落一点。
+  -->
+  <Transition name="menu">
+    <div v-if="open" class="menu-backdrop" @click.self="emit('close')">
+      <section class="menu" :style="panelStyle">
+        <header class="menu__head">
+          <img class="menu__logo" :src="logoSrc" alt="" />
+          <h1 class="menu__title">{{ title }}</h1>
+        </header>
 
-      <div class="menu__columns">
-        <nav v-for="group in groups" :key="group.title" class="menu__group">
-          <h2 class="menu__group-title">{{ group.title }}</h2>
-          <button
-            v-for="page in group.items"
-            :key="page"
-            class="menu__item"
-            type="button"
-            :title="metaOf(page).tip"
-            @click="emit('open', `special:${page}`)"
-          >
-            <component
-              :is="metaOf(page).icon"
-              v-if="metaOf(page).icon"
-              :size="16"
-              :stroke-width="1.75"
-            />
-            <span>{{ metaOf(page).label }}</span>
-          </button>
-        </nav>
-      </div>
-    </section>
-  </div>
+        <div class="menu__columns">
+          <nav v-for="group in groups" :key="group.title" class="menu__group">
+            <h2 class="menu__group-title">{{ group.title }}</h2>
+            <button
+              v-for="page in group.items"
+              :key="page"
+              class="menu__item"
+              type="button"
+              :title="metaOf(page).tip"
+              @click="emit('open', `special:${page}`)"
+            >
+              <component
+                :is="metaOf(page).icon"
+                v-if="metaOf(page).icon"
+                :size="16"
+                :stroke-width="1.75"
+              />
+              <span>{{ metaOf(page).label }}</span>
+            </button>
+            </nav>
+          </div>
+      </section>
+    </div>
+  </Transition>
 </template>
 
 <style scoped>
@@ -95,11 +136,45 @@ const groups = computed(() =>
   background: transparent;
 }
 
+/* 出现 / 收起：140ms，菜单不该让人等 */
+.menu-enter-active,
+.menu-leave-active {
+  transition: opacity 140ms ease;
+}
+
+.menu-enter-active .menu,
+.menu-leave-active .menu {
+  transition: transform 140ms ease;
+}
+
+.menu-enter-from,
+.menu-leave-to {
+  opacity: 0;
+}
+
+.menu-enter-from .menu,
+.menu-leave-to .menu {
+  transform: translateY(-8px);
+}
+
+/* 关掉动效的用户：直接出现/消失，不做位移与淡出 */
+@media (prefers-reduced-motion: reduce) {
+  .menu-enter-active,
+  .menu-leave-active,
+  .menu-enter-active .menu,
+  .menu-leave-active .menu {
+    transition: none;
+  }
+
+  .menu-enter-from .menu,
+  .menu-leave-to .menu {
+    transform: none;
+  }
+}
+
 .menu {
   position: absolute;
   top: var(--titlebar-height);
-  left: 0;
-  width: min(520px, calc(100vw - 16px));
   max-height: calc(100vh - var(--titlebar-height) - 12px);
   overflow-y: auto;
   padding: 14px 20px 20px;

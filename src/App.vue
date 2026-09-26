@@ -1655,7 +1655,7 @@ function onAction(name: string) {
   </div>
 
   <AppMenu
-    v-if="menuOpen"
+    :open="menuOpen"
     :pages="specialPages"
     :title="APP_NAME"
     @open="openFromMenu"
