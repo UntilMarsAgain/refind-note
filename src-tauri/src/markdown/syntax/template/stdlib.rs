@@ -9,6 +9,12 @@ use markdown_it::{Node, Renderer};
 /// 全部标准模板。
 pub static TEMPLATES: &[(&str, TemplateRenderer)] = &[("quote", render_quote)];
 
+/// 署名前面那条横线。
+///
+/// 单独拎出来是因为它只该出现在一个地方：想换成两个破折号、或者换成普通连字符，
+/// 改这里一处即可。
+const ORIGIN_DASH: &str = "—";
+
 /// `::quote origin="署名"` —— 效果等同 markdown 的 `>`，但可以在参数里给一个署名，
 /// 渲染到右下角。
 ///
@@ -22,6 +28,8 @@ fn render_quote(template: &Template, node: &Node, fmt: &mut dyn Renderer) {
     if let Some(origin) = template.param("origin") {
         fmt.cr();
         fmt.open("p", &[("class", "quote__origin".to_string())]);
+        fmt.text(ORIGIN_DASH);
+        fmt.text(" ");
         fmt.text(origin);
         fmt.close("p");
     }

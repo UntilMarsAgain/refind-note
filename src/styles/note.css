@@ -472,6 +472,17 @@
  * `::quote` 模板：等同引用块，署名单独一行靠右下角。
  * 左侧那条竖线与缩进由正文既有的 blockquote 样式负责，这里只补署名。
  */
+/*
+ * 署名靠右下角。
+ *
+ * 右边留出内边距，是为了让**嵌套的引用一层比一层靠内**：每一层 blockquote 都有自己的
+ * 右内边距，于是内层的右下角自然比外层更靠里。只靠 `text-align: right` 做不到这件事 ——
+ * 那样两层署名会落在同一条竖线上（看起来像并排，分不出谁是谁的）。
+ */
+.note-body blockquote.quote {
+  padding-right: 16px;
+}
+
 .note-body .quote__origin {
   margin: 8px 0 0;
   text-align: right;

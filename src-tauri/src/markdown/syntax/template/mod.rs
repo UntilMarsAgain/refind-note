@@ -170,8 +170,8 @@ mod tests {
         assert!(html.contains(r#"<blockquote class="quote">"#), "{html}");
         assert!(html.contains("引用内容"), "{html}");
         assert!(html.contains("quote__origin"), "{html}");
-        // 引号保护的空格原样保留
-        assert!(html.contains("某 人"), "{html}");
+        // 署名带一条横线，且引号保护的空格原样保留
+        assert!(html.contains("— 某 人"), "{html}");
     }
 
     #[test]
