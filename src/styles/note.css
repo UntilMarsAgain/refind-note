@@ -386,3 +386,52 @@
   background: var(--accent);
   color: #fff;
 }
+
+/*
+ * 未知模板：**给作者看的提示框**，不是"不认识就静静丢掉"。
+ *
+ * 名字与参数按解析结果列出 —— 一眼能看出引号去了哪儿、空格有没有保住；
+ * 内容仍用代码块裹住，所以写错了也看得见自己写了什么。
+ * 左侧那条灰边与"未知模板"标：这不是危险操作，不该用红色。
+ */
+.note-body .template {
+  margin: 1em 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-dim);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.note-body .template__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.note-body .template__badge {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--code-bg);
+  color: var(--text-dim);
+  font-size: 12.5px;
+}
+
+.note-body .template__name {
+  background: none;
+  color: var(--link-blue);
+  font-weight: 600;
+}
+
+.note-body .template__param {
+  background: none;
+  color: var(--text-dim);
+  font-size: 0.9em;
+}
+
+/* 框里的代码块贴着框边，别再叠一层外边距 */
+.note-body .template pre {
+  margin: 0;
+}

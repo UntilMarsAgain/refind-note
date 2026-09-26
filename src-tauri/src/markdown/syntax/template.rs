@@ -5,14 +5,16 @@
 //!   content
 //! ```
 //!
-//! 分三层，本文件目前只管第一层：
+//! 分三步，都在这里：
 //!
-//! 1. **认出块并拆出头**（这里）：一行以 `::` 开头就是块的开头，随后取名字与若干
-//!    `key=value` 参数；接着**缩进比头更深**的行是块内容，遇到不更深的行就结束 ——
-//!    缩进就是块内与块外的唯一分界，不需要结束标记。
-//! 2. **按名字分发**：把块交给登记在册的渲染器。这块能力还没有，登记表是空的。
-//! 3. **兜底**：原样当代码块显示。这是**暂时**的行为 —— 先让第一层做对、看得见，
-//!    而不是一次写完半成品。
+//! 1. **认出块并拆出头**：一行以 `::` 开头就是块的开头，随后取名字与若干 `key=value`
+//!    参数；接着**缩进比头更深**的行是块内容，遇到不更深的行就结束 —— 缩进就是块内与
+//!    块外的唯一分界，不需要结束标记。
+//! 2. **按名字分发**：见 [`TEMPLATES`] 那张表。有什么模板只写在那一个地方。
+//! 3. **查不到就报错**：[`render_unknown`] 渲染一个框，把名字与参数原样列出，内容仍用
+//!    代码块裹住 —— 写得再错也不会让内容静静消失。
+//!
+//! 名字、key、value 都可以用引号保护其中的空格；引号里用反斜杠保护引号本身。
 use markdown_it::parser::block::{BlockRule, BlockState};
 use markdown_it::{MarkdownIt, Node, NodeValue, Renderer};
 
@@ -25,8 +27,6 @@ pub struct Template {
     pub params: Vec<(String, String)>,
     /// 块内容，已去掉公共缩进
     pub body: String,
-    /// 整块原文（含头），兜底渲染用
-    pub raw: String,
 }
 
 impl Template {
@@ -36,11 +36,12 @@ impl Template {
     /// 出现在名字里几乎一定是写错了。宁可退回普通段落，也不要认出一个坏块。
     pub fn parse_header(line: &str) -> Option<(String, Vec<(String, String)>)> {
         let rest = line.trim_start().strip_prefix("::")?;
-        let mut tokens = rest.split_whitespace();
-        let name = tokens.next()?.to_string();
-        if name.contains('=') || name.contains(':') {
+        let mut tokens = tokenize(rest)?.into_iter();
+        let name = tokens.next()?;
+        if name.is_empty() || name.contains('=') || name.contains(':') {
             return None;
         }
+        // `=` 按**第一个**切：`key="a=b"` 的值就是 `a=b`。
         let params = tokens
             .map(|token| match token.split_once('=') {
                 Some((key, value)) => (key.to_string(), value.to_string()),
@@ -60,17 +61,129 @@ impl Template {
     }
 }
 
+/// 把一行切成 token：空白分隔，但**引号里的空白不算分隔**。
+///
+/// 单引号与双引号都可以；引号内用反斜杠保护引号本身（`\"`）与反斜杠（`\\`），
+/// 引号外反斜杠没有特殊含义（路径里到处都是反斜杠，不该在这里被吃掉）。
+///
+/// 引号没有配对就整行走不通：返回 `None`，这一行退回普通段落 —— 宁可当普通文字，
+/// 也不要猜作者想要什么。
+fn tokenize(line: &str) -> Option<Vec<String>> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut started = false;
+    let mut quote: Option<char> = None;
+    let mut chars = line.chars();
+
+    while let Some(ch) = chars.next() {
+        match quote {
+            Some(closing) => {
+                if ch == '\\' {
+                    // 只认这两个转义：引号与反斜杠本身
+                    match chars.next() {
+                        Some('\\') => current.push('\\'),
+                        Some(next) if next == closing => current.push(closing),
+                        Some(next) => {
+                            current.push('\\');
+                            current.push(next);
+                        }
+                        None => return None,
+                    }
+                } else if ch == closing {
+                    quote = None;
+                } else {
+                    current.push(ch);
+                }
+            }
+            None => match ch {
+                '\'' | '"' => {
+                    quote = Some(ch);
+                    // `""` 是一个空值的 token，不是没有 token
+                    started = true;
+                }
+                ch if ch.is_whitespace() => {
+                    if started {
+                        tokens.push(std::mem::take(&mut current));
+                        started = false;
+                    }
+                }
+                ch => {
+                    current.push(ch);
+                    started = true;
+                }
+            },
+        }
+    }
+
+    if quote.is_some() {
+        return None;
+    }
+    if started {
+        tokens.push(current);
+    }
+    Some(tokens)
+}
+
+/// 一个模板渲染器：拿到解析好的块，往 `fmt` 里写 HTML。
+pub type TemplateRenderer = fn(&Template, &mut dyn Renderer);
+
+/// 模板分发表：名字 → 渲染器。
+///
+/// 与指令表同样的规矩：**有什么模板只写在这一个地方**，别处不再各自认一遍名字。
+/// 表还是空的（一个真正的模板都还没有），所以现在每块都会走 [`render_unknown`]。
+pub static TEMPLATES: &[(&str, TemplateRenderer)] = &[];
+
+/// 按名字分发；查不到就交给"未知模板"。
+pub fn render_template(template: &Template, fmt: &mut dyn Renderer) {
+    match TEMPLATES.iter().find(|(name, _)| *name == template.name) {
+        Some((_, render)) => render(template, fmt),
+        None => render_unknown(template, fmt),
+    }
+}
+
+/// 名字查不到时的兜底：渲染一个框，把名字与参数原样列出，内容仍用代码块裹住。
+///
+/// 这是**给作者看的错误提示**，不是"不认识就静静丢掉"。参数用等号写法回显，
+/// 所以从输出上能一眼看出解析成了什么 —— 引号去了哪儿、空格是否保住。
+fn render_unknown(template: &Template, fmt: &mut dyn Renderer) {
+    fmt.cr();
+    fmt.open(
+        "div",
+        &[("class", "template template--unknown".to_string())],
+    );
+    fmt.cr();
+    fmt.open("p", &[("class", "template__head".to_string())]);
+    fmt.open("span", &[("class", "template__badge".to_string())]);
+    fmt.text("未知模板");
+    fmt.close("span");
+    fmt.open("code", &[("class", "template__name".to_string())]);
+    fmt.text(&template.name);
+    fmt.close("code");
+    for (key, value) in &template.params {
+        fmt.open("code", &[("class", "template__param".to_string())]);
+        let shown = if value.is_empty() {
+            key.clone()
+        } else {
+            format!("{key}={value}")
+        };
+        fmt.text(&shown);
+        fmt.close("code");
+    }
+    fmt.close("p");
+    fmt.cr();
+    fmt.open("pre", &[]);
+    fmt.open("code", &[]);
+    fmt.text(&template.body);
+    fmt.close("code");
+    fmt.close("pre");
+    fmt.cr();
+    fmt.close("div");
+    fmt.cr();
+}
+
 impl NodeValue for Template {
     fn render(&self, _node: &Node, fmt: &mut dyn Renderer) {
-        // 还没有登记任何渲染器：原样当代码块显示。
-        // `fmt.text` 会做 HTML 转义，所以笔记里的尖括号不会漏进页面。
-        fmt.cr();
-        fmt.open("pre", &[]);
-        fmt.open("code", &[("class", "language-template".to_string())]);
-        fmt.text(&self.raw);
-        fmt.close("code");
-        fmt.close("pre");
-        fmt.cr();
+        render_template(self, fmt);
     }
 }
 
@@ -142,16 +255,10 @@ impl BlockRule for TemplateScanner {
             line += 1;
         }
 
-        // 原文照收：兜底渲染要能一字不差地看到作者写了什么
-        let raw = (start..line)
-            .map(|index| state.get_line(index))
-            .collect::<Vec<_>>()
-            .join("\n");
         let node = Node::new(Template {
             name,
             params,
             body: dedent(&body_lines),
-            raw,
         });
         Some((node, line - start))
     }
@@ -190,11 +297,59 @@ mod tests {
     }
 
     #[test]
-    fn block_content_is_marked_as_code_for_now() {
-        let html = render("::note key=value\n  正文一行\n");
-        assert!(html.contains("language-template"), "{html}");
-        assert!(html.contains("::note key=value"), "{html}");
-        assert!(html.contains("正文一行"), "{html}");
+    fn quotes_protect_spaces_and_escapes() {
+        let (name, params) =
+            Template::parse_header(r#"::"两 个词" 标题="含 空格" 引号="他说\"好\"" flag"#).unwrap();
+        assert_eq!(name, "两 个词");
+        assert_eq!(
+            params,
+            vec![
+                ("标题".to_string(), "含 空格".to_string()),
+                ("引号".to_string(), "他说\"好\"".to_string()),
+                // 引号不改变参数的性质：仍然可以只写 key
+                ("flag".to_string(), String::new()),
+            ]
+        );
+    }
+
+    #[test]
+    fn unterminated_quote_is_not_a_header() {
+        assert!(Template::parse_header("::note key=\"没关上").is_none());
+    }
+
+    #[test]
+    fn backslash_outside_quotes_is_literal() {
+        // 引号外反斜杠没有特殊含义：路径不该在这里被吃掉
+        let (_, params) = Template::parse_header(r"::note path=C:\笔记").unwrap();
+        assert_eq!(params, vec![("path".to_string(), r"C:\笔记".to_string())]);
+    }
+
+    #[test]
+    fn unknown_template_renders_a_box() {
+        let html = render("::还没有的模板 标题=\"含 空格\" flag\n  内容一行\n");
+        assert!(html.contains("template--unknown"), "{html}");
+        assert!(html.contains("未知模板"), "{html}");
+        // 名字与参数原样列出（参数回显成等号写法，一眼看出解析成了什么）
+        assert!(
+            html.contains(r#"<code class="template__name">还没有的模板</code>"#),
+            "{html}"
+        );
+        assert!(html.contains("标题=含 空格"), "{html}");
+        assert!(html.contains("flag"), "{html}");
+        // 内容仍用代码块裹住，不会静静消失
+        assert!(
+            html.contains("<pre><code>内容一行</code></pre>"),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn dispatch_table_has_unique_names() {
+        let mut names: Vec<&str> = TEMPLATES.iter().map(|(name, _)| *name).collect();
+        let total = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(total, names.len(), "模板表里有重名");
     }
 
     #[test]
