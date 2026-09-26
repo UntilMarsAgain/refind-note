@@ -51,7 +51,14 @@ const actions: {
 <template>
   <div class="page-header" :class="{ 'page-header--collapsed': collapsed }">
     <div class="page-heading">
-      <h1 class="page-title" :title="title">{{ title }}</h1>
+      <!--
+      大标题要能选中、复制。
+
+      body 上是 user-select: none（无边框窗口里整页都是"应用"，不是文档），
+      正文靠 .note-body 显式放开，标题在正文之外，所以自己挂 .selectable ——
+      这是既有的那一个类，不新造一套。
+    -->
+    <h1 class="page-title selectable" :title="title">{{ title }}</h1>
       <ViaHint :via="via" @open-via="emit('open-via', $event)" />
       <!-- 子页面（标题里有斜杠）给一个回上一级的出口 -->
       <button
