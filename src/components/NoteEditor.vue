@@ -5,6 +5,7 @@ import { Check, Pencil, Save, Trash2, X } from "@lucide/vue";
 import { checkTitle } from "../title";
 import { themeMode } from "../theme";
 import { applyLineNumbers } from "../code-blocks";
+import { headIndent, isTemplateHead, templateBlockEnd } from "../template-blocks";
 import StatePanel from "./StatePanel.vue";
 import { codeLineNumbers } from "../settings";
 // `codemirror` 是元包（提供 basicSetup 等），EditorState 由 @codemirror/state 提供 ——
@@ -170,92 +171,6 @@ const wikilinkMatcher = new MatchDecorator({
   decoration: Decoration.mark({ class: "cm-wikilink" }),
 });
 
-/**
- * 模板块的高亮。
- *
- * CM6 的 markdown 语法不认识 `::名字`（那是本项目的扩展语法），所以在**视图层**加装饰：
- * 头行连同属于这个块的行一起标出来。只加样式、不改文档 —— 保存下来的仍是原文，
- * 渲染依旧由后端负责。
- *
- * **边界规则与后端逐条一致**（`storage` 里的模板块扫描器）：
- *
- * 1. 头行之后，缩进更深（非空）的行属于块内；
- * 2. 遇到缩进不更深的行，块到此为止；
- * 3. 空行**不直接结束块** —— 要往后看一行：后面还有更深的内容，这个空行就算块内，
- *    否则它属于块外。
- *
- * 第 3 条不能省：渲染那边就是这么算的，这里若按"空行即结束"，高亮就会比渲染**早收**，
- * 于是编辑器与渲染各说各话 —— 那正是这个面板和这套对齐规则要消灭的东西。
- */
-function headIndent(text: string): number {
-  return text.length - text.trimStart().length;
-}
-
-function isBlank(text: string): boolean {
-  return text.trim().length === 0;
-}
-
-/** 块的最后一行（含）；不含在块内的行不返回 */
-function templateBlockEnd(
-  doc: { lines: number; line: (number: number) => { text: string } },
-  start: number,
-  markerIndent: number,
-): number {
-  let last = start;
-  for (let number = start + 1; number <= doc.lines; number += 1) {
-    const text = doc.line(number).text;
-    if (isBlank(text)) {
-      // 往后找第一个非空行：它更深就把这个空行收进来，否则到此为止
-      let next = number + 1;
-      while (next <= doc.lines && isBlank(doc.line(next).text)) {
-        next += 1;
-      }
-      if (next > doc.lines || headIndent(doc.line(next).text) <= markerIndent) {
-        break;
-      }
-      last = number;
-      continue;
-    }
-    if (headIndent(text) <= markerIndent) {
-      break;
-    }
-    last = number;
-  }
-  return last;
-}
-
-function buildTemplateDecorations(view: EditorView): DecorationSet {
-  const doc = view.state.doc;
-  const ranges: { from: number; to: number; head: boolean }[] = [];
-
-  for (let number = 1; number <= doc.lines; number += 1) {
-    const line = doc.line(number);
-    // 头行：`::名字`。名字里不该有空白、`=` 或 `:`（与后端 parse_header 同一条规矩），
-    // 也允许用引号包住带空格的名字。
-    if (!/^::(?:"[^"]*"|'[^']*'|[^\s:=]+)/.test(line.text.trimStart())) {
-      continue;
-    }
-    ranges.push({ from: line.from, to: line.to, head: true });
-
-    const last = templateBlockEnd(doc, number, headIndent(line.text));
-    for (let inner = number + 1; inner <= last; inner += 1) {
-      const row = doc.line(inner);
-      ranges.push({ from: row.from, to: row.to, head: false });
-    }
-    number = last;
-  }
-
-  ranges.sort((a, b) => a.from - b.from);
-  return Decoration.set(
-    ranges.map((range) =>
-      Decoration.mark({
-        class: range.head ? "cm-template-head" : "cm-template-body",
-      }).range(range.from, range.to),
-    ),
-    true,
-  );
-}
-
 const templateHighlight = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet;
@@ -270,6 +185,49 @@ const templateHighlight = ViewPlugin.fromClass(
   },
   { decorations: (plugin) => plugin.decorations },
 );
+
+/**
+ * 模板块的高亮。
+ *
+ * CM6 的 markdown 语法不认识 `::名字`（本项目的扩展语法），所以在**视图层**加装饰：
+ * 头行连同属于这个块的行一起标出来。**规则本身在 `template-blocks.ts`**（纯函数，
+ * 与后端逐条一致，并有用例）；这里只负责把它套到 CM6 的文档与装饰上。
+ */
+function buildTemplateDecorations(view: EditorView): DecorationSet {
+  const doc = view.state.doc;
+  const lines = doc.toString().split("\n");
+  const ranges: { from: number; to: number; head: boolean }[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const text = lines[index] ?? "";
+    if (!isTemplateHead(text)) {
+      continue;
+    }
+    const line = doc.line(index + 1);
+    ranges.push({ from: line.from, to: line.to, head: true });
+
+    const last = templateBlockEnd(lines, index, headIndent(text));
+    for (let inner = index + 1; inner <= last; inner += 1) {
+      const row = doc.line(inner + 1);
+      // 空行没有可标记的字符 —— 零长度的 mark 装饰 CM6 会**直接抛异常**，
+      // 而这个函数跑在视图插件的构造函数里：一抛，插件被整个禁用，于是高亮全没。
+      if (row.from === row.to) {
+        continue;
+      }
+      ranges.push({ from: row.from, to: row.to, head: false });
+    }
+  }
+
+  ranges.sort((a, b) => a.from - b.from);
+  return Decoration.set(
+    ranges.map((range) =>
+      Decoration.mark({
+        class: range.head ? "cm-template-head" : "cm-template-body",
+      }).range(range.from, range.to),
+    ),
+    true,
+  );
+}
 
 const wikilinkHighlight = ViewPlugin.fromClass(
   class {
