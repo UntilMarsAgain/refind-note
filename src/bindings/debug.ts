@@ -18,3 +18,19 @@ export interface DebugSection {
 export interface DebugReport {
   sections: DebugSection[];
 }
+
+/** 编辑页「状态」面板要的编译报告：这次渲染到底发生了什么 */
+export interface RenderReport {
+  /** 送进渲染器的文本规模 */
+  markdown_bytes: number;
+  markdown_lines: number;
+  /** 渲染出的 HTML */
+  html: string;
+  html_bytes: number;
+  /** 渲染耗时（毫秒） */
+  millis: number;
+  /** 这一页按什么语言对待（`css` / `html` / markdown） */
+  language: string;
+  /** 正文里每条模板块会走哪条分发路径 */
+  blocks: DebugEntry[];
+}

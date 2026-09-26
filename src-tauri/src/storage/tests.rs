@@ -2261,3 +2261,37 @@ fn debug_report_covers_the_basics() {
         "应当列出模板页"
     );
 }
+
+/// 编译报告：规模、耗时、语言、模板块走向都在
+#[test]
+fn render_report_describes_one_render() {
+    let temp = TempVault::new();
+    temp.vault.create("template:样式.css").unwrap();
+    temp.vault
+        .commit("template:样式.css", "h1 { color: red }\n", None, 0)
+        .unwrap();
+
+    let report = temp
+        .vault
+        .render_report("::css src=样式.css\n\n# 标题\n", Some("某页"));
+    assert!(report.markdown_bytes > 0);
+    assert_eq!(report.markdown_lines, 3);
+    assert!(report.html_bytes > 0, "应当渲染出东西");
+    assert!(report.html.contains("<style>"), "{}", report.html);
+    assert!(report.html.contains("<h1"), "{}", report.html);
+    assert_eq!(report.language, "markdown", "普通页面按 markdown");
+
+    // 模板块的走向要说清：内建模板 + src 找得到
+    let routes: Vec<&str> = report.blocks.iter().map(|entry| entry.value.as_str()).collect();
+    assert!(routes.iter().any(|route| route.contains("内建模板")), "{routes:?}");
+    assert!(
+        routes.iter().any(|route| route.contains("src=样式.css → 找得到")),
+        "{routes:?}"
+    );
+
+    // 模板命名空间里的代码模板：语言判定要跟上
+    let code = temp
+        .vault
+        .render_report(".a { }\n", Some("template:样式.css"));
+    assert_eq!(code.language, "css");
+}

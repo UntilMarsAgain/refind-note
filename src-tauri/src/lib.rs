@@ -13,7 +13,7 @@ use std::sync::{Mutex, MutexGuard};
 use storage::{
     Address, CommandInfo, Namespace, DiffResult, Draft, GcReport, LoadOutcome, MaintenanceReport, Note, NoteSummary,
     PurgeReport, RevisionContent, RevisionSummary, TrashEntry, Vault, VaultSettings,
-    DebugReport,
+    DebugReport, RenderReport,
 };
 use tauri::Manager;
 
@@ -128,6 +128,15 @@ fn add_namespace(
         .add_namespace(&name, aliases, site)
         .map_err(|error| error.to_string())?;
     Ok(vault.namespaces())
+}
+
+/// 编辑页「状态」面板要的编译报告：对给定文本渲染一次，并报告这次渲染的来龙去脉。
+///
+/// 按需调用（面板上的「收集」）：预览本身走 `render_markdown`，这条命令不跟着每次输入跑。
+#[tauri::command]
+fn render_report(markdown: String, address: Option<String>) -> Result<RenderReport, String> {
+    let vault = open()?;
+    Ok(vault.render_report(&markdown, address.as_deref()))
 }
 
 /// 诊断报告（`special:debug`）：把仓库现在是什么样摊开成可读的分段。
@@ -524,6 +533,7 @@ pub fn run() {
             add_namespace,
             rename_namespace,
             debug_report,
+            render_report,
             update_namespace,
             empty_namespace,
             delete_namespace,

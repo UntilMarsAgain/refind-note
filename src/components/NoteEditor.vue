@@ -5,6 +5,7 @@ import { Check, Pencil, Save, Trash2, X } from "@lucide/vue";
 import { checkTitle } from "../title";
 import { themeMode } from "../theme";
 import { applyLineNumbers } from "../code-blocks";
+import StatePanel from "./StatePanel.vue";
 import { codeLineNumbers } from "../settings";
 // `codemirror` 是元包（提供 basicSetup 等），EditorState 由 @codemirror/state 提供 ——
 // 后者必须作为**直接依赖**安装：pnpm 的严格 node_modules 下，传递依赖不可直接导入。
@@ -40,6 +41,8 @@ const props = defineProps<{
   status: string;
   /** 后端给出的语言（`css` / `html`）；null = markdown。判定只在后端一处 */
   language: string | null;
+  /** 当前地址：「状态」面板把它交给后端，用于语言判定与渲染报告 */
+  address: string;
 }>();
 
 /**
@@ -610,6 +613,18 @@ function submit() {
         <span v-if="languageLabel" class="editor__language">{{ languageLabel }}</span>
       </span>
     </p>
+
+    <!--
+      状态面板：编辑页当前的事实（编辑状态 / 预览编译 / 布局实测）。
+      放在编辑器下方，因为它说的是**这一页这一次编辑**的状态。
+    -->
+    <StatePanel
+      :title="title"
+      :address="address"
+      :markdown="modelValue"
+      :language="language"
+      :status="status"
+    />
 
   </section>
 </template>

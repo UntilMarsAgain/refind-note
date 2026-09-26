@@ -1371,6 +1371,7 @@ function onAction(name: string) {
             v-model="draftText"
             :title="note.title"
             :language="note.language"
+            :address="addressText"
             :busy="busy"
             :status="editorStatus"
             @rename="renameCurrent"

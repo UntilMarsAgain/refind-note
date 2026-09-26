@@ -33,7 +33,7 @@ mod trash;
 pub use api::{
     Address, CommandInfo, DiffResult, Draft, GcReport, LoadOutcome, MaintenanceReport, Note,
     NoteSummary, PurgeReport, RevisionContent, RevisionSummary, TrashEntry, VaultSettings, Via,
-    DebugReport,
+    DebugReport, RenderReport,
 };
 pub use config::VaultConfig;
 pub use error::VaultError;

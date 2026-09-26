@@ -90,6 +90,25 @@ pub struct DebugSection {
     pub entries: Vec<DebugEntry>,
 }
 
+/// 编辑页「状态」面板要的编译报告：这次渲染到底发生了什么。
+///
+/// 与诊断页同一套事实来源（模板块探针、语言判定），只是输入换成编辑器里的**当前文本**。
+#[derive(Debug, Clone, Serialize)]
+pub struct RenderReport {
+    /// 送进渲染器的文本规模
+    pub markdown_bytes: usize,
+    pub markdown_lines: usize,
+    /// 渲染出的 HTML（面板里截断显示，复制时给全）
+    pub html: String,
+    pub html_bytes: usize,
+    /// 渲染耗时（毫秒）
+    pub millis: u64,
+    /// 这一页按什么语言对待（`css` / `html` / markdown）
+    pub language: String,
+    /// 正文里每条模板块会走哪条分发路径
+    pub blocks: Vec<DebugEntry>,
+}
+
 /// 诊断报告：仓库当前是什么样（`special:debug`）
 ///
 /// 分段给出，是为了让它**可读**：一屏能扫完，而不是一段糊在一起的日志。

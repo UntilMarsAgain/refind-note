@@ -5,7 +5,7 @@
 //! 路径、计数、表内容、解析结果；不放临时打印。
 //!
 //! 报告的每一段都对应界面上的一张小表；前端只负责显示与复制。
-use super::api::{DebugEntry, DebugReport, DebugSection};
+use super::api::{DebugEntry, DebugReport, DebugSection, RenderReport};
 use super::{now_iso, Event, Vault};
 use std::fs;
 
@@ -236,7 +236,33 @@ impl Vault {
     /// 这是**近似**：真正的块识别（缩进划界）在 markdown 解析器里，这里只看行首的 `::`。
     /// 目的不是复刻解析器，而是回答"我写的这个模板为什么没生效"：
     /// 名字对不对、内建表里有没有、模板命名空间里有没有、`src=` 指的页面在不在。
-    fn debug_template_probe(&self, markdown: &str) -> Vec<DebugEntry> {
+    /// 编辑器预览的编译报告：把"这次渲染发生了什么"摊开。
+    ///
+    /// 与诊断页共用探针与语言判定 —— 同一件事只有一处说法，两边的结论不会分家。
+    /// **按需调用**（面板上的「收集」），不跟着每次输入跑：预览本身走的是另一条命令。
+    pub fn render_report(&self, markdown: &str, address: Option<&str>) -> RenderReport {
+        let started = std::time::Instant::now();
+        let html = self.render(markdown);
+        let millis = started.elapsed().as_millis() as u64;
+
+        let language = address
+            .and_then(|address| self.table.parse(address, self.config.capital_links).ok())
+            .and_then(|parsed| crate::title::code_template_language(&parsed.ns, &parsed.title))
+            .unwrap_or("markdown")
+            .to_string();
+
+        RenderReport {
+            markdown_bytes: markdown.len(),
+            markdown_lines: markdown.lines().count(),
+            html_bytes: html.len(),
+            html,
+            millis,
+            language,
+            blocks: self.debug_template_probe(markdown),
+        }
+    }
+
+    pub(crate) fn debug_template_probe(&self, markdown: &str) -> Vec<DebugEntry> {
         let templates = self.template_names();
         let mut found: Vec<DebugEntry> = Vec::new();
 
