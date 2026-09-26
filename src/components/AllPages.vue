@@ -9,11 +9,20 @@ import { computed, onMounted, ref } from "vue";
 import { labelOf } from "../special";
 import { invoke } from "@tauri-apps/api/core";
 
+interface CommandInfo {
+  /** 短名：`redirect` / `random-redirect` / `unrecognized` */
+  kind: string;
+  /** 中文名，直接显示 */
+  label: string;
+  /** 一句说明（悬停提示用） */
+  detail: string;
+}
+
 interface NoteSummary {
   key: string;
   title: string;
-  /** 指令页面的短名；普通页面是 null */
-  command: string | null;
+  /** 指令信息；普通页面是 null。**全部来自后端那张指令表**，这里不再自己维护一份文案 */
+  command: CommandInfo | null;
 }
 
 /**
@@ -23,13 +32,6 @@ interface NoteSummary {
  * 页号是**地址的一部分**（`special:all#3`），因此刷新、前进后退、分享地址都能落到同一页。
  */
 const PAGE_SIZE = 50;
-
-/** 指令页面的标记文案；没登记的退回短名本身 */
-const COMMAND_LABELS: Record<string, string> = {
-  redirect: "重定向",
-  "random-redirect": "随机重定向",
-  unrecognized: "指令有问题",
-};
 
 const emit = defineEmits<{
   (e: "open", address: string): void;
@@ -59,6 +61,16 @@ function go(address: string, event: MouseEvent) {
     return;
   }
   emit("open", address);
+}
+
+/**
+ * 点笔记列表里的一项。
+ *
+ * 指令页面：应当**打开它本身**（`@no-command`），而不是被它的指令带走 ——
+ * 这个列表是来找页面、看内容的，不是执行指令的地方。
+ */
+function goNote(note: NoteSummary, event: MouseEvent) {
+  go(note.command ? `${note.title}@no-command` : note.title, event);
 }
 
 /** 当前页号：地址里没写、或写了不是正整数的东西，都当第 1 页 */
@@ -127,14 +139,15 @@ onMounted(async () => {
             class="all__link"
             type="button"
             :title="note.key"
-            @click="go(note.title, $event)"
+            @click="goNote(note, $event)"
           >
             <span class="all__name">{{ note.title }}</span>
             <span
               v-if="note.command"
               class="all__cmd"
-              :class="{ 'all__cmd--bad': note.command === 'unrecognized' }"
-            >{{ COMMAND_LABELS[note.command] ?? note.command }}</span>
+              :class="{ 'all__cmd--bad': note.command.kind === 'unrecognized' }"
+              :title="note.command.detail"
+            >{{ note.command.label }}</span>
           </button>
         </li>
       </ul>

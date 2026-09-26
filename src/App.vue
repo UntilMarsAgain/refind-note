@@ -112,6 +112,8 @@ type Address =
       address: string;
       /** 指令页面 + `@no-command`：正文按代码块显示（不执行指令） */
       code_block: boolean;
+      /** 是跟某条指令来到这一页的（直接打开时为 null） */
+      via: { from: string; random: boolean } | null;
     }
   | { kind: "edit"; title: string; address: string }
   | { kind: "history"; title: string; address: string }
@@ -410,6 +412,9 @@ async function loadNote(title: string, codeBlock = false) {
     missingTitle.value = "";
     loadError.value = "";
     scrolled.value = false;
+    // `@no-command` 打开的是指令页面本身：问一次后端"这是什么指令"，
+    // 顶部据此提示，并给出执行按钮
+    void loadCommandInfo(codeBlock ? outcome.note.title : "");
     void refreshDraftHint(outcome.note.title);
   } catch (error) {
     console.debug("装载笔记失败:", title, error);
@@ -772,6 +777,57 @@ async function runMaintenanceOnce() {
  * 后台任务（维护 / 回收）会改写"上次执行时间"，界面上的值必须跟着更新 ——
  * 否则设置页会一直显示任务执行之前的旧时间。
  */
+/**
+ * 当前 `@no-command` 页面的指令信息；不是指令页面时为 null。
+ *
+ * 短名、中文名、说明全部由后端那张指令表给出 —— 前端不解释 `$$COMMAND$$`，
+ * 也不维护第二份命令清单。
+ */
+const commandInfo = ref<{
+  kind: string;
+  label: string;
+  detail: string;
+} | null>(null);
+
+async function loadCommandInfo(title: string) {
+  if (!title) {
+    commandInfo.value = null;
+    return;
+  }
+  try {
+    commandInfo.value = await invoke<typeof commandInfo.value>("command_info", { title });
+  } catch (error) {
+    console.debug("读取指令信息失败:", error);
+    commandInfo.value = null;
+  }
+}
+
+/**
+ * 执行这条指令：回到不带 `@no-command` 的地址。
+ *
+ * 执行仍在后端（地址一解析就按指令跳），前端只负责"点一下把它送回去解析" ——
+ * 命令与页面查找因此是解耦的：同一张表既回答"这是什么"，也决定"跳到哪"。
+ */
+function runCommand() {
+  const title = currentTitle.value;
+  if (title) {
+    void navigate(title);
+  }
+}
+
+/**
+ * 标题下方的来源提示：跟重定向来到这一页时才显示。
+ *
+ * 随机跳转不写来源页名 —— 那个名字不是"目标"，写了反而误导；只说"来自随机重定向"。
+ */
+const viaHint = computed(() => {
+  const address = route.value;
+  if (!address || address.kind !== "note" || !address.via) {
+    return "";
+  }
+  return address.via.random ? "来自随机重定向" : `重定向自《${address.via.from}》`;
+});
+
 async function reloadSettings() {
   try {
     vaultSettings.value = await invoke<VaultSettings>("get_settings");
@@ -1532,9 +1588,31 @@ function onAction(name: string) {
               :title="note.title"
               :parent="parentTitle"
               :collapsed="scrolled"
+              :under="viaHint"
               @action="onAction"
               @open-parent="onNoteSelected"
             />
+
+            <!--
+              指令页面用 `@no-command` 打开时：说清这是什么指令，并给一个"执行"的出口。
+              认不出的指令不给执行按钮 —— 它执行不了，该做的是点右上角去修。
+            -->
+            <div
+              v-if="!revisionView && commandInfo"
+              class="cmdbar"
+              :class="{ 'cmdbar--bad': commandInfo.kind === 'unrecognized' }"
+            >
+              <span class="cmdbar__label">{{ commandInfo.label }}</span>
+              <span class="cmdbar__detail">{{ commandInfo.detail }}</span>
+              <button
+                v-if="commandInfo.kind !== 'unrecognized'"
+                class="cmdbar__run"
+                type="button"
+                @click="runCommand"
+              >
+                执行
+              </button>
+            </div>
 
             <NoteContent
               v-if="!revisionView"
@@ -1895,6 +1973,56 @@ function onAction(name: string) {
   border-radius: 8px;
   background: var(--surface);
   box-shadow: 0 12px 32px rgb(0 0 0 / 28%);
+}
+
+/* ---------- 指令页面提示条（`@no-command`） ---------- */
+
+.cmdbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 10px 0 14px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 13px;
+}
+
+.cmdbar__label {
+  flex-shrink: 0;
+  padding: 0 7px;
+  border-radius: 9px;
+  background: var(--code-bg);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.cmdbar__detail {
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+.cmdbar__run {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 3px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background-color: transparent;
+  color: var(--text);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.cmdbar__run:hover {
+  background-color: var(--hover);
+}
+
+/* 认不出的指令：一执行就报错，用缺失链接的颜色提醒 */
+.cmdbar--bad .cmdbar__label {
+  color: var(--link-missing);
 }
 
 .linkmenu__target {

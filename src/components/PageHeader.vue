@@ -19,6 +19,13 @@ defineProps<{
   parent: string;
   /** 正文已滚下去：收起并冻结 */
   collapsed: boolean;
+  /**
+   * 标题下方的补充一行（目前用于"重定向自 X"）。
+   *
+   * 与 MediaWiki 标题下面那行"(重定向自 CommonMark)"同理：让人知道自己是**被带过来的**，
+   * 而不是这一页本来就长这样。空串表示不显示。
+   */
+  under: string;
 }>();
 
 const emit = defineEmits<{
@@ -42,6 +49,7 @@ const actions: {
   <div class="page-header" :class="{ 'page-header--collapsed': collapsed }">
     <div class="page-heading">
       <h1 class="page-title" :title="title">{{ title }}</h1>
+      <p v-if="under" class="page-under">{{ under }}</p>
       <!-- 子页面（标题里有斜杠）给一个回上一级的出口 -->
       <button
         v-if="parent"
@@ -97,6 +105,13 @@ const actions: {
 .page-heading {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+.page-under {
+  margin: 2px 0 0;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1.6;
 }
 
 .page-up {
