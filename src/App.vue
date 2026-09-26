@@ -22,11 +22,13 @@ import GcPage from "./components/GcPage.vue";
 import TrashPage from "./components/TrashPage.vue";
 import TaskBar from "./components/TaskBar.vue";
 import ViaHint from "./components/ViaHint.vue";
+import { applyAppearance as applyAppearanceTo } from "./composables/useAppearance";
+import { useLinkMenu } from "./composables/useLinkMenu";
+import { useZoom } from "./composables/useZoom";
 import { labelOf } from "./special";
-import { BASE_ZOOM } from "./settings";
+
 import { setThemeMode, themeMode, type ThemeMode } from "./theme";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
+
 import NoteContent from "./components/NoteContent.vue";
 import NoteEditor from "./components/NoteEditor.vue";
 import PageHeader from "./components/PageHeader.vue";
@@ -35,14 +37,8 @@ import TitleBar from "./components/TitleBar.vue";
 import WindowResizeHandles from "./components/WindowResizeHandles.vue";
 import { PREFERENCE_KEYS, readFlag, writeFlag } from "./settings";
 
-
-
-
-
-
 /** 站点名：顶栏菜单顶上那一行（纯显示，不参与地址） */
 const APP_NAME = "重逢笔记";
-
 
 type Mode =
   | "read"
@@ -52,7 +48,6 @@ type Mode =
   | "delete"
   | "rollback"
   | "special";
-
 
 /** 自动保存：停手三秒后写一条草稿到链上 */
 const AUTOSAVE_DELAY_MS = 3000;
@@ -139,8 +134,10 @@ const specialPage = computed(() => {
   const address = route.value;
   return address && address.kind === "special" ? address.page : "";
 });
-/** 内部链接的右键菜单（坐标来自鼠标事件） */
-const linkMenu = ref<{ title: string; x: number; y: number } | null>(null);
+/** 内部链接的右键菜单（状态与动作都在 composable 里） */
+const { linkMenu, openLinkMenuTarget, copyLinkTarget } = useLinkMenu({
+  openInNewTab: (title) => openTabWith(title),
+});
 
 /** 标签页上显示什么名字 */
 function tabTitleOf(address: Address): string {
@@ -202,25 +199,6 @@ function openTabWith(address: string) {
   });
   activeTab.value = tabs.value.length - 1;
   void navigate(address, "replace");
-}
-
-/** 右键菜单：在新标签页打开 */
-function openLinkMenuTarget() {
-  const target = linkMenu.value;
-  linkMenu.value = null;
-  if (target) {
-    openTabWith(target.title);
-  }
-}
-
-/** 右键菜单：复制链接目标（地址栏里能直接粘贴这个写法） */
-function copyLinkTarget() {
-  const target = linkMenu.value;
-  linkMenu.value = null;
-  if (target) {
-    // 与正文里的复制走同一条路（Tauri 剪贴板插件）
-    void writeText(target.title).catch(() => {});
-  }
 }
 
 /** 切到某个标签页：它带着自己的地址，重新解析一遍（全量重载） */
@@ -537,7 +515,7 @@ onMounted(async () => {
   try {
     const settings = await invoke<VaultSettings>("get_settings");
     vaultSettings.value = settings;
-    applyAppearance();
+    applyAppearanceTo(appearance());
     // 到点了就清回收站 / 回收内容块；判定由后端按"上次执行时间"做
     void runMaintenanceOnce();
     vaultRoot.value = settings.root;
@@ -753,7 +731,7 @@ const viaHint = computed(() => {
 async function reloadSettings() {
   try {
     vaultSettings.value = await invoke<VaultSettings>("get_settings");
-    applyAppearance();
+    applyAppearanceTo(appearance());
   } catch (error) {
     console.debug("重新读取设置失败:", error);
   }
@@ -773,27 +751,6 @@ function openFromMenu(address: string) {
  * - 主题色：覆盖 `--accent` / `--accent-soft` 两个 token，其余（选中色等）保持主题默认；
  * - 限宽：覆盖 `--reading-width`。
  */
-function applyAppearance() {
-  const appearance = vaultSettings.value;
-  if (!appearance) {
-    return;
-  }
-
-  // 主题**不在这里落地**：`theme.ts` 是它唯一的真相（标题栏按钮、index.html 的
-  // 防闪烁脚本、跟随系统的实时响应都在那儿）。这里只把后端的值交给它。
-  setThemeMode(appearance.theme as ThemeMode);
-
-  const root = document.documentElement.style;
-  root.setProperty("--accent", appearance.accent);
-  root.setProperty("--accent-soft", appearance.accent);
-  root.setProperty("--accent-tint", tintOf(appearance.accent));
-  root.setProperty("--reading-width", `${appearance.reading_width}px`);
-
-  // 界面缩放交给 WebView 自己做：整页等比，和浏览器一致。
-  // 生效的是"基准 × 用户缩放"：基准负责把默认字号整体抬高，用户值只做相对调整。
-  void getCurrentWebview().setZoom(appearance.zoom * BASE_ZOOM);
-}
-
 /** 设置页改了哪一项就只传哪一项（后端是补丁式更新） */
 async function updateSettings(patch: Record<string, unknown>) {
   // 主题是一条共享真相：先在本地落地（标题栏那个轮换按钮立刻跟上），再写回后端
@@ -803,7 +760,7 @@ async function updateSettings(patch: Record<string, unknown>) {
 
   try {
     vaultSettings.value = await invoke<VaultSettings>("update_settings", patch);
-    applyAppearance();
+    applyAppearanceTo(appearance());
   } catch (error) {
     addressError.value = String(error);
   }
@@ -894,15 +851,6 @@ function openFromList(address: string) {
  * 主题色在设置里是**不透明** hex，而"表头底色"这类淡染需要透明版本；CSS 里没法对
  * 运行时设的变量做混色（且不能假定支持 color-mix），所以在 JS 里算好一个变量。
  */
-function tintOf(hex: string): string {
-  const match = /^#([0-9a-fA-F]{6})$/.exec(hex.trim());
-  if (!match) {
-    return hex;
-  }
-  const value = Number.parseInt(match[1]!, 16);
-  return `rgba(${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}, 0.16)`;
-}
-
 /**
  * Ctrl + 滚轮缩放界面。
  *
@@ -911,42 +859,22 @@ function tintOf(hex: string): string {
  *
  * 立即生效保手感，落盘节流：滚轮一次会连发很多事件，逐个写文件既慢也没意义。
  */
-const ZOOM_MIN = 0.5;
-const ZOOM_MAX = 3;
-const ZOOM_STEP = 0.1;
-let zoomSaveTimer: number | undefined;
-
-function onWheelZoom(event: WheelEvent) {
-  if (!event.ctrlKey) {
-    return;
-  }
-  // 拦掉 WebView 自己的 Ctrl+滚轮行为，避免两套缩放打架
-  event.preventDefault();
-
-  const current = vaultSettings.value?.zoom ?? 1;
-  const next = Math.min(
-    ZOOM_MAX,
-    Math.max(ZOOM_MIN, current - Math.sign(event.deltaY) * ZOOM_STEP),
-  );
-  if (next === current) {
-    return;
-  }
-
-  if (vaultSettings.value) {
-    vaultSettings.value.zoom = next;
-  }
-  void getCurrentWebview().setZoom(next);
-
-  window.clearTimeout(zoomSaveTimer);
-  zoomSaveTimer = window.setTimeout(() => void updateSettings({ zoom: next }), 400);
-}
-
-window.addEventListener("wheel", onWheelZoom, { passive: false });
-
 /** 标签栏底部的设置入口 */
 function openSettings() {
   void navigate("special:settings");
 }
+
+// 外观与缩放：都只依赖设置，与地址/标签页无关，所以各自成 composable
+const appearance = () => vaultSettings.value;
+useZoom({
+  current: () => vaultSettings.value?.zoom ?? 1,
+  apply: (zoom) => {
+    if (vaultSettings.value) {
+      vaultSettings.value.zoom = zoom;
+    }
+  },
+  persist: (zoom) => void updateSettings({ zoom }),
+});
 
 /** 阅读页只显示最新提交；有草稿就提示一下，点按钮才进编辑器看 */
 async function refreshDraftHint(title: string) {
@@ -1090,7 +1018,6 @@ function cancelConfirm() {
 }
 
 /** 只读查看某一版：地址解析已经确认它存在，这里只取内容 */
-
 
 /**
  * 只读查看某一版。
@@ -1269,7 +1196,6 @@ async function doDelete() {
 }
 
 /** 回退：把某一版内容作为**新提交**写上去，旧记录一条不改 */
-
 
 /**
  * 要求回退到某一版：**先去确认页**（`名称@rollback-缩写`），确认后才真的动手。
