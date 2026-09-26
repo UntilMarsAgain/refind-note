@@ -12,6 +12,7 @@ import {
   isTemplateHead,
   templateBlockEnd,
   templateMarks,
+  templateBlockLines,
   templateRanges,
 } from "./template-blocks.ts";
 
@@ -133,4 +134,14 @@ test("偏移量与逐字符累加一致，且不含空标记", () => {
     { from: start(1), to: start(1) + 2, head: false },
     { from: start(3), to: start(3) + 2, head: false },
   ]);
+});
+
+test("块覆盖的行包含块内的空行（这样左边缘才跨得过去）", () => {
+  const lines = ["::quote", "  第一段", "  ", "", "  第二段", "块外"];
+  // 第 2 行是"带空白的空行"、第 3 行是真正的空行：两者都属于块内
+  assert.deepEqual(templateBlockLines(lines), [0, 1, 2, 3, 4]);
+});
+
+test("块外的行不覆盖", () => {
+  assert.deepEqual(templateBlockLines(["::note", "  块内", "", "块外"]), [0, 1]);
 });

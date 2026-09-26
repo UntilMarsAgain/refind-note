@@ -177,3 +177,26 @@ export function templateRanges(lines: string[]): TemplateRange[] {
   }
   return ranges;
 }
+
+/**
+ * 模板块覆盖的**全部行**（1 基不方便，这里用 0 基），**包含块内的空行**。
+ *
+ * 与 `templateMarks` 的区别就在这里：标记是"给这一行的某些列上色"，空行没有列可上色，
+ * 于是块在空行处会断一条缝；而这一份是给**整行**加装饰用的 —— 空行也算，
+ * 于是块的左边缘能一路画下去，跨空行是**连续**的（渲染那边本来就没在那儿断开）。
+ */
+export function templateBlockLines(lines: string[]): number[] {
+  const covered = new Set<number>();
+  for (let index = 0; index < lines.length; index += 1) {
+    const text = lines[index] ?? "";
+    if (!isTemplateHead(text)) {
+      continue;
+    }
+    covered.add(index);
+    const last = templateBlockEnd(lines, index, headIndent(text));
+    for (let inner = index + 1; inner <= last; inner += 1) {
+      covered.add(inner);
+    }
+  }
+  return [...covered].sort((a, b) => a - b);
+}

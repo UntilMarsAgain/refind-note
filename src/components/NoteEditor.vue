@@ -5,7 +5,7 @@ import { Check, Pencil, Save, Trash2, X } from "@lucide/vue";
 import { checkTitle } from "../title";
 import { themeMode } from "../theme";
 import { applyLineNumbers } from "../code-blocks";
-import { templateRanges } from "../template-blocks";
+import { templateBlockLines, templateRanges } from "../template-blocks";
 import StatePanel from "./StatePanel.vue";
 import { codeLineNumbers } from "../settings";
 // `codemirror` 是元包（提供 basicSetup 等），EditorState 由 @codemirror/state 提供 ——
@@ -93,6 +93,10 @@ const appTheme = EditorView.theme(
     ".cm-template-body": {
       // 只盖住行首缩进：那是"这段属于这个块"的标记，别染到正文
       backgroundColor: "var(--accent-tint)",
+    },
+    // 块的左边缘（整行装饰）：空行也在内，所以跨空行是**连续**的一条
+    ".cm-template-line": {
+      boxShadow: "inset 3px 0 0 0 var(--accent-tint)",
     },
     ".cm-wikilink": {
       color: "var(--accent)",
@@ -194,14 +198,36 @@ const templateHighlight = ViewPlugin.fromClass(
  * 这里只负责把"行号 + 列"换成 CM6 的文档偏移量。
  */
 function buildTemplateDecorations(view: EditorView): DecorationSet {
-  // 算什么、落在哪个偏移量，全在纯函数里（有用例）；这里只剩最后一步：变成装饰
-  const lines = view.state.doc.toString().split("\n");
-  return Decoration.set(
-    templateRanges(lines).map((range) =>
-      Decoration.mark({
+  // 算什么、落在哪里，全在纯函数里（有用例）；这里只剩最后一步：变成装饰
+  const doc = view.state.doc;
+  const lines = doc.toString().split("\n");
+  const items: { from: number; to: number; decoration: Decoration }[] = [];
+
+  // 标记：整行（头行）或行首缩进（块内）
+  for (const range of templateRanges(lines)) {
+    items.push({
+      from: range.from,
+      to: range.to,
+      decoration: Decoration.mark({
         class: range.head ? "cm-template-head" : "cm-template-body",
-      }).range(range.from, range.to),
-    ),
+      }),
+    });
+  }
+
+  // 整行装饰：块的左边缘。**空行也要** —— 空行没有列可以上色，
+  // 只靠标记的话块会在空行处断开一条缝，看上去像"没跨过空行"（其实跨过了）。
+  for (const index of templateBlockLines(lines)) {
+    const line = doc.line(index + 1);
+    items.push({
+      from: line.from,
+      to: line.from,
+      decoration: Decoration.line({ class: "cm-template-line" }),
+    });
+  }
+
+  items.sort((a, b) => a.from - b.from || a.to - b.to);
+  return Decoration.set(
+    items.map((item) => item.decoration.range(item.from, item.to)),
     true,
   );
 }
