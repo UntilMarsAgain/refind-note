@@ -183,7 +183,17 @@ const previewProblem = ref("");
  * 为什么连"方向"都写在内联样式里：这个组件里 scoped CSS 在当前 WebView 下不生效
  * （当初两栏不能独立滚动就是栽在这上面），所以布局只能写在元素上。
  */
-const STACK_BREAKPOINT = 720;
+/**
+ * 一栏最窄多少还算"能看"。
+ *
+ * 阈值**由它推出来**，而不是拍一个总数：两栏各占一半，所以
+ * `2 × 最窄 + 间距` 就是该并排的最小宽度。以前写死 720，等于要求每栏 354px ——
+ * 窗口一窄就翻成上下排布，而且再也回不去（那其实不是判定错，是门槛太高：
+ * 可用宽度 = 窗口 ÷ 基准缩放 − 标签栏 − 正文内边距，还会被阅读栏上限再夹一次）。
+ */
+const PANE_MIN_WIDTH = 260;
+const PANES_GAP = 12;
+const STACK_BREAKPOINT = PANE_MIN_WIDTH * 2 + PANES_GAP;
 
 /** 并排时单栏的高度上限（视口减去本页固定开销的权宜值） */
 const PANE_HEIGHT = "calc(100vh - 240px)";
@@ -198,6 +208,8 @@ function measurePanes() {
   if (!el) {
     return;
   }
+  // 量两栏容器自己是对的：它宽度由父级决定（块级 flex 撑满），**不随排布方向变化**，
+  // 所以不会出现"一变成上下排布、可用宽度也跟着变小，于是再也切不回来"的自反馈。
   const width = el.clientWidth;
   // 宽度为 0（还没布局 / 不可见）时不下结论，免得一上来就误判
   stacked.value = width > 0 && width < STACK_BREAKPOINT;
@@ -423,7 +435,7 @@ function submit() {
         display: 'flex',
         flexDirection: stacked ? 'column' : 'row',
         alignItems: 'stretch',
-        gap: '12px',
+        gap: PANES_GAP + 'px',
       }"
     >
       <!-- 左：源码（CodeMirror） -->
