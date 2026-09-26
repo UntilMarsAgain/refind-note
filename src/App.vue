@@ -574,21 +574,37 @@ function onContextMenu(event: MouseEvent) {
 }
 
 /**
- * Ctrl+W（macOS 上是 Cmd+W）关掉当前标签页。
+ * 全局快捷键：Ctrl+W 关标签页、Ctrl+T 新建标签页（macOS 上同样认 Cmd）。
  *
- * 自己拦是有意的：WebView 不会把这组键交给我们，而"关标签"是浏览器时代的肌肉记忆 ——
- * 按下去没反应，人会以为界面卡了。只在**真有标签页**时才拦，别去吞别的场合。
+ * 自己拦是有意的：WebView 不会把这组键交给我们，而这两个是浏览器时代的肌肉记忆 ——
+ * 按下去没反应，人会以为界面卡了。
+ *
+ * 两条自我约束：
+ *
+ * - 只认**不带** `Shift`/`Alt` 的组合（`Ctrl+Shift+W` 之类是别的东西）；
+ * - 只做**确实能做**的事（一个标签页都没有时，`Ctrl+W` 什么也不做，而不是去吞掉这次按键）。
  */
 function onGlobalKey(event: KeyboardEvent) {
-  const closing = (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey;
-  if (!closing || event.key.toLowerCase() !== "w") {
+  const plain = (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey;
+  if (!plain) {
     return;
   }
-  if (tabs.value.length === 0) {
-    return;
+
+  switch (event.key.toLowerCase()) {
+    case "w":
+      if (tabs.value.length === 0) {
+        return;
+      }
+      event.preventDefault();
+      closeTab(activeTab.value);
+      return;
+    case "t":
+      event.preventDefault();
+      openNewTab();
+      return;
+    default:
+      return;
   }
-  event.preventDefault();
-  closeTab(activeTab.value);
 }
 
 onBeforeUnmount(() => {
