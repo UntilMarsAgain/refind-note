@@ -90,7 +90,7 @@ fn serve_file(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<
     let Ok(vault) = open() else {
         return not_found();
     };
-    let Ok(Some(path)) = vault.file_path_by_id(id) else {
+    let Ok(Some(path)) = vault.file_path_by_key(id) else {
         return not_found();
     };
     let Ok(bytes) = fs::read(&path) else {

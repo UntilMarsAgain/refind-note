@@ -145,17 +145,21 @@ impl Vault {
         Ok(table.items.iter().map(StoredFile::to_entry).collect())
     }
 
-    /// 按标识找磁盘上的路径 —— 取文件时唯一需要的映射，**不接受任意路径**
-    pub fn file_path_by_id(&self, id: &str) -> Result<Option<PathBuf>, VaultError> {
-        // 标识只可能是我们自己生成的十六进制串；先按这个挡掉一切花招
-        if id.is_empty() || !id.chars().all(|ch| ch.is_ascii_hexdigit()) {
+    /// 取文件时的映射：`key` 可以是**标识**，也可以是**显示名**。
+    ///
+    /// 两种都在表里查 —— 请求里的那串字永远不会变成文件系统路径，所以路径穿越在
+    /// 这一层就不成立。笔记里写的是名字（人记得住），界面取件时用的是标识，
+    /// 两条路都从这里过。
+    pub fn file_path_by_key(&self, key: &str) -> Result<Option<PathBuf>, VaultError> {
+        let wanted = decode_key(key);
+        if wanted.is_empty() {
             return Ok(None);
         }
         Ok(self
             .read_files()?
             .items
             .iter()
-            .find(|file| file.id == id)
+            .find(|file| file.id == wanted || file.name == wanted)
             .map(|file| self.files_dir().join(file.stored_name())))
     }
 
@@ -175,6 +179,29 @@ impl Vault {
         }
         Ok(())
     }
+}
+
+/// 解 URL 里的百分号编码：`%E5%9B%BE.png` → `图.png`。
+///
+/// 自己写十几行而不是引一个依赖：只用得上解码，而且这样能被用例钉住
+/// （编码那一侧由前端的 `encodeURIComponent` 负责，两边对上就行）。
+pub fn decode_key(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[index + 1..index + 3]).unwrap_or("");
+            if let Ok(value) = u8::from_str_radix(hex, 16) {
+                out.push(value);
+                index += 3;
+                continue;
+            }
+        }
+        out.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&out).to_string()
 }
 
 /// 只取文件名部分，并去掉一定不能出现在文件名里的字符（路径分隔符与控制字符）。
@@ -335,17 +362,37 @@ mod tests {
     }
 
     #[test]
-    fn id_lookup_refuses_anything_that_is_not_an_id() {
+    fn keys_are_looked_up_in_the_table_only() {
         let temp = TempVault::new();
-        let entry = temp.vault.add_file("图.png", b"data").unwrap();
-        assert!(temp.vault.file_path_by_id(&entry.id).unwrap().is_some());
-        // 路径花招一律拒绝：这个函数只看我们自己生成的标识
-        for bad in ["../vault.json", "..", "", "abc/def", "图片"] {
+        let entry = temp.vault.add_file("桥 图.png", b"data").unwrap();
+
+        // 标识与显示名都能取到同一份文件
+        let by_id = temp.vault.file_path_by_key(&entry.id).unwrap().unwrap();
+        let by_name = temp.vault.file_path_by_key("桥 图.png").unwrap().unwrap();
+        assert_eq!(by_id, by_name);
+
+        // 前端会用 encodeURIComponent，这里对上：解码后仍是同一个名字
+        let encoded = "%E6%A1%A5%20%E5%9B%BE.png";
+        assert_eq!(decode_key(encoded), "桥 图.png");
+        assert!(temp.vault.file_path_by_key(encoded).unwrap().is_some());
+
+        // 路径花招一律不成立：表里没有这个名字，就没有这个文件
+        for bad in ["../vault.json", "..", "", "..%2Fvault.json", "桥 图.png/../vault.json"] {
             assert!(
-                temp.vault.file_path_by_id(bad).unwrap().is_none(),
-                "{bad} 不该被当成标识"
+                temp.vault.file_path_by_key(bad).unwrap().is_none(),
+                "{bad} 不该取到文件"
             );
         }
+    }
+
+    #[test]
+    fn percent_decoding_is_forgiving() {
+        // 不是合法编码的地方原样保留，不吞字符
+        assert_eq!(decode_key("abc"), "abc");
+        assert_eq!(decode_key("100%"), "100%");
+        assert_eq!(decode_key("%E5%9B%BE"), "图");
+        assert_eq!(decode_key("%ZZ"), "%ZZ");
+        assert_eq!(decode_key(""), "");
     }
 
     #[test]

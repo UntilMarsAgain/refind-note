@@ -2,9 +2,12 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { Check, Pencil, Save, Trash2, X } from "@lucide/vue";
+import type { FileEntry } from "../bindings";
 import { checkTitle } from "../title";
 import { themeMode } from "../theme";
 import { applyLineNumbers, highlightCode } from "../code-blocks";
+import { resolveFileImages } from "../note-html";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   templateBlockLines,
   templateFoldRange,
@@ -322,6 +325,8 @@ watch(preview, () => {
     if (previewEl.value) {
       highlightCode(previewEl.value);
       applyLineNumbers(previewEl.value);
+      // 相对地址的图片与附件指向仓库文件（与阅读视图同一条规则）
+      resolveFileImages(previewEl.value);
     }
   });
 });
@@ -557,6 +562,38 @@ const languageLabel = computed(() => {
 
 /** 词法问题（空、@、非法字符、过长）即时反馈，不打扰后端 */
 const renameProblem = ref<string | null>(null);
+/** 上传/插入文件时出的问题（与改名的问题分开，各自说各自的事） */
+const fileProblem = ref<string | null>(null);
+
+/**
+ * 快速上传：选文件 → 收进仓库 → 在光标处插入引用。
+ *
+ * 引用写的是**文件名**（`![名字](名字)`），因为磁盘上的标识是生成的、人记不住；
+ * 名字到取件地址的换算在 `resolveFileImages` 里统一做。
+ */
+async function insertFile() {
+  fileProblem.value = null;
+  try {
+    const picked = await open({ multiple: true, title: "选择要插入的文件" });
+    const paths = Array.isArray(picked) ? picked : picked ? [picked] : [];
+    if (paths.length === 0) {
+      return;
+    }
+    const references: string[] = [];
+    for (const path of paths) {
+      const entry = await invoke<FileEntry>("upload_file", { path });
+      references.push(
+        entry.mime.startsWith("image/")
+          ? `![${entry.name}](${entry.name})`
+          : `[${entry.name}](${entry.name})`,
+      );
+    }
+    view?.dispatch(view.state.replaceSelection(references.join("\n")));
+    view?.focus();
+  } catch (error) {
+    fileProblem.value = String(error);
+  }
+}
 
 function localCheck() {
   renameProblem.value = newTitle.value === props.title ? null : checkTitle(newTitle.value);
@@ -613,6 +650,7 @@ function submit() {
         改名为「{{ newTitle.trim() }}」
       </button>
       <span v-if="renameProblem" class="editor__problem">{{ renameProblem }}</span>
+      <span v-if="fileProblem" class="editor__problem">{{ fileProblem }}</span>
     </div>
 
     <div class="editor__bar">
@@ -626,6 +664,16 @@ function submit() {
       />
 
       <div class="editor__actions">
+        <button
+          class="ebtn"
+          type="button"
+          title="上传文件，并在光标处插入引用"
+          @click="insertFile"
+        >
+          <ImagePlus :size="14" :stroke-width="1.9" />
+          插入文件
+        </button>
+
         <button
           class="ebtn"
           type="button"
