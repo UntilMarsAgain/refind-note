@@ -225,24 +225,23 @@ function remove(item: Namespace) {
     <p v-if="loading" class="ns__hint">正在读取…</p>
 
     <template v-else>
-      <!-- 出错只报错，**不顶掉下面的列表与创建区** —— 以前它挤在 v-else 的位置上，
-           一旦创建失败，整个内容跟着消失，用户连改哪儿都看不到。 -->
-      <p v-if="error" class="ns__notice">
-        <strong>操作未完成</strong>
-        <span>{{ error }}</span>
-      </p>
 
       <div class="ns__table">
         <div class="ns__head-row" aria-hidden="true">
           <span>名称</span>
+          <span>标识</span>
           <span>别名</span>
           <span>类型 / 跨站地址</span>
           <span class="ns__head-actions">操作</span>
         </div>
 
         <div v-for="item in items" :id="anchorOf(item)" :key="item.id" class="ns__item">
-          <div class="ns__cell ns__cell--name">
+          <div class="ns__cell">
             <span class="ns__name">{{ labelOf(item) }}</span>
+          </div>
+
+          <!-- 标识单独一列：它是磁盘上真正用的键，与名称不是一回事 -->
+          <div class="ns__cell">
             <code class="ns__id">{{ item.id }}</code>
           </div>
 
@@ -348,6 +347,13 @@ function remove(item: Namespace) {
         </div>
       </div>
 
+      <!-- 出错只报错，**不顶掉列表与创建区** —— 以前它挤在 v-else 的位置上，
+           一旦创建失败，整个内容跟着消失，用户连改哪儿都看不到。 -->
+      <p v-if="error" class="ns__notice">
+        <strong>操作未完成</strong>
+        <span>{{ error }}</span>
+      </p>
+
       <section class="ns__create">
         <h3 class="ns__create-title">新建命名空间</h3>
         <p class="ns__create-lead">
@@ -436,7 +442,14 @@ function remove(item: Namespace) {
 .ns__head-row,
 .ns__item {
   display: grid;
-  grid-template-columns: minmax(110px, 1fr) minmax(110px, 1fr) minmax(160px, 1.3fr) auto;
+  /* 每一行各自是一个网格，所以最后一列**必须给固定宽度**：
+     用 auto 时它的宽度随该行按钮数变化，前几列跟着被挤，各行就对不齐了。 */
+  grid-template-columns:
+    minmax(96px, 0.9fr)   /* 名称 */
+    minmax(64px, 0.6fr)   /* 标识 */
+    minmax(96px, 1fr)     /* 别名 */
+    minmax(150px, 1.5fr)  /* 类型 / 跨站地址 */
+    300px;                /* 操作 */
   gap: 8px 14px;
   align-items: center;
   padding: 9px 12px;
@@ -534,7 +547,8 @@ function remove(item: Namespace) {
   padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--surface);
+  /* 用**主题色的淡染**（不是 --surface：那个在深色主题里偏红） */
+  background: var(--accent-tint);
 }
 
 .ns__create-title {
@@ -596,11 +610,27 @@ function remove(item: Namespace) {
   outline: 1px solid var(--accent);
 }
 
+/*
+ * 原生下拉在深色主题下会白底（WebKitGTK 按系统主题画）—— 只能自己画：
+ * `appearance: none` 去掉原生外观，再补一个箭头。
+ */
 select.ns__input {
-  /* 原生下拉在深色主题下会白底：显式给底色与文字色 */
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 26px;
   background-color: var(--field-bg);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%23888' stroke-width='1.6' stroke-linecap='round'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 11px;
   color: var(--text);
   cursor: pointer;
+}
+
+/* 展开的选项列表也跟随主题（否则仍是白底黑字） */
+select.ns__input option {
+  background-color: var(--field-bg);
+  color: var(--text);
 }
 
 /* ---------- 按钮 ---------- */
