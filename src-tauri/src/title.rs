@@ -503,6 +503,18 @@ impl LinkResolver {
         self.templates.get(name).map(String::as_str)
     }
 
+    /// 解析器看到的模板页（名字、字节数）。**只给调试用** ——
+    /// "页面明明在，取用却是空的"这类问题，第一步就是看这里有没有它。
+    pub fn template_names(&self) -> Vec<(String, usize)> {
+        let mut names: Vec<(String, usize)> = self
+            .templates
+            .iter()
+            .map(|(name, text)| (name.clone(), text.len()))
+            .collect();
+        names.sort();
+        names
+    }
+
     /// 解析一个内部链接目标；返回 `None` 表示解析不了（应留作字面文本）
     pub fn resolve(&self, target: &str) -> Option<Resolved> {
         let trimmed = target.trim();

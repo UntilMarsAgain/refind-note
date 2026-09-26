@@ -46,7 +46,7 @@ fn render_quote(template: &Template, node: &Node, fmt: &mut dyn Renderer) {
 
 /// `::css` —— 把内容（或 `src="页面名"` 指的模板页）当 CSS 注入页面。
 ///
-/// 注入的 CSS 与界面在**同一个文档**里，所以本项目所有的 CSS 变量
+/// 注入的 CSS 与界面在**同一个文档**里（作用域收在这一页的内容上），所以本项目所有的 CSS 变量
 /// （`--accent`、`--accent-solid`、`--link-blue`、`--text-dim`、`--surface`…）
 /// 在这里用 `var()` 直接就能取到 —— 这正是"自定义模板能跟着主题走"的关键。
 ///
@@ -57,7 +57,7 @@ fn render_css(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
         return;
     };
     let css = fill::sanitize_css(&fill::substitute(&source, template, &template.body));
-    // 收进正文范围：不然一条 `* { }` 就能把整个界面改掉
+    // 收进这一页：不然一条 `* { }` 就能把整个界面改掉
     let css = fill::scope_css(&css);
     fmt.cr();
     fmt.open("style", &[]);

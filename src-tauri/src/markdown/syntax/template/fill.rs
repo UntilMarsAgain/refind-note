@@ -133,7 +133,12 @@ pub fn sanitize_html(html: &str) -> String {
     strip_protocol(&out, "javascript:")
 }
 
-/// 把用户写的 CSS 收进正文范围：每条选择器都加 `.note-body` 前缀。
+/// 把用户写的 CSS 收进**这一页**：每条选择器都加 `.app__column` 前缀。
+///
+/// 不用 `.note-body`：那一层只框住正文，**页面标题与页头在它外面** ——
+/// 于是 `h1 { color: … }` 这类规则落空，看起来就像"CSS 没生效"。
+/// `.app__column` 是"这一页的内容"那一层（页头 + 正文），范围正好。
+/// 代价是与前端的类名耦合：改那个类名要同时改这里（`App.vue` 的 `.app__column`）。
 ///
 /// 为什么不原样注入：那样它作用于**整个界面** —— 一条 `* { }` 就能把标签栏、菜单、
 /// 任务栏一起改掉。收进正文之后，它只影响正文；而正文内部仍按正常层叠参与，
@@ -269,21 +274,21 @@ fn split_selectors(selector: &str) -> Vec<String> {
 /// 给一条选择器加范围。
 fn scope_selector(selector: &str) -> String {
     let selector = selector.trim();
-    if selector.is_empty() || selector.starts_with(".note-body") || selector.starts_with('&') {
+    if selector.is_empty() || selector.starts_with(".app__column") || selector.starts_with('&') {
         return selector.to_string();
     }
     // 写给根元素的规则收成正文本身：于是"给整篇正文设字体或变量"仍然写得出来
     for root in ["html", "body", ":root"] {
         if selector == root {
-            return ".note-body".to_string();
+            return ".app__column".to_string();
         }
         if let Some(rest) = selector.strip_prefix(root) {
             if rest.starts_with('.') || rest.starts_with(':') || rest.starts_with('[') {
-                return format!(".note-body{rest}");
+                return format!(".app__column{rest}");
             }
         }
     }
-    format!(".note-body {selector}")
+    format!(".app__column {selector}")
 }
 
 /// CSS 里不许出现 `</style`：它会提前闭合样式块，把后面的内容顶到页面上
@@ -424,25 +429,25 @@ mod tests {
 
     #[test]
     fn css_is_scoped_to_the_note_body() {
-        assert_eq!(scope_css(".a { color: red }"), ".note-body .a { color: red }");
+        assert_eq!(scope_css(".a { color: red }"), ".app__column .a { color: red }");
         assert_eq!(
             scope_css(".a, .b { }"),
-            ".note-body .a, .note-body .b { }"
+            ".app__column .a, .app__column .b { }"
         );
         // `:is(a, b)` 里的逗号不是选择器分隔符
-        assert_eq!(scope_css(":is(a, b) { }"), ".note-body :is(a, b) { }");
+        assert_eq!(scope_css(":is(a, b) { }"), ".app__column :is(a, b) { }");
         // 写给根元素的收成正文本身
-        assert_eq!(scope_css("body { }"), ".note-body { }");
-        assert_eq!(scope_css(":root { --x: 1 }"), ".note-body { --x: 1 }");
+        assert_eq!(scope_css("body { }"), ".app__column { }");
+        assert_eq!(scope_css(":root { --x: 1 }"), ".app__column { --x: 1 }");
         // 已经收过的不重复收
-        assert_eq!(scope_css(".note-body a { }"), ".note-body a { }");
+        assert_eq!(scope_css(".app__column a { }"), ".app__column a { }");
     }
 
     #[test]
     fn conditional_rules_are_scoped_inside() {
         assert_eq!(
             scope_css("@media (min-width: 1px) { .a { } }"),
-            "@media (min-width: 1px) { .note-body .a { } }"
+            "@media (min-width: 1px) { .app__column .a { } }"
         );
         // 关键帧里的百分比不是选择器，别去动它
         assert_eq!(
@@ -454,7 +459,7 @@ mod tests {
     #[test]
     fn imports_are_dropped() {
         // 让笔记去外部拉样式：既慢又不受控
-        assert_eq!(scope_css("@import url(x.css); .a { }"), ".note-body .a { }");
+        assert_eq!(scope_css("@import url(x.css); .a { }"), ".app__column .a { }");
     }
 
     #[test]
