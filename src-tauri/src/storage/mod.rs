@@ -1807,7 +1807,7 @@ impl Vault {
             .iter()
             .rev()
             .find(|event| matches!(event, Event::Auto { blob, .. } if *blob == draft.blob))
-            .ok_or_else(|| VaultError::Corrupt("草稿事件不见了".to_string()))?;
+            .ok_or_else(|| VaultError::Corrupt("找不到这份草稿".to_string()))?;
         let id = revision_id(event);
 
         let text = String::from_utf8(self.blobs.get(&draft.blob)?)

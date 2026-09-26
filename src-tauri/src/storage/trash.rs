@@ -36,9 +36,9 @@ impl Vault {
         let events = self.read_events_at(&trashed)?;
         let state = fold(&events);
         if !state.deleted {
-            // 文件在回收站里、日志却没有删除标记：状态不一致，先别动它
+            // 文件在回收站里、却没有删除记录：状态不一致，先别动它
             return Err(VaultError::Corrupt(format!(
-                "《{display}》在回收站里，但日志里没有删除标记"
+                "《{display}》在回收站里，但没有删除记录，无法还原"
             )));
         }
 

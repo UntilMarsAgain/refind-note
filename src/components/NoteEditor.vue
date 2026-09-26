@@ -496,7 +496,7 @@ function submit() {
         </h1>
 
         <p v-if="previewProblem" class="editor__preview-error">
-          预览渲染失败：{{ previewProblem }}
+          预览生成失败：{{ previewProblem }}
         </p>
         <div v-else class="note-body" v-html="preview" />
       </div>

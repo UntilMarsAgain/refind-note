@@ -61,7 +61,7 @@ impl std::fmt::Display for VaultError {
             Self::BadAddress(why) => write!(f, "{why}"),
             Self::IdCollision(id) => write!(
                 f,
-                "版本 ID 与已有版本重复（{id}…）。为安全起见拒绝写入 —— 这通常意味着哈希或派生规则出了问题，请先备份仓库。"
+                "版本标识与已有版本重复（{id}…）。为安全起见拒绝写入，请先备份仓库。"
             ),
         }
     }
