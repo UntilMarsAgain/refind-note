@@ -74,6 +74,19 @@ pub struct Namespace {
     pub site: Option<String>,
 }
 
+impl Namespace {
+    /// 跨站链接的地址：把页面名填进站点模板（`$1`）。
+    ///
+    /// 没有配站点就返回 `None`（那它就是个普通命名空间）。
+    pub fn url_for(&self, page: &str) -> Option<String> {
+        let template = self.site.as_ref()?;
+        if page.is_empty() {
+            return None;
+        }
+        Some(template.replace("$1", &encode_page(page)))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NamespaceTable {
     pub items: Vec<Namespace>,
@@ -240,9 +253,10 @@ impl NamespaceTable {
         let mut next = self.clone();
         next.items.push(Namespace {
             id: next.next_id(),
+            // 配了站点地址 = 页面在别的站上，本仓库不存它的页面
+            storable: site.is_none(),
             name,
             aliases,
-            storable: true,
             site,
         });
         next.validate()?;
@@ -343,6 +357,8 @@ pub struct Resolved {
     pub title: String,
     /// 目标是否存在（决定前端画红链还是蓝链）
     pub exists: bool,
+    /// 跨站链接的外部地址；`Some` 表示这一条指向**别的站**，要画绿链并当外链打开
+    pub url: Option<String>,
 }
 
 /// 渲染 `[[目标]]` 时用的解析器。
@@ -393,6 +409,21 @@ impl LinkResolver {
         // 我们暂不实现归类，因此只把它脱掉，不影响目标本身。
         let body = trimmed.strip_prefix(':').unwrap_or(trimmed).trim();
 
+        // 跨站链接先判：前缀登记过站点地址时，它指向**别的站**，不在本仓库里找页面。
+        // （这类命名空间是非存储的，普通解析本来也会把它挡掉 —— 所以必须抢在前面。）
+        if let Some((prefix, page)) = body.split_once(':') {
+            if let Some(item) = self.table.lookup(prefix) {
+                if let Some(url) = item.url_for(page.trim()) {
+                    return Some(Resolved {
+                        key: item.id.clone(),
+                        title: format!("{}:{}", item.name, page.trim()),
+                        exists: true,
+                        url: Some(url),
+                    });
+                }
+            }
+        }
+
         let parsed = if let Some(rest) = body.strip_prefix('/') {
             // 相对当前笔记的子页面：拼在完整标题后面，命名空间不变
             let from = self.from.as_ref()?;
@@ -413,11 +444,29 @@ impl LinkResolver {
             exists: self.keys.contains(&key),
             title: parsed.display(&self.table),
             key,
+            url: None,
         })
     }
 }
 
 // ---------------------------------------------------------------- 小工具
+
+/// 把页面名放进 URL 路径。只动确实会破坏 URL 的那几个 ASCII 字符；
+/// 空格按 MediaWiki 的习惯折成 `_`；非 ASCII（中文标题）原样留着 —— 现代浏览器
+/// 会自己转义，而提前转义反而容易弄错。
+fn encode_page(page: &str) -> String {
+    let mut out = String::with_capacity(page.len());
+    for ch in page.chars() {
+        match ch {
+            ' ' => out.push('_'),
+            '#' | '?' | '&' | '%' | '<' | '>' | '"' => {
+                out.push_str(&format!("%{:02X}", ch as u32));
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
+}
 
 /// 大小写与空白折叠，用于命名空间名前缀的比较
 fn fold(text: &str) -> String {

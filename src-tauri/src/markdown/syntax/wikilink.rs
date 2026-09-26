@@ -4,8 +4,9 @@
 //! （省略时显示文字就是目标本身）。
 //! 注意别写反成 `[[显示文字|目标]]`。
 //!
-//! 渲染成不带 `href` 的 `<a class="wikilink" …>`：
-//! href 故意留空，否则会被前端「a[href] 一律当外链打开」那段逻辑吞掉。
+//! 渲染成 `<a class="wikilink" …>`：**普通内部链接故意不带 href**，否则会被前端
+//! 「a[href] 一律当外链打开」那段逻辑吞掉；跨站（interwiki）链接反过来 —
+//! 它本来就是外链，给出真实 `href` 并挂 `data-interwiki`，由前端当外链打开、由 CSS 画绿链。
 //!
 //! 目标是否存在（红链 / 蓝链）由后端判定：从 [`crate::markdown::current_resolver`]
 //! 取当次渲染注入的解析器（见 [`crate::markdown::render_with`]）。取不到解析器时
@@ -34,10 +35,18 @@ impl NodeValue for WikiLink {
         if let Some(resolved) = &self.resolved {
             attrs.push(("data-key", resolved.key.clone()));
             attrs.push(("data-title", resolved.title.clone()));
-            attrs.push((
-                "data-missing",
-                if resolved.exists { "false" } else { "true" }.into(),
-            ));
+            match &resolved.url {
+                // 跨站链接：给真实地址（前端按外链打开），绿链由 CSS 上色。
+                // 它不参与"红链/蓝链"的判断 —— 那是本仓库有没有这一页的事。
+                Some(url) => {
+                    attrs.push(("href", url.clone()));
+                    attrs.push(("data-interwiki", "true".into()));
+                }
+                None => attrs.push((
+                    "data-missing",
+                    if resolved.exists { "false" } else { "true" }.into(),
+                )),
+            }
         }
 
         fmt.open("a", &attrs);

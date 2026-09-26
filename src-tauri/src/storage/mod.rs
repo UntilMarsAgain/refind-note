@@ -1352,6 +1352,51 @@ impl Vault {
         Ok(count)
     }
 
+    /// 给命名空间改名。
+    ///
+    /// 两跳寻址下这**只是改表里一行**：磁盘目录与标题键用的都是标识，所以
+    /// **一个文件都不用动**（这也正是当初把标识与名字分开的理由）。
+    /// 需要跟着走的只有名字表里的**完整显示标题**前缀。
+    pub fn rename_namespace(&mut self, key: &str, new_name: &str) -> Result<(), VaultError> {
+        let id = self.namespace_id(key);
+        if NamespaceTable::is_reserved(&id) {
+            return Err(VaultError::BadAddress(format!(
+                "「{key}」是保留的命名空间，不能改名"
+            )));
+        }
+        let old_name = self
+            .table
+            .get(&id)
+            .map(|item| item.name.clone())
+            .ok_or_else(|| VaultError::BadAddress(format!("命名空间「{key}」不存在")))?;
+
+        let new_name = new_name.trim().to_string();
+        let mut table = (*self.table).clone();
+        let Some(item) = table.items.iter_mut().find(|item| item.id == id) else {
+            return Err(VaultError::BadAddress(format!("命名空间「{key}」不存在")));
+        };
+        item.name = new_name.clone();
+        // 先校验、通过了才替换：失败不留半张表
+        table.validate().map_err(VaultError::BadAddress)?;
+        self.table = Arc::new(table);
+
+        if !old_name.is_empty() && old_name != new_name {
+            let mut titles = self.titles()?;
+            let old_prefix = format!("{old_name}:");
+            let new_prefix = format!("{new_name}:");
+            for map in [&mut titles.notes, &mut titles.trashed] {
+                for value in map.values_mut() {
+                    if let Some(rest) = value.strip_prefix(&old_prefix) {
+                        *value = format!("{new_prefix}{rest}");
+                    }
+                }
+            }
+            self.save_titles(&titles)?;
+        }
+
+        self.save_namespaces()
+    }
+
     /// 删除一个命名空间：先清空（页面进回收站），再把自己从表里去掉。
     ///
     /// 键就是名字，所以**删掉再建同名 = 没删过**（你说的那条）。
@@ -3947,6 +3992,80 @@ mod tests {
         // 保留名不可删
         assert!(temp.vault.delete_namespace("special").is_err());
         assert!(temp.vault.delete_namespace("0").is_err());
+    }
+
+    /// 改名只改表里一行：**文件一个都不搬**，链接跟着新名字走
+    #[test]
+    fn renaming_a_namespace_moves_nothing() {
+        fn dirs(root: &Path) -> Vec<String> {
+            let mut out: Vec<String> = fs::read_dir(root.join("notes"))
+                .unwrap()
+                .flatten()
+                .map(|entry| entry.file_name().to_string_lossy().to_string())
+                .collect();
+            out.sort();
+            out
+        }
+
+        let mut temp = TempVault::new();
+        temp.vault.add_namespace("help", Vec::new(), None).unwrap();
+        temp.vault.create("help:甲").unwrap();
+        temp.vault.commit("help:甲", "正文", None, 0).unwrap();
+
+        let before = dirs(&temp.root);
+        temp.vault.rename_namespace("help", "帮助").unwrap();
+        assert_eq!(before, dirs(&temp.root), "改名不该动任何目录或文件");
+
+        // 新名字认识它，旧名字不再认识
+        assert_eq!(temp.vault.load("帮助:甲").unwrap().title, "帮助:甲");
+        assert!(temp.vault.load("help:甲").is_err(), "旧名字已经不属于它了");
+
+        // 旧名字可以给别人用（键是标识，不是名字）
+        temp.vault.add_namespace("help", Vec::new(), None).unwrap();
+        // 保留名不能改名
+        assert!(temp.vault.rename_namespace("special", "别的").is_err());
+    }
+
+    /// 跨站链接：前缀配了站点地址 → 渲染成带 href 的绿链，不在本仓库里查页面
+    #[test]
+    fn interwiki_links_point_at_another_site() {
+        let mut temp = TempVault::new();
+        temp.vault
+            .add_namespace(
+                "zhwiki",
+                Vec::new(),
+                Some("https://zh.wikipedia.org/wiki/$1".to_string()),
+            )
+            .unwrap();
+
+        let item = temp
+            .vault
+            .namespaces()
+            .into_iter()
+            .find(|item| item.name == "zhwiki")
+            .unwrap();
+        assert!(!item.storable, "配了站点的命名空间页面在别处，本仓库不存");
+        assert_eq!(
+            item.url_for("New York").unwrap(),
+            "https://zh.wikipedia.org/wiki/New_York",
+            "空格按 MediaWiki 习惯折成下划线"
+        );
+
+        temp.vault.create("引用").unwrap();
+        temp.vault
+            .commit("引用", "看 [[zhwiki:NASA|NASA]]。", None, 0)
+            .unwrap();
+
+        let html = temp.vault.load("引用").unwrap().html;
+        assert!(
+            html.contains(r#"href="https://zh.wikipedia.org/wiki/NASA""#),
+            "{html}"
+        );
+        assert!(html.contains(r#"data-interwiki="true""#), "{html}");
+        assert!(
+            !html.contains("data-missing"),
+            "跨站链接不该被判成红链（那是本仓库有没有这一页的事）：{html}"
+        );
     }
 
     #[test]
