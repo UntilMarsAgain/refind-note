@@ -12,6 +12,19 @@ import { FILE_SCHEME, fileTargetOf, httpUrlOf, vaultKeyOf } from "./file-links";
 import { viewImage } from "./image-viewer";
 
 /**
+ * "在新标签页打开"由 App 注入。
+ *
+ * 笔记正文是**后端渲染的 HTML**，这里拿不到 App 的事件通道，所以由 App 在启动时把实现
+ * 塞进来 —— 与"点链接"走同一个函数，两处行为不会分家。
+ */
+let openInNewTab: ((address: string) => void) | null = null;
+
+/** App 启动时调用一次 */
+export function setOpenInNewTab(handler: (address: string) => void) {
+  openInNewTab = handler;
+}
+
+/**
  * 图片取不到时**换成一句说明**，而不是留一个破图标：
  * 读者要知道的是"这张图不在了"，而不是盯着一个加载失败的方框猜。
  */
@@ -71,6 +84,11 @@ function attachContextMenu(root: HTMLElement) {
     } else if (target instanceof HTMLAnchorElement) {
       // 内部链接上写的是笔记地址（`data-title`），外部链接就是 href
       const address = target.dataset.title || target.getAttribute("href") || "";
+      const internal = target.dataset.title;
+      if (internal && openInNewTab) {
+        // 与 Ctrl+点击同一件事：右键里也该有它，否则这条路只有键盘用户找得到
+        items.push({ label: "在新标签页打开", run: () => openInNewTab?.(internal) });
+      }
       items.push({ label: "复制链接地址", run: () => writeText(address) });
     }
 

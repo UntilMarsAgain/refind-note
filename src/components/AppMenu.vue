@@ -9,6 +9,8 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { FALLBACK_GROUP, metaOf, SPECIAL_GROUPS } from "../special";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { openMenu } from "../context-menu";
 import { logoSrc } from "../theme";
 
 const props = defineProps<{
@@ -27,8 +29,35 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "open", address: string): void;
+  /** Ctrl/Cmd 点击，或者右键菜单里选「在新标签页打开」 */
+  (e: "open-new-tab", address: string): void;
   (e: "close"): void;
 }>();
+
+/** 点条目：Ctrl/Cmd 点击＝在新标签页打开（与正文里的链接一个规矩） */
+function activate(event: MouseEvent, page: string) {
+  if (event.ctrlKey || event.metaKey) {
+    emit("open-new-tab", "special:" + page);
+    return;
+  }
+  emit("open", "special:" + page);
+}
+
+/**
+ * 条目上右键：与浏览器一致，给「在新标签页打开」。
+ *
+ * 顺带一项「复制地址」—— 菜单栏里都是本程序的系统页面，地址写成 `special:xxx`，
+ * 抄下来贴进地址栏就能打开。
+ */
+function onItemMenu(event: MouseEvent, page: string) {
+  event.preventDefault();
+  event.stopPropagation();
+  const address = "special:" + page;
+  openMenu(event, [
+    { label: "在新标签页打开", run: () => emit("open-new-tab", address) },
+    { label: "复制地址", run: () => writeText(address) },
+  ]);
+}
 
 // Esc 关闭：这一版菜单不压暗页面，键盘出口要留一个
 function onKeydown(event: KeyboardEvent) {
@@ -103,7 +132,8 @@ const groups = computed(() =>
               class="menu__item"
               type="button"
               :title="metaOf(page).tip"
-              @click="emit('open', `special:${page}`)"
+              @click="activate($event, page)"
+              @contextmenu="onItemMenu($event, page)"
             >
               <component
                 :is="metaOf(page).icon"

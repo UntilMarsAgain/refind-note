@@ -15,6 +15,7 @@ import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { type MenuItem, closeMenu, openMenu } from "./context-menu";
 import { popClosed, pushClosed } from "./closed-tabs";
 import { recordVisit } from "./history";
+import { setOpenInNewTab } from "./note-html";
 import { invoke } from "@tauri-apps/api/core";
 import FloatingTools from "./components/FloatingTools.vue";
 import HistoryView from "./components/HistoryView.vue";
@@ -667,6 +668,9 @@ onBeforeUnmount(() => {
 });
 
 onMounted(async () => {
+  // 笔记正文里的"在新标签页打开"由这里注入实现（正文是后端渲染的 HTML，
+  // 拿不到组件的事件通道）
+  setOpenInNewTab(openTabWith);
   window.addEventListener("keydown", onGlobalKey);
   window.addEventListener("contextmenu", onContextMenu);
   try {
@@ -1719,6 +1723,7 @@ function onAction(name: string) {
     :open="menuOpen"
     :pages="specialPages"
     :title="APP_NAME"
+    @open-new-tab="openTabWith"
     @open="openFromMenu"
     @close="menuOpen = false"
   />
