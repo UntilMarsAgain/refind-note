@@ -311,7 +311,8 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
 
 <style scoped>
 .settings {
-  max-width: 640px;
+  /* 宽度交给 App 的阅读栏（`.app__column`）：限宽时 1080，不限宽时铺满。
+     这里自设 max-width 会把它盖住，页面对"限宽"按钮就没反应了。 */
   margin: 0 auto;
   padding: 28px 20px 64px;
 }

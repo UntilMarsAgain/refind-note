@@ -39,6 +39,10 @@ const editingId = ref("");
 const editingName = ref("");
 /** 已按过一次"确认"的破坏性操作（`清空:<标识>` / `删除:<标识>`） */
 const armed = ref("");
+/** 正在编辑别名的那一项，以及它的草稿（点保存才落盘） */
+const aliasId = ref("");
+const aliasDraft = ref<string[]>([]);
+const aliasInput = ref("");
 
 const newName = ref("");
 const newAliases = ref("");
@@ -126,6 +130,43 @@ async function add() {
   });
 }
 
+/**
+ * 谁可以清空：有页面文件的都能 —— **主命名空间也可以**（你要求的）。
+ * `special` 是虚拟的，页面由程序提供，没有可清的页面。
+ */
+function canEmpty(item: Namespace): boolean {
+  return item.id !== SPECIAL;
+}
+
+function startAliases(item: Namespace) {
+  aliasId.value = item.id;
+  aliasDraft.value = [...item.aliases];
+  aliasInput.value = "";
+  armed.value = "";
+}
+
+function addAlias() {
+  const value = aliasInput.value.trim();
+  if (value && !aliasDraft.value.includes(value)) {
+    aliasDraft.value = [...aliasDraft.value, value];
+  }
+  aliasInput.value = "";
+}
+
+function dropAlias(alias: string) {
+  aliasDraft.value = aliasDraft.value.filter((value) => value !== alias);
+}
+
+async function saveAliases(item: Namespace) {
+  await act(item.id, () =>
+    invoke<Namespace[]>("update_namespace_aliases", {
+      key: item.id,
+      aliases: aliasDraft.value,
+    }),
+  );
+  aliasId.value = "";
+}
+
 function startRename(item: Namespace) {
   editingId.value = item.id;
   editingName.value = item.name;
@@ -207,7 +248,37 @@ function remove(item: Namespace) {
           </div>
 
           <div class="ns__cell ns__cell--actions">
-            <template v-if="editingId === item.id">
+            <!-- 别名编辑：草稿 + 保存（点保存才落盘，避免每敲一下就发一次请求） -->
+            <template v-if="aliasId === item.id">
+              <span class="ns__chips">
+                <span v-for="alias in aliasDraft" :key="alias" class="ns__chip">
+                  {{ alias }}
+                  <button
+                    class="ns__chip-x"
+                    type="button"
+                    :aria-label="`删除别名 ${alias}`"
+                    @click="dropAlias(alias)"
+                  >
+                    ×
+                  </button>
+                </span>
+                <span v-if="!aliasDraft.length" class="ns__dim">还没有别名</span>
+              </span>
+              <input
+                v-model="aliasInput"
+                class="ns__input"
+                type="text"
+                placeholder="新别名"
+                @keydown.enter.prevent="addAlias"
+              />
+              <button class="ns__btn" type="button" @click="addAlias">添加</button>
+              <button class="ns__btn ns__btn--primary" type="button" @click="saveAliases(item)">
+                保存
+              </button>
+              <button class="ns__btn" type="button" @click="aliasId = ''">取消</button>
+            </template>
+
+            <template v-else-if="editingId === item.id">
               <input
                 v-model="editingName"
                 class="ns__input"
@@ -220,8 +291,18 @@ function remove(item: Namespace) {
               <button class="ns__btn" type="button" @click="editingId = ''">取消</button>
             </template>
 
-            <template v-else-if="!isReserved(item)">
+            <template v-else>
               <button
+                class="ns__btn"
+                type="button"
+                :disabled="busy === item.id"
+                @click="startAliases(item)"
+              >
+                别名
+              </button>
+              <!-- 主命名空间只不能改名与删除；special 只能配别名 -->
+              <button
+                v-if="!isReserved(item)"
                 class="ns__btn"
                 type="button"
                 :disabled="busy === item.id"
@@ -230,6 +311,7 @@ function remove(item: Namespace) {
                 改名
               </button>
               <button
+                v-if="canEmpty(item)"
                 class="ns__btn"
                 type="button"
                 :disabled="busy === item.id"
@@ -238,6 +320,7 @@ function remove(item: Namespace) {
                 {{ armed === '清空:' + item.id ? '确认清空' : '清空' }}
               </button>
               <button
+                v-if="!isReserved(item)"
                 class="ns__btn ns__btn--danger"
                 type="button"
                 :disabled="busy === item.id"
@@ -246,8 +329,6 @@ function remove(item: Namespace) {
                 {{ armed === '删除:' + item.id ? '确认删除' : '删除' }}
               </button>
             </template>
-
-            <span v-else class="ns__locked">不可改名 / 清空 / 删除</span>
           </div>
         </div>
       </div>
@@ -296,6 +377,10 @@ function remove(item: Namespace) {
   color: var(--text-dim);
   font-size: 12.5px;
   line-height: 1.7;
+}
+
+.ns__cell--actions .ns__chips {
+  max-width: 320px;
 }
 
 .ns__lead code,
@@ -380,6 +465,17 @@ function remove(item: Namespace) {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+
+.ns__chip-x {
+  margin-left: 4px;
+  padding: 0;
+  border: 0;
+  background-color: transparent;
+  color: var(--link-missing);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .ns__chip {
