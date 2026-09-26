@@ -11,7 +11,7 @@ mod title;
 
 use std::sync::{Mutex, MutexGuard};
 use storage::{
-    Address, CommandInfo, DiffResult, Draft, GcReport, LoadOutcome, MaintenanceReport, Note, NoteSummary,
+    Address, CommandInfo, Namespace, DiffResult, Draft, GcReport, LoadOutcome, MaintenanceReport, Note, NoteSummary,
     PurgeReport, RevisionContent, RevisionSummary, TrashEntry, Vault, VaultSettings,
 };
 use tauri::Manager;
@@ -106,6 +106,49 @@ fn command_info(title: String) -> Result<Option<CommandInfo>, String> {
     open()?
         .command_info(&title)
         .map_err(|error| error.to_string())
+}
+
+/// 命名空间表（设置页用）
+#[tauri::command]
+fn namespaces() -> Result<Vec<Namespace>, String> {
+    Ok(open()?.namespaces())
+}
+
+/// 新增一个命名空间
+#[tauri::command]
+fn add_namespace(
+    name: String,
+    aliases: Vec<String>,
+    site: Option<String>,
+) -> Result<Vec<Namespace>, String> {
+    let _guard = write_guard();
+    let mut vault = open()?;
+    vault
+        .add_namespace(&name, aliases, site)
+        .map_err(|error| error.to_string())?;
+    Ok(vault.namespaces())
+}
+
+/// 清空一个命名空间（页面进回收站）
+#[tauri::command]
+fn empty_namespace(key: String) -> Result<Vec<Namespace>, String> {
+    let _guard = write_guard();
+    let vault = open()?;
+    vault
+        .empty_namespace(&key)
+        .map_err(|error| error.to_string())?;
+    Ok(vault.namespaces())
+}
+
+/// 删除一个命名空间（先清空，再从表里去掉；不可找回）
+#[tauri::command]
+fn delete_namespace(key: String) -> Result<Vec<Namespace>, String> {
+    let _guard = write_guard();
+    let mut vault = open()?;
+    vault
+        .delete_namespace(&key)
+        .map_err(|error| error.to_string())?;
+    Ok(vault.namespaces())
 }
 
 /// 回收站清单（`special:trash` 用它）
@@ -440,6 +483,10 @@ pub fn run() {
             load_note_no_command,
             command_kind,
             command_info,
+            namespaces,
+            add_namespace,
+            empty_namespace,
+            delete_namespace,
             list_trash,
             purge_trash,
             restore_note,

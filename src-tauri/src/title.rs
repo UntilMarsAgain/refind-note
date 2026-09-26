@@ -65,6 +65,10 @@ pub struct Namespace {
     pub aliases: Vec<String>,
     /// 虚拟命名空间（Special / Media）不落存储
     pub storable: bool,
+    /// 跨站链接的地址模板，`$1` 是页面名（如 `https://zh.wikipedia.org/wiki/$1`）。
+    /// 有它的命名空间写成 `[[zhwiki:NASA]]` 时渲染成绿链，不再查本仓库有没有这一页。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub site: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,13 +101,17 @@ impl NamespaceTable {
                     name: String::new(),
                     aliases: Vec::new(),
                     storable: true,
+                    site: None,
                 },
                 // 虚拟命名空间：`special:` 下的页面由程序提供，不落存储
                 Namespace {
                     id: SPECIAL_NS.to_string(),
                     name: SPECIAL_NS.to_string(),
-                    aliases: vec!["Special".to_string()],
+                    // 不需要 "Special" 之类的别名：查找本来就不区分大小写，
+                    // 而"别名与规范名折过之后相同"正是查重要拦下的重复
+                    aliases: Vec::new(),
                     storable: false,
+                    site: None,
                 },
             ],
         }
@@ -133,6 +141,75 @@ impl NamespaceTable {
             fold(&item.name) == needle
                 || item.aliases.iter().any(|alias| fold(alias) == needle)
         })
+    }
+
+    /// 这两个命名空间**删不掉、也不许占用它们的名字**：
+    /// 主命名空间（`"0"`）与虚拟的 `special`。
+    pub fn is_reserved(id: &str) -> bool {
+        id == MAIN_NS || id == SPECIAL_NS
+    }
+
+    /// 校验整张表：**名称与别名都不许重复**（大小写不敏感），别名也不许撞别人的规范名。
+    ///
+    /// 主命名空间的规范名是空串（它没有前缀），不参与查重；但它那个占位标识 `"0"`
+    /// 也不该被谁当成名字用。
+    pub fn validate(&self) -> Result<(), String> {
+        // 折过的大小写/空白之后，所有"能被写出来的名字"必须互不相同
+        let mut seen: Vec<(String, String)> = Vec::new();
+        for item in &self.items {
+            // 内建的那两个本来就叫 main / special：它们自己用保留名是应该的，
+            // 只是不许别人占用 —— 所以照旧进 seen，但不因此报错
+            let reserved = Self::is_reserved(&item.id);
+            let mut names: Vec<String> = Vec::new();
+            if !item.name.is_empty() {
+                names.push(item.name.clone());
+            }
+            names.extend(item.aliases.iter().cloned());
+
+            for name in names {
+                let folded = fold(&name);
+                if folded.is_empty() {
+                    return Err(format!("命名空间「{}」有空白名字", item.id));
+                }
+                if !reserved && Self::is_reserved(&folded) {
+                    return Err(format!("「{name}」是保留名，不能用作命名空间名或别名"));
+                }
+                if let Some((owner, _)) = seen.iter().find(|(key, _)| *key == folded) {
+                    return Err(format!(
+                        "「{name}」与 {} 重名；名称与别名都不能重复",
+                        owner
+                    ));
+                }
+                seen.push((folded, name));
+            }
+        }
+        Ok(())
+    }
+
+    /// 加一个命名空间。**标识就是名字本身**（你说的"只使用名称作为键"）。
+    pub fn add(&mut self, name: &str, aliases: Vec<String>, site: Option<String>) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("命名空间名不能为空".to_string());
+        }
+        if name.contains(':') || name.contains('@') || name.contains('#') || name.contains('/') {
+            return Err("命名空间名里不能有 `:` `@` `#` `/`".to_string());
+        }
+        if self.lookup(name).is_some() || self.get(name).is_some() {
+            return Err(format!("「{name}」已经存在（或与某个别名相同）"));
+        }
+
+        let mut next = self.clone();
+        next.items.push(Namespace {
+            id: name.to_string(),
+            name: name.to_string(),
+            aliases,
+            storable: true,
+            site,
+        });
+        next.validate()?;
+        *self = next;
+        Ok(())
     }
 
     /// 解析标题

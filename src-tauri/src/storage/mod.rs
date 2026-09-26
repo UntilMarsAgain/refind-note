@@ -13,6 +13,7 @@
 //!   由「每个 key 的版本列表」直接对应。
 
 use crate::markdown;
+pub use crate::title::Namespace;
 use crate::title::{LinkResolver, NamespaceTable, ParsedTitle};
 
 mod atomic;
@@ -1213,6 +1214,72 @@ impl Vault {
         }
     }
 
+    /// 命名空间表（设置页要看）
+    pub fn namespaces(&self) -> Vec<Namespace> {
+        self.table.items.clone()
+    }
+
+    /// 把命名空间表写回去。表现在可以被用户改，所以必须落盘。
+    fn save_namespaces(&self) -> Result<(), VaultError> {
+        write_atomic(
+            &self.root.join("namespaces.json"),
+            &serde_json::to_vec_pretty(&*self.table)?,
+        )?;
+        Ok(())
+    }
+
+    /// 新增一个命名空间。标识就是名字本身。
+    pub fn add_namespace(
+        &mut self,
+        name: &str,
+        aliases: Vec<String>,
+        site: Option<String>,
+    ) -> Result<(), VaultError> {
+        let mut table = (*self.table).clone();
+        table
+            .add(name, aliases, site)
+            .map_err(VaultError::BadAddress)?;
+        self.table = Arc::new(table);
+        self.save_namespaces()
+    }
+
+    /// 清空一个命名空间：里面的页面全部进回收站（可还原），命名空间本身留着。
+    pub fn empty_namespace(&self, key: &str) -> Result<usize, VaultError> {
+        let titles: Vec<String> = self
+            .walk(&self.notes_dir())?
+            .iter()
+            .filter(|parsed| parsed.ns == key)
+            .map(|parsed| parsed.display(&self.table))
+            .collect();
+
+        let mut count = 0;
+        for title in titles {
+            // 走既有的删除路径：写删除标记、文件搬进回收站 —— 一件事只实现一次
+            self.delete(&title)?;
+            count += 1;
+        }
+        Ok(count)
+    }
+
+    /// 删除一个命名空间：先清空（页面进回收站），再把自己从表里去掉。
+    ///
+    /// 键就是名字，所以**删掉再建同名 = 没删过**（你说的那条）。
+    /// 主命名空间与 `special` 不可删。
+    pub fn delete_namespace(&mut self, key: &str) -> Result<usize, VaultError> {
+        if NamespaceTable::is_reserved(key) {
+            return Err(VaultError::BadAddress(format!(
+                "「{key}」是不可删除的命名空间"
+            )));
+        }
+        let count = self.empty_namespace(key)?;
+
+        let mut table = (*self.table).clone();
+        table.items.retain(|item| item.id != key);
+        self.table = Arc::new(table);
+        self.save_namespaces()?;
+        Ok(count)
+    }
+
     /// 从回收站还原一篇笔记。
     ///
     /// 做法：文件搬回 `notes/`、名字表挪回去，然后**追加一次提交**（内容不变）——
@@ -1221,6 +1288,17 @@ impl Vault {
     /// 用追加而不是抹掉那条删除标记：**一条历史都不丢**（"什么时候删过"这件事仍留在链上），
     /// 这也是删除确认页对用户的承诺。
     pub fn restore_note(&self, title: &str) -> Result<Note, VaultError> {
+        // 命名空间可能已经被删除：那样就还原不回来了，提示要说清是哪件事
+        // （标题里不会出现 `:`，所以有冒号就一定是命名空间前缀）
+        if let Some((prefix, _)) = title.split_once(':') {
+            if self.table.lookup(prefix).is_none() {
+                return Err(VaultError::BadAddress(format!(
+                    "命名空间「{}」不存在，无法还原《{title}》",
+                    prefix.trim()
+                )));
+            }
+        }
+
         let (parsed, path) = self.locate(title)?;
         let display = parsed.display(&self.table);
         let id = Self::id_from_path(&path);
@@ -1279,17 +1357,23 @@ impl Vault {
     /// 只删日志与名字表项，**不顺手回收内容块**：那件事交给「数据库回收」那一页，
     /// 由用户决定何时回收 —— 回收站页面正好链过去。
     pub fn purge_trash_entry(&self, title: &str) -> Result<(), VaultError> {
-        let (parsed, path) = self.locate(title)?;
-        let display = parsed.display(&self.table);
-        let id = Self::id_from_path(&path);
+        // 按**名字表里的显示标题**找，而不是先解析标题：命名空间可能已经被删除，
+        // 那时解析会失败，可这条记录还得能被清掉 —— 否则它就永久卡在回收站里了。
+        let mut titles = self.titles()?;
+        let Some(id) = titles
+            .trashed
+            .iter()
+            .find(|(_, stored)| *stored == title)
+            .map(|(id, _)| id.clone())
+        else {
+            return Err(VaultError::NotFound(title.to_string()));
+        };
 
         let trashed = self.trashed_path(&id);
         if !trashed.is_file() {
-            return Err(VaultError::NotFound(display));
+            return Err(VaultError::NotFound(title.to_string()));
         }
         fs::remove_file(&trashed)?;
-
-        let mut titles = self.titles()?;
         titles.trashed.remove(&id);
         self.save_titles(&titles)?;
         Ok(())
@@ -3684,6 +3768,37 @@ mod tests {
                 assert_eq!(via.from, "跳到设置");
                 assert!(!via.random, "这是重定向，不是随机跳转");
             }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// 命名空间：名称与别名都不许重复，保留名不许占用
+    #[test]
+    fn namespace_names_must_be_unique() {
+        let mut temp = TempVault::new();
+        temp.vault
+            .add_namespace("help", vec!["帮助".to_string()], None)
+            .unwrap();
+
+        assert!(temp.vault.add_namespace("help", Vec::new(), None).is_err());
+        assert!(temp.vault.add_namespace("HELP", Vec::new(), None).is_err());
+        assert!(temp
+            .vault
+            .add_namespace("other", vec![" help ".to_string()], None)
+            .is_err());
+        assert!(temp
+            .vault
+            .add_namespace("other", vec!["甲".to_string(), "甲".to_string()], None)
+            .is_err());
+        assert!(temp.vault.add_namespace("special", Vec::new(), None).is_err());
+        assert!(temp.vault.add_namespace("0", Vec::new(), None).is_err());
+        assert!(temp.vault.add_namespace("  ", Vec::new(), None).is_err());
+
+        // 别名解析成规范名（链接回显走的就是这条路）
+        temp.vault.create("help:入门").unwrap();
+        temp.vault.commit("help:入门", "正文", None, 0).unwrap();
+        match temp.vault.parse_address("帮助:入门").unwrap() {
+            Address::Note { title, .. } => assert_eq!(title, "help:入门"),
             other => panic!("{other:?}"),
         }
     }
