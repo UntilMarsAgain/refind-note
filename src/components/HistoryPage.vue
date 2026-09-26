@@ -7,11 +7,34 @@
  */
 import { computed, ref } from "vue";
 import { History, Trash2 } from "@lucide/vue";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { openMenu } from "../context-menu";
 import { browsingHistory, clearHistory, historyEnabled } from "../history";
 
 const emit = defineEmits<{
   (e: "open", address: string): void;
+  /** Ctrl/Cmd 点击，或者右键菜单里选「在新标签页打开」 */
+  (e: "open-new-tab", address: string): void;
 }>();
+
+/** 点一条：Ctrl/Cmd 点击＝在新标签页打开（与菜单栏、正文链接一个规矩） */
+function activate(event: MouseEvent, address: string) {
+  if (event.ctrlKey || event.metaKey) {
+    emit("open-new-tab", address);
+    return;
+  }
+  emit("open", address);
+}
+
+/** 条目上右键：与别处一致，给"在新标签页打开"与"复制地址" */
+function onRowMenu(event: MouseEvent, address: string) {
+  event.preventDefault();
+  event.stopPropagation();
+  openMenu(event, [
+    { label: "在新标签页打开", run: () => emit("open-new-tab", address) },
+    { label: "复制地址", run: () => writeText(address) },
+  ]);
+}
 
 /** 正在等第二次确认：清空不可撤销，值得多问一句 */
 const confirming = ref(false);
@@ -64,11 +87,17 @@ function clear() {
 
     <ul v-else class="history__list">
       <li v-for="row in rows" :key="row.address + row.at" class="history__item">
-        <button class="history__open" type="button" @click="emit('open', row.address)">
+        <button
+          class="history__open"
+          type="button"
+          :title="row.address"
+          @click="activate($event, row.address)"
+          @contextmenu="onRowMenu($event, row.address)"
+        >
           <span class="history__title">{{ row.title }}</span>
           <span class="history__address">{{ row.address }}</span>
+          <span class="history__when">{{ row.when }}</span>
         </button>
-        <span class="history__when">{{ row.when }}</span>
       </li>
     </ul>
   </section>
@@ -142,18 +171,26 @@ function clear() {
   border-bottom: 1px solid var(--border);
 }
 
+/*
+ * 一条一行：标题、地址、时间并排。
+ *
+ * 原来是标题与地址各占一行，每一行将近 60px —— 一屏看不掉十几条，
+ * 而"翻历史"恰恰需要一次看到很多条。地址过长时截断，完整地址在悬停提示里。
+ */
 .history__open {
   flex: 1;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 4px;
+  display: grid;
+  grid-template-columns: minmax(0, 16em) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: baseline;
+  padding: 5px 6px;
   border: 0;
   background: none;
   color: var(--text);
   text-align: left;
   cursor: pointer;
+  font-size: 0.92em;
 }
 
 .history__open:hover {
@@ -171,7 +208,15 @@ function clear() {
 }
 
 .history__address {
-  word-break: break-all;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.history__title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .history__when {

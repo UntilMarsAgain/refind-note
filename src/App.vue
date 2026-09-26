@@ -1539,6 +1539,7 @@ function onAction(name: string) {
       <ChangesPage
         v-else-if="mode === 'special' && specialPage === 'changes'"
         @open="openFromList"
+        @open-new-tab="openTabWith"
       />
 
       <!--
@@ -1548,6 +1549,7 @@ function onAction(name: string) {
       <HistoryPage
         v-else-if="mode === 'special' && specialPage === 'history'"
         @open="openFromList"
+        @open-new-tab="openTabWith"
       />
 
           <!-- 编辑中：不显示页头，操作都在编辑器自己那一行里 -->

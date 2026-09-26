@@ -7,11 +7,15 @@
  */
 import { onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { openMenu } from "../context-menu";
 import { Clock } from "@lucide/vue";
 import type { ChangeEntry } from "../bindings";
 
 const emit = defineEmits<{
   (e: "open", address: string): void;
+  /** Ctrl/Cmd 点击，或者右键菜单里选「在新标签页打开」 */
+  (e: "open-new-tab", address: string): void;
 }>();
 
 /** 一次看多少条。给个上限是因为"最近"本来就该有边界 */
@@ -43,9 +47,29 @@ async function refresh() {
   }
 }
 
-/** 点一条：能定位到那一版就定位过去，否则打开这一页 */
-function open(entry: ChangeEntry) {
-  emit("open", entry.short_id ? entry.title + "@view-" + entry.short_id : entry.title);
+/** 这一条对应的地址：能定位到那一版就定位过去，否则就是这一页 */
+function addressOf(entry: ChangeEntry): string {
+  return entry.short_id ? entry.title + "@view-" + entry.short_id : entry.title;
+}
+
+/** 点一条：Ctrl/Cmd 点击＝在新标签页打开（与别处一个规矩） */
+function open(event: MouseEvent, entry: ChangeEntry) {
+  if (event.ctrlKey || event.metaKey) {
+    emit("open-new-tab", addressOf(entry));
+    return;
+  }
+  emit("open", addressOf(entry));
+}
+
+/** 条目上右键：与别处一致 */
+function onRowMenu(event: MouseEvent, entry: ChangeEntry) {
+  event.preventDefault();
+  event.stopPropagation();
+  const address = addressOf(entry);
+  openMenu(event, [
+    { label: "在新标签页打开", run: () => emit("open-new-tab", address) },
+    { label: "复制地址", run: () => writeText(address) },
+  ]);
 }
 
 function when(at: string): string {
@@ -92,7 +116,12 @@ onMounted(refresh);
 
     <ul v-else class="changes__list">
       <li v-for="entry in entries" :key="entry.title + entry.rev" class="changes__item">
-        <button class="changes__open" type="button" @click="open(entry)">
+        <button
+          class="changes__open"
+          type="button"
+          @click="open($event, entry)"
+          @contextmenu="onRowMenu($event, entry)"
+        >
           <span class="changes__when">{{ when(entry.at) }}</span>
           <span class="changes__kind" :class="'changes__kind--' + entry.kind">
             {{ KIND_LABELS[entry.kind] ?? entry.kind }}
