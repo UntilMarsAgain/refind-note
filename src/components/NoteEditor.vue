@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Check, Pencil, Save, Trash2, X } from "@lucide/vue";
 import { checkTitle } from "../title";
 import { themeMode } from "../theme";
-import { applyLineNumbers } from "../code-blocks";
+import { applyLineNumbers, highlightCode } from "../code-blocks";
 import {
   templateBlockLines,
   templateFoldRange,
@@ -311,10 +311,16 @@ function updateCursor(state: EditorState) {
 /** 预览那一层（行号加在它上面；预览故意不做高亮：每次输入都会重跑） */
 const previewEl = ref<HTMLElement | null>(null);
 
-/** 预览一更新（v-html 换完 DOM）就补上行号 */
+/**
+ * 预览一更新（v-html 换完 DOM）就补上高亮与行号。
+ *
+ * 预览与阅读视图走**同一个渲染器**，所以这里也该长成同一个样子：以前只加行号，
+ * 代码是纯色的一片，看不出"编译出来是什么样"。
+ */
 watch(preview, () => {
   void nextTick(() => {
     if (previewEl.value) {
+      highlightCode(previewEl.value);
       applyLineNumbers(previewEl.value);
     }
   });

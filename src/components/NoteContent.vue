@@ -2,8 +2,7 @@
 import { nextTick, onMounted, ref, watch } from "vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import hljs from "highlight.js/lib/common";
-import { applyLineNumbers } from "../code-blocks";
+import { applyLineNumbers, highlightCode } from "../code-blocks";
 import { codeLineNumbers } from "../settings";
 
 const props = defineProps<{ html: string }>();
@@ -25,21 +24,6 @@ const COPIED_TEXT = "已复制";
 const FAILED_TEXT = "复制失败";
 
 /**
- * markdown-it 只给代码块标上 language-xxx，真正的分词交给 highlight.js。
- * 只引入 common 那一档（36 种常用语言），不把全部语言包打进来。
- */
-function highlight(block: HTMLElement) {
-  const language = Array.from(block.classList)
-    .find((name) => name.startsWith("language-"))
-    ?.slice("language-".length);
-
-  // 未注册的语言 hljs 会打警告并跳过，这里先挡掉，避免控制台刷屏
-  if (language && hljs.getLanguage(language)) {
-    hljs.highlightElement(block);
-  }
-}
-
-/**
  * 给每个代码块套一层容器并挂上复制按钮。
  * 按钮必须放在 <pre> 外面：pre 有 overflow:auto，放里面会跟着横向滚动被裁掉；
  * 而且放外面，选中或复制代码时不会把按钮算进去。
@@ -50,11 +34,12 @@ function decorateCodeBlocks() {
     return;
   }
 
+  // 先上色，再加行号：行号列是按行高摆的，色带也是，顺序不影响，但先色后号更直观
+  highlightCode(root);
+
   for (const pre of root.querySelectorAll("pre")) {
+    // 复制按钮要用它取原文（高亮交给上面的 highlightCode）
     const code = pre.querySelector("code");
-    if (code instanceof HTMLElement) {
-      highlight(code);
-    }
 
     const frame = document.createElement("div");
     frame.className = "code-frame";

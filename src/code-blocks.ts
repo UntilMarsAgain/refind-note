@@ -4,8 +4,33 @@
  * 行号**不写进代码文本**，而是单独一列：写进去就会参与复制，也会被 highlight.js
  * 当成代码一起分词。横向滚动时那一列用 sticky 留在原地。
  */
+import hljs from "highlight.js/lib/common";
 import { markedLines } from "./code-marks";
 import { codeLineNumbers } from "./settings";
+
+/**
+ * 给代码块分词上色。
+ *
+ * 阅读视图与**编辑器预览**都用它 —— 预览以前刻意不做高亮（每次输入都会重跑），
+ * 但那让"编译出来是什么样"少了一件事可看；预览本来就按静默节流重跑，负担可控。
+ *
+ * 只引 `common` 那一档（36 种常用语言），不把全部语言包打进来。
+ */
+export function highlightCode(root: HTMLElement): void {
+  for (const block of root.querySelectorAll("code")) {
+    // 已经上过色的跳过：hljs 对重复调用会告警，而且再做一遍也没意义
+    if (block.hasAttribute("data-highlighted")) {
+      continue;
+    }
+    const language = Array.from(block.classList)
+      .find((name) => name.startsWith("language-"))
+      ?.slice("language-".length);
+    // 未注册的语言 hljs 会打警告并跳过，这里先挡掉，避免控制台刷屏
+    if (language && hljs.getLanguage(language)) {
+      hljs.highlightElement(block as HTMLElement);
+    }
+  }
+}
 
 /** 代码有多少行。末尾那个换行不算多出来的一行，空代码块算一行。 */
 function lineCount(text: string): number {
