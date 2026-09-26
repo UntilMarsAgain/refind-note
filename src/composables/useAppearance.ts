@@ -4,7 +4,7 @@
  * 从 `App.vue` 抽出来：这一块只跟"设置"有关，与地址、标签页、笔记都没有交集。
  */
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { setThemeMode, type ThemeMode } from "../theme";
+import { resolvedTheme, setThemeMode, type ThemeMode } from "../theme";
 import { BASE_ZOOM } from "../settings";
 import type { VaultSettings } from "../bindings";
 
@@ -21,6 +21,28 @@ export function tintOf(hex: string): string {
   }
   const value = Number.parseInt(match[1]!, 16);
   return `rgba(${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}, 0.16)`;
+}
+
+/**
+ * 主题色的**不透明**版本：把它按比例混进底色。
+ *
+ * `tintOf` 给的是 `rgba(..., 0.16)` —— 底色淡染用它正合适，但浮层不能用它：
+ * 底下的正文会透上来，叠在一起就看不清了。浮层要的是"跟随主题色、又能完全遮住"。
+ */
+export function solidTintOf(hex: string, light: boolean): string {
+  const match = /^#([0-9a-fA-F]{6})$/.exec(hex.trim());
+  if (!match) {
+    return light ? "#ffffff" : "#171a1e";
+  }
+  const value = Number.parseInt(match[1]!, 16);
+  const accent = [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+  const base = light ? [255, 255, 255] : [23, 26, 30];
+  // 混入比例：深色底要稍高一点，才看得出"带颜色"而不是灰块
+  const ratio = light ? 0.14 : 0.22;
+  const mixed = accent.map((channel, index) =>
+    Math.round(channel * ratio + (base[index] ?? 0) * (1 - ratio)),
+  );
+  return `rgb(${mixed[0]}, ${mixed[1]}, ${mixed[2]})`;
 }
 
 /**
@@ -44,6 +66,10 @@ export function applyAppearance(settings: VaultSettings | null) {
   root.setProperty("--accent", settings.accent);
   root.setProperty("--accent-soft", settings.accent);
   root.setProperty("--accent-tint", tintOf(settings.accent));
+  root.setProperty(
+    "--accent-solid",
+    solidTintOf(settings.accent, resolvedTheme.value === "light"),
+  );
   root.setProperty("--reading-width", `${settings.reading_width}px`);
 
   void getCurrentWebview().setZoom(effectiveZoom(settings.zoom));

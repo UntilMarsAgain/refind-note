@@ -137,8 +137,9 @@ onBeforeUnmount(() => window.clearInterval(timer));
   padding: 8px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  /* 状态条跟着**主题色**走：它是"后台在做什么"的窗口，不是警告框 */
-  background: var(--accent-tint);
+  /* 状态条跟着**主题色**走，并且必须**不透明**：它浮在正文上，
+     半透明的底会让文字透上来，两边叠着谁也看不清 */
+  background: var(--accent-solid);
   box-shadow: 0 10px 26px rgb(0 0 0 / 35%);
   font-size: 13px;
 }
