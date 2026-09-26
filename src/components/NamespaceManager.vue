@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Namespace } from "../api-types";
+import type { Namespace } from "../bindings";
 /**
  * 命名空间管理。
  *

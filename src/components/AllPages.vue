@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { NoteSummary } from "../api-types";
+import type { NoteSummary } from "../bindings";
 /**
  * 全部页面（`special:all`）：列出数据库里所有笔记，以及所有可用的特殊页面。
  *

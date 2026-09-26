@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { NoteSummary } from "../api-types";
+import type { NoteSummary } from "../bindings";
 import { computed, nextTick, ref, watch } from "vue";
 import { Search } from "@lucide/vue";
 

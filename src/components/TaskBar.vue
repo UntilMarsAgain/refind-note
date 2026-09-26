@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Task } from "../api-types";
+import type { Task } from "../bindings";
 /**
  * 底部任务状态栏。
  *

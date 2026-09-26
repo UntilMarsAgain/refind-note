@@ -6,7 +6,7 @@
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { setThemeMode, type ThemeMode } from "../theme";
 import { BASE_ZOOM } from "../settings";
-import type { VaultSettings } from "../api-types";
+import type { VaultSettings } from "../bindings";
 
 /**
  * `#rrggbb` → 低透明度版本。

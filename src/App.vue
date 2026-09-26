@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 地址的判别式**只有后端一处定义**：这份类型由 `cargo test` 从 Rust 导出到 src/bindings/
-import type { Address } from "./bindings/Address";
+import type { Address } from "./bindings";
 import type {
   Draft,
   LoadOutcome,
@@ -8,7 +8,7 @@ import type {
   NoteSummary,
   RevisionContent,
   VaultSettings,
-} from "./api-types";
+} from "./bindings";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import FloatingTools from "./components/FloatingTools.vue";

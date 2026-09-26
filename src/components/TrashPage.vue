@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { TrashEntry } from "../api-types";
+import type { TrashEntry } from "../bindings";
 /**
  * 回收站（`special:trash`）。
  *

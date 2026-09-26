@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { DiffResult, DiffLine, RevisionSummary } from "../api-types";
+import type { DiffResult, DiffLine, RevisionSummary } from "../bindings";
 import { computed, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { ArrowLeft } from "@lucide/vue";

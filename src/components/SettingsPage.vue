@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { VaultSettings } from "../api-types";
+import type { VaultSettings } from "../bindings";
 /**
  * 设置页（`special:settings`）。
  *
