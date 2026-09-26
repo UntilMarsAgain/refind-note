@@ -7,7 +7,12 @@
 //! 这是防止"编辑器与渲染各说各话"的机制：规则改坏任何一边，两边都会当场报出来。
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { headIndent, isTemplateHead, templateBlockEnd } from "./template-blocks.ts";
+import {
+  headIndent,
+  isTemplateHead,
+  templateBlockEnd,
+  templateMarks,
+} from "./template-blocks.ts";
 
 /** 便捷：算"块覆盖了哪些行"（1 基，含端点），便于与后端用例对照 */
 function covered(text: string, start = 1): string[] {
@@ -68,4 +73,40 @@ test("认得出头行：引号包住的名字也算", () => {
   assert.equal(isTemplateHead("不是头行"), false);
   // 引号没关上也不算（与后端词法一致）
   assert.equal(isTemplateHead('::"没关上'), false);
+});
+
+test("块内的行只标缩进，不染到正文", () => {
+  const marks = templateMarks(["::quote", "  正文一行", "    更深的正文"]);
+  assert.deepEqual(marks, [
+    { line: 0, head: true, start: 0, end: 7 },
+    { line: 1, head: false, start: 0, end: 2 },
+    { line: 2, head: false, start: 0, end: 4 },
+  ]);
+});
+
+test("嵌套的头行只算头行，不与外层的块内叠加", () => {
+  // 长度从字符串本身算：手写数字正是最容易抄错的东西
+  const inner = '  ::quote origin="内层"';
+  const marks = templateMarks([
+    "::quote",
+    "  外层正文",
+    "",
+    inner,
+    "    内层正文",
+  ]);
+  assert.deepEqual(marks, [
+    { line: 0, head: true, start: 0, end: 7 },
+    { line: 1, head: false, start: 0, end: 2 },
+    { line: 3, head: true, start: 0, end: inner.length },
+    { line: 4, head: false, start: 0, end: 4 },
+  ]);
+});
+
+test("空行不产生装饰（零长度标记会被 CM6 拒绝）", () => {
+  const marks = templateMarks(["::note", "  一", "", "  二"]);
+  assert.equal(marks.every((mark) => mark.end > mark.start), true);
+  assert.deepEqual(
+    marks.map((mark) => mark.line),
+    [0, 1, 3],
+  );
 });

@@ -80,3 +80,55 @@ export function templateBlockEnd(
   }
   return last;
 }
+
+/** 一条装饰：`line` 是 0 基行号，`start` / `end` 是**行内列**（0 基，end 不含） */
+export interface TemplateMark {
+  line: number;
+  head: boolean;
+  start: number;
+  end: number;
+}
+
+/**
+ * 把全文算成一串装饰（不含 CM6 的偏移量换算，所以可以直接测）。
+ *
+ * - **头行**：整行 —— 它是一次模板调用，整行标出来才看得出；
+ * - **块内的其他行**：只标行首的**缩进**。缩进是"这段属于这个块"的视觉标记，
+ *   把后面的正文也染上，只会让文字更难读（这一点你也提了）；
+ * - **嵌套的头行**只算头行、不算外层的块内：两种着色叠在同一行上，谁赢取决于样式顺序，
+ *   那是碰运气，不是规则。
+ */
+export function templateMarks(lines: string[]): TemplateMark[] {
+  const heads: number[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    if (isTemplateHead(lines[index] ?? "")) {
+      heads.push(index);
+    }
+  }
+  const isHead = new Set(heads);
+  // 一行可能同时落在多个块的范围内（嵌套），但它的缩进标记只有一条 —— 去重
+  const markedBodies = new Set<number>();
+
+  const marks: TemplateMark[] = [];
+  for (const index of heads) {
+    const text = lines[index] ?? "";
+    marks.push({ line: index, head: true, start: 0, end: text.length });
+
+    const last = templateBlockEnd(lines, index, headIndent(text));
+    for (let inner = index + 1; inner <= last; inner += 1) {
+      if (isHead.has(inner) || markedBodies.has(inner)) {
+        continue;
+      }
+      const indent = headIndent(lines[inner] ?? "");
+      if (indent === 0) {
+        // 没有缩进就没有可标的列；零长度装饰 CM6 会直接抛异常
+        continue;
+      }
+      marks.push({ line: inner, head: false, start: 0, end: indent });
+      markedBodies.add(inner);
+    }
+  }
+
+  marks.sort((a, b) => a.line - b.line || a.start - b.start);
+  return marks;
+}
