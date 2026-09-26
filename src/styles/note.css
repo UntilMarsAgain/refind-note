@@ -435,3 +435,35 @@
 .note-body .template pre {
   margin: 0;
 }
+
+/*
+ * 代码块行号。
+ *
+ * 行号是 <pre> 里的**独立一列**（不写进代码文本，复制时不会带上，也不会被分词）。
+ * 两列的行高必须完全一致才能对齐：字号与行高都由 pre 统一给出（见上面那条注释），
+ * 这里只负责把内边距挪到各自那一列上，并让行号列在横向滚动时留在原地。
+ */
+.note-body pre.pre--numbered {
+  display: flex;
+  align-items: stretch;
+  padding: 0;
+}
+
+.note-body pre.pre--numbered .code-lines {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  padding: 14px 10px 14px 14px;
+  color: var(--text-dim);
+  text-align: right;
+  user-select: none;
+  /* 代码横向滚动时，行号留在原地 */
+  position: sticky;
+  left: 0;
+  background: var(--code-bg);
+}
+
+.note-body pre.pre--numbered code {
+  flex: 1 1 auto;
+  padding: 14px 16px 14px 12px;
+}

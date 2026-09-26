@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { Check, Pencil, Save, Trash2, X } from "@lucide/vue";
 import { checkTitle } from "../title";
 import { themeMode } from "../theme";
+import { applyLineNumbers } from "../code-blocks";
+import { codeLineNumbers } from "../settings";
 // `codemirror` 是元包（提供 basicSetup 等），EditorState 由 @codemirror/state 提供 ——
 // 后者必须作为**直接依赖**安装：pnpm 的严格 node_modules 下，传递依赖不可直接导入。
 import { basicSetup } from "codemirror";
@@ -142,6 +144,23 @@ let view: EditorView | null = null;
  * 表格、内部链接、代码高亮与正文逐字一致，不会出现"预览好看、提交后变样"。
  */
 const preview = ref("");
+/** 预览那一层（行号加在它上面；预览故意不做高亮：每次输入都会重跑） */
+const previewEl = ref<HTMLElement | null>(null);
+
+/** 预览一更新（v-html 换完 DOM）就补上行号 */
+watch(preview, () => {
+  void nextTick(() => {
+    if (previewEl.value) {
+      applyLineNumbers(previewEl.value);
+    }
+  });
+});
+
+watch(codeLineNumbers, () => {
+  if (previewEl.value) {
+    applyLineNumbers(previewEl.value);
+  }
+});
 let previewTimer: number | undefined;
 
 async function refreshPreview(text: string) {
@@ -498,7 +517,7 @@ function submit() {
         <p v-if="previewProblem" class="editor__preview-error">
           预览生成失败：{{ previewProblem }}
         </p>
-        <div v-else class="note-body" v-html="preview" />
+        <div v-else ref="previewEl" class="note-body" v-html="preview" />
       </div>
     </div>
 

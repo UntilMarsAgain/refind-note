@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { VaultSettings } from "../bindings";
 import ViaHint from "./ViaHint.vue";
+import { codeLineNumbers, setCodeLineNumbers } from "../settings";
 import type { Via } from "../bindings";
 /**
  * 设置页（`special:settings`）。
@@ -9,7 +10,7 @@ import type { Via } from "../bindings";
  * 改了**立刻落盘**，没有「保存」按钮 —— 这些值改错也不会有损失，多一个按钮只会
  * 多一次忘记点。
  */
-import { nextTick, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import NamespaceManager from "./NamespaceManager.vue";
 import { BASE_ZOOM } from "../settings";
 
@@ -20,6 +21,13 @@ const props = defineProps<{
   /** 是被哪条指令带到这一页的（null = 直接打开） */
   via: Via | null;
 }>();
+
+/** 代码行号是**界面偏好**（存这台机器上），不走后端设置 */
+const lineNumbersOn = computed(() => codeLineNumbers.value);
+
+function onLineNumbers(event: Event) {
+  setCodeLineNumbers((event.target as HTMLInputElement).checked);
+}
 
 /* 每个设置项的 id 是**地址的一部分**（`special:settings#accent` 能直接跳过去），
    因此它们等于对外接口：改名要同步改 id 与文案。滚动不再依赖白名单，
@@ -148,6 +156,23 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
           {{ theme.label }}
         </button>
       </div>
+    </div>
+
+    <div
+      id="line-numbers"
+      class="row"
+      :class="{ 'row--target': isFocused('line-numbers') }"
+    >
+      <span class="row__label">代码行号</span>
+      <code class="row__id">#line-numbers</code>
+      <label class="row__check">
+        <input
+          type="checkbox"
+          :checked="lineNumbersOn"
+          @change="onLineNumbers"
+        />
+        <span>代码块左侧显示行号</span>
+      </label>
     </div>
 
     <div id="accent" class="row" :class="{ 'row--target': isFocused('accent') }">
@@ -346,6 +371,22 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
 .row__label {
   min-width: 132px;
   font-size: 13px;
+}
+
+/* 勾选式的一行：复选框与说明文字并排，与右边的分段控件同一位置 */
+.row__check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.row__check input {
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 .row__id {

@@ -3,6 +3,8 @@ import { nextTick, onMounted, ref, watch } from "vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import hljs from "highlight.js/lib/common";
+import { applyLineNumbers } from "../code-blocks";
+import { codeLineNumbers } from "../settings";
 
 const props = defineProps<{ html: string }>();
 
@@ -84,6 +86,8 @@ function decorateCodeBlocks() {
 
     frame.append(button);
   }
+
+  applyLineNumbers(root);
 }
 
 onMounted(decorateCodeBlocks);
@@ -92,6 +96,12 @@ watch(
   () => props.html,
   () => nextTick(decorateCodeBlocks),
 );
+// 设置页把行号关掉时，已经打开的文章要立刻跟着变
+watch(codeLineNumbers, () => {
+  if (rootEl.value) {
+    applyLineNumbers(rootEl.value);
+  }
+});
 
 /**
  * 渲染结果里的 <a> 如果放任不管，webview 会直接导航过去，

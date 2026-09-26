@@ -1,3 +1,5 @@
+import { ref } from "vue";
+
 /**
  * 设置分两层，别混：
  *
@@ -28,7 +30,21 @@ export const PREFERENCE_KEYS = {
   limitWidth: "refind-note:limit-width",
   /** 标签栏是否收起（只显示图标） */
   railCollapsed: "refind-note:rail-collapsed",
+  /** 代码块是否显示行号 */
+  codeLineNumbers: "refind-note:code-line-numbers",
 } as const;
+
+/**
+ * 代码块行号（默认开）。
+ *
+ * 做成**响应式**的：设置页一改，已经打开的文章立刻跟着变，不必等下一次渲染。
+ */
+export const codeLineNumbers = ref(readFlag(PREFERENCE_KEYS.codeLineNumbers, true));
+
+export function setCodeLineNumbers(on: boolean): void {
+  codeLineNumbers.value = on;
+  writeFlag(PREFERENCE_KEYS.codeLineNumbers, on);
+}
 
 export function readPreference(key: string): string | null {
   try {
