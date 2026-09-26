@@ -5,7 +5,7 @@ import { Check, Pencil, Save, Trash2, X } from "@lucide/vue";
 import { checkTitle } from "../title";
 import { themeMode } from "../theme";
 import { applyLineNumbers } from "../code-blocks";
-import { templateMarks } from "../template-blocks";
+import { templateRanges } from "../template-blocks";
 import StatePanel from "./StatePanel.vue";
 import { codeLineNumbers } from "../settings";
 // `codemirror` 是元包（提供 basicSetup 等），EditorState 由 @codemirror/state 提供 ——
@@ -194,24 +194,10 @@ const templateHighlight = ViewPlugin.fromClass(
  * 这里只负责把"行号 + 列"换成 CM6 的文档偏移量。
  */
 function buildTemplateDecorations(view: EditorView): DecorationSet {
-  const doc = view.state.doc;
-  const lines = doc.toString().split("\n");
-
-  const ranges: { from: number; to: number; head: boolean }[] = [];
-  for (const mark of templateMarks(lines)) {
-    const line = doc.line(mark.line + 1);
-    const from = line.from + Math.min(mark.start, line.length);
-    const to = line.from + Math.min(mark.end, line.length);
-    // 零长度标记 CM6 会**直接抛异常**，而这个函数跑在视图插件的构造函数里：
-    // 一抛，插件被整个禁用，高亮全没。规则那边已保证非空，这里再挡一道。
-    if (to <= from) {
-      continue;
-    }
-    ranges.push({ from, to, head: mark.head });
-  }
-
+  // 算什么、落在哪个偏移量，全在纯函数里（有用例）；这里只剩最后一步：变成装饰
+  const lines = view.state.doc.toString().split("\n");
   return Decoration.set(
-    ranges.map((range) =>
+    templateRanges(lines).map((range) =>
       Decoration.mark({
         class: range.head ? "cm-template-head" : "cm-template-body",
       }).range(range.from, range.to),

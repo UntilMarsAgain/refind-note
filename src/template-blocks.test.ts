@@ -12,6 +12,7 @@ import {
   isTemplateHead,
   templateBlockEnd,
   templateMarks,
+  templateRanges,
 } from "./template-blocks.ts";
 
 /** 便捷：算"块覆盖了哪些行"（1 基，含端点），便于与后端用例对照 */
@@ -118,4 +119,18 @@ test("带空白的空行也不标（否则会留下一条孤零零的色块）",
     marks.map((mark) => mark.line),
     [0, 1, 3],
   );
+});
+
+test("偏移量与逐字符累加一致，且不含空标记", () => {
+  const lines = ["::quote", "  正文", "", "  再一段"];
+  // 期望值由"逐字符累加"算出来，**不手写数字** —— 手写数字正是最容易抄错的东西
+  // （这条用例第一版就抄错了一个：14 写成了 19）。
+  const start = (index: number) =>
+    lines.slice(0, index).reduce((sum, text) => sum + text.length + 1, 0);
+  assert.deepEqual(templateRanges(lines), [
+    { from: start(0), to: start(0) + 7, head: true },
+    // 空行（第 2 行）不产生任何范围
+    { from: start(1), to: start(1) + 2, head: false },
+    { from: start(3), to: start(3) + 2, head: false },
+  ]);
 });

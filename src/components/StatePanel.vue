@@ -13,7 +13,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import type { Draft, RenderReport } from "../bindings";
-import { isBlank, templateMarks } from "../template-blocks";
+import { isBlank, templateMarks, templateRanges } from "../template-blocks";
 
 const props = defineProps<{
   /** 当前标题 */
@@ -76,8 +76,10 @@ function measureMarks() {
   const bodies = document.querySelectorAll(".cm-template-body").length;
   const sample = document.querySelector(".cm-template-body");
   const style = sample ? getComputedStyle(sample) : null;
+  const expected = templateRanges(props.markdown.split("\n")).length;
   markDom.value =
-    ".cm-template-head " + heads + " 个、.cm-template-body " + bodies + " 个" +
+    "应有 " + expected + " 条；DOM 里 .cm-template-head " + heads +
+    " 个、.cm-template-body " + bodies + " 个" +
     (style ? "；首个块内标记底色 " + style.backgroundColor : "；没有块内标记");
 }
 /** 草稿的落盘时间只有后端知道：收一次，顺带把"存过没有"说清 */

@@ -139,3 +139,41 @@ export function templateMarks(lines: string[]): TemplateMark[] {
   marks.sort((a, b) => a.line - b.line || a.start - b.start);
   return marks;
 }
+
+/** 一条装饰的**文档偏移量**（CM6 用的那种，从全文开头算起） */
+export interface TemplateRange {
+  from: number;
+  to: number;
+  head: boolean;
+}
+
+/**
+ * 把 `templateMarks` 的行列换算成文档偏移量。
+ *
+ * 这一步原来只在编辑器里用 CM6 的 `doc.line()` 做，**没法测** —— 于是"规则对、屏幕上却没有"
+ * 这类问题只能靠肉眼猜。现在它也是纯函数：面板能算出同样的结果，与 DOM 里实际有的东西对照，
+ * "规则错"还是"插件没跑"当场就能分清。
+ *
+ * 换算是按全文逐字符累加（换行算一个字符），与 CM6 的口径一致。
+ */
+export function templateRanges(lines: string[]): TemplateRange[] {
+  const starts: number[] = [];
+  let offset = 0;
+  for (const text of lines) {
+    starts.push(offset);
+    offset += text.length + 1; // 加上被 split 掉的那个换行
+  }
+
+  const ranges: TemplateRange[] = [];
+  for (const mark of templateMarks(lines)) {
+    const start = starts[mark.line] ?? 0;
+    const length = (lines[mark.line] ?? "").length;
+    const from = start + Math.min(mark.start, length);
+    const to = start + Math.min(mark.end, length);
+    if (to <= from) {
+      continue;
+    }
+    ranges.push({ from, to, head: mark.head });
+  }
+  return ranges;
+}
