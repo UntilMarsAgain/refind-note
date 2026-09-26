@@ -133,6 +133,35 @@
 | `css` | 把内容当 CSS 注入页面：本项目的 CSS 变量（`--accent`、`--link-blue`…）在这里直接可用。作用范围是**这一页的内容**（页头 + 正文），所以 `h1 { }` 改得到页面标题；`.note-body` 只框住正文，标题不在里面 |
 | `html` | 把内容当原始 HTML 注入；**默认过滤**脚本与事件属性，要放开得显式写 `js` |
 
+### 它们长什么样
+
+下面每一块都是**真的在渲染**（不是示意图）：
+
+::banner
+  内置模板演示
+
+::fields
+  模板 | 用途
+  code | 控制行号与要强调的行
+  fields | 你这会儿看到的这张表
+  image | 插图，能定位置与尺寸上限
+
+::code lang=rust lines=on start=10 highlight=2-3
+  fn main() {
+      let answer = 42;
+
+      println!("{answer}");
+  }
+
+::image src=/logo.svg align=center width=120 caption="居中的图：最宽 120 像素"
+
+信息栏是**浮动**的，所以放在这一节最后，看它怎么让正文绕着走：
+
+::aside title="信息栏（aside）"
+  侧栏浮在右侧，正文绕着它排。
+
+  里面照常按 markdown 渲染：**强调**、[[示例笔记|内部链接]]都可以。
+
 模板可以写在 `template:` 命名空间里再按名字取用：`::盒子` 会去找 `template:盒子` 那一页，
 `::css src=样式.css` 会去找 `template:样式.css`。模板里用 `{{参数名}}` 取参数、`{{body}}` 取块内容。
 

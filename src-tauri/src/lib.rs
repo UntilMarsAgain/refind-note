@@ -590,6 +590,19 @@ mod tests {
         );
         assert!(html.contains("quote__origin"), "示例里的署名应当渲染出来");
 
+        // 示例里演示了每个内置模板：演示要是渲染不出来，示例就退化成死文字
+        for marker in [
+            r#"<aside class="aside">"#,
+            r#"<table class="fields">"#,
+            r#"<p class="banner">"#,
+            r#"<figure class="image image--center">"#,
+            r#"<pre class="template-code""#,
+        ] {
+            assert!(html.contains(marker), "示例里应当渲染出 {marker}");
+        }
+        // 图片指向真实存在的静态资源（tauri.svg 早就不在了）
+        assert!(html.contains("src=\"/logo.svg\""), "示例里的图片应当指向 logo.svg");
+
         let mut checked = 0;
         for line in SEED_MARKDOWN.lines() {
             let Some(rest) = line.strip_prefix("- [") else {

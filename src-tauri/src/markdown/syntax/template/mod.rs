@@ -319,9 +319,9 @@ mod tests {
 
     #[test]
     fn image_carries_alignment_and_limits() {
-        let html = render("::image src=/tauri.svg align=right width=320 caption=\"桥体\"\n");
+        let html = render("::image src=/logo.svg align=right width=320 caption=\"桥体\"\n");
         assert!(html.contains(r#"<figure class="image image--right">"#), "{html}");
-        assert!(html.contains(r#"src="/tauri.svg""#), "{html}");
+        assert!(html.contains(r#"src="/logo.svg""#), "{html}");
         assert!(html.contains("max-width: 320px"), "{html}");
         assert!(html.contains("<figcaption>桥体</figcaption>"), "{html}");
     }
