@@ -13,6 +13,7 @@ import type {
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { type MenuItem, closeMenu, openMenu } from "./context-menu";
+import { popClosed, pushClosed } from "./closed-tabs";
 import { recordVisit } from "./history";
 import { invoke } from "@tauri-apps/api/core";
 import FloatingTools from "./components/FloatingTools.vue";
@@ -250,17 +251,50 @@ function moveTab(from: number, to: number) {
  */
 const shakeTick = ref(0);
 
+/**
+ * 刚关掉的标签页（Ctrl+Shift+T 用）。
+ *
+ * 与浏览器一致：后进先出、只留最近若干个（见 `closed-tabs.ts`）。
+ */
+const closedTabs = ref<Array<(typeof tabs.value)[number]>>([]);
+
+/** 重新打开最近关掉的那个：插在当前标签页**右边**并切过去（与浏览器一致） */
+function reopenClosedTab() {
+  const taken = popClosed(closedTabs.value);
+  if (!taken) {
+    return;
+  }
+  closedTabs.value = taken.rest;
+  const at = tabs.value.length === 0 ? 0 : activeTab.value + 1;
+  tabs.value.splice(at, 0, taken.closed);
+  activeTab.value = at;
+  // 与切标签页一样用 `restore`：连它上次停的滚动位置一起还回来
+  void navigate(taken.closed.address, "restore");
+}
+
 /** 关闭其它标签页：只留下点中的那一个（它是右键菜单里的一项） */
 function closeOtherTabs(index: number) {
   const keep = tabs.value[index];
   if (!keep) {
     return;
   }
+  // 其余的都算"刚关掉"。按从左到右压栈，于是最右边的在最上面 ——
+  // 与"一个个关过去"的顺序一致，重新打开时回来的顺序也就一致。
+  for (const tab of tabs.value) {
+    if (tab !== keep) {
+      closedTabs.value = pushClosed(closedTabs.value, tab);
+    }
+  }
   tabs.value = [keep];
   activeTab.value = 0;
 }
 
 function closeTab(index: number) {
+  const closing = tabs.value[index];
+  if (closing) {
+    closedTabs.value = pushClosed(closedTabs.value, closing);
+  }
+
   if (tabs.value.length <= 1) {
     tabs.value = [];
     openNewTab();
@@ -591,8 +625,17 @@ function onContextMenu(event: MouseEvent) {
  * - 只做**确实能做**的事（一个标签页都没有时，`Ctrl+W` 什么也不做，而不是去吞掉这次按键）。
  */
 function onGlobalKey(event: KeyboardEvent) {
-  const plain = (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey;
-  if (!plain) {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) {
+    return;
+  }
+
+  // 带 Shift 的那几个单独处理（目前只有一个 Ctrl+Shift+T）
+  if (event.shiftKey) {
+    if (event.key.toLowerCase() === "t") {
+      // 与浏览器一致：重新打开刚关掉的那个标签页
+      event.preventDefault();
+      reopenClosedTab();
+    }
     return;
   }
 
@@ -1409,6 +1452,8 @@ function onAction(name: string) {
         @select="selectTab"
         @close="closeTab"
         @close-others="closeOtherTabs"
+        :can-reopen="closedTabs.length > 0"
+        @reopen="reopenClosedTab"
         @new-tab="openNewTab"
         @settings="openSettings"
         @trash="openTrash"

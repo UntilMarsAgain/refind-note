@@ -24,6 +24,8 @@ import { initialOf } from "../title";
 const props = defineProps<{
   tabs: { address: string; title: string }[];
   active: number;
+  /** 有没有"刚关掉、可以重新打开"的标签页（决定右键菜单里给不给那一项） */
+  canReopen: boolean;
   /**
    * 抖动信号：每变一次就让标签抖一下。
    *
@@ -37,6 +39,8 @@ const emit = defineEmits<{
   (e: "select", index: number): void;
   (e: "close", index: number): void;
   (e: "close-others", index: number): void;
+  /** 重新打开刚关掉的那个（右键菜单里给一项入口，快捷键是 Ctrl+Shift+T） */
+  (e: "reopen"): void;
   (e: "new-tab"): void;
   /** 拖放调整顺序 */
   (e: "move", from: number, to: number): void;
@@ -99,10 +103,15 @@ const collapsed = ref(readFlag(PREFERENCE_KEYS.railCollapsed, true));
 function onTabMenu(event: MouseEvent, index: number) {
   event.preventDefault();
   event.stopPropagation();
-  openMenu(event, [
+  const items = [
     { label: "关闭标签页", run: () => emit("close", index) },
     { label: "关闭其它标签页", run: () => emit("close-others", index) },
-  ]);
+  ];
+  // 没有关掉过标签页时不给这一项：给了也没得开
+  if (props.canReopen) {
+    items.push({ label: "重新打开关闭的标签页", run: () => emit("reopen") });
+  }
+  openMenu(event, items);
 }
 
 function toggle() {
