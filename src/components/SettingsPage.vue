@@ -297,7 +297,9 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
       上次清理回收站：{{ settings.last_trash_purge || "从未" }}<br />
       上次回收：{{ settings.last_gc || "从未" }}
     </p>
-    <h2 class="settings__section">命名空间</h2>
+    <h2 class="settings__section">
+      命名空间 <code class="row__id">#namespaces</code>
+    </h2>
     <!-- id 与高亮放在**同一个元素**上：跳过来时滚到的、点亮的才是同一处 -->
     <div
       id="namespaces"
@@ -353,6 +355,8 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
 .row {
   display: flex;
   align-items: center;
+  /* 窄窗口下让"标签 + 锚点 + 输入框 + 单位"换行，而不是被裁掉 */
+  flex-wrap: wrap;
   gap: 12px;
   margin: 10px 0;
 }

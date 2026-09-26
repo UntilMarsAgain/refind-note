@@ -235,7 +235,13 @@ function remove(item: Namespace) {
           <span class="ns__head-actions">操作</span>
         </div>
 
-        <div v-for="item in items" :id="anchorOf(item)" :key="item.id" class="ns__item">
+        <div
+          v-for="item in items"
+          :id="anchorOf(item)"
+          :key="item.id"
+          class="ns__item"
+          :title="'地址锚点：#' + anchorOf(item)"
+        >
           <div class="ns__cell">
             <span class="ns__name">{{ labelOf(item) }}</span>
           </div>
@@ -445,11 +451,11 @@ function remove(item: Namespace) {
   /* 每一行各自是一个网格，所以最后一列**必须给固定宽度**：
      用 auto 时它的宽度随该行按钮数变化，前几列跟着被挤，各行就对不齐了。 */
   grid-template-columns:
-    minmax(96px, 0.9fr)   /* 名称 */
-    minmax(64px, 0.6fr)   /* 标识 */
-    minmax(96px, 1fr)     /* 别名 */
-    minmax(150px, 1.5fr)  /* 类型 / 跨站地址 */
-    300px;                /* 操作 */
+    minmax(84px, 0.9fr)   /* 名称 */
+    minmax(56px, 0.5fr)   /* 标识 */
+    minmax(84px, 1fr)     /* 别名 */
+    minmax(130px, 1.5fr)  /* 类型 / 跨站地址 */
+    248px;                /* 操作：够放四个按钮，再宽就交给下面的折行 */
   gap: 8px 14px;
   align-items: center;
   padding: 9px 12px;
@@ -490,6 +496,8 @@ function remove(item: Namespace) {
 
 .ns__cell--actions {
   justify-content: flex-end;
+  /* 中等宽度下按钮先在自己这一格内换行，而不是被容器裁掉 */
+  flex-wrap: wrap;
 }
 
 .ns__name {
@@ -687,8 +695,14 @@ select.ns__input option {
   font-weight: 500;
 }
 
-/* 窄窗口改成一列，别把表格挤成碎片 */
-@media (max-width: 720px) {
+/*
+ * 窄窗口改成一列。
+ *
+ * 断点按**容器**算，不是窗口：正文两侧各有 32px 内边距，媒体查询量的却是视口 ——
+ * 所以阈值要留在 900px 左右，否则 800 多像素的窗口里表格已经溢出（"清空"被切掉），
+ * 而这个媒体查询还没生效。
+ */
+@media (max-width: 900px) {
   .ns__head-row {
     display: none;
   }
