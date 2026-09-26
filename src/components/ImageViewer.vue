@@ -5,8 +5,11 @@
  * 全局只挂这一份（App 根上）。点击处理在 `note-html.ts` 里随笔记 DOM 一起挂，
  * 所以阅读视图与编辑器预览共用同一套行为。
  */
-import { onBeforeUnmount, watch } from "vue";
 import { X } from "@lucide/vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { Download } from "@lucide/vue";
+import { saveVaultFile } from "../file-save";
+import { vaultKeyOf } from "../file-links";
 import { closeImage, viewingImage } from "../image-viewer";
 
 function onKey(event: KeyboardEvent) {
@@ -25,6 +28,29 @@ watch(viewingImage, (value) => {
 });
 
 onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
+
+/**
+ * 能不能另存：只有仓库里的文件可以。
+ *
+ * 外链图片的字节在别的站上（跨域拿不到），所以对它们不给这个按钮 ——
+ * 给一个点了没用的按钮比不给更糟。
+ */
+const vaultKey = computed(() => (viewingImage.value ? vaultKeyOf(viewingImage.value.url) : null));
+
+const trouble = ref("");
+
+async function keep() {
+  const key = vaultKey.value;
+  if (!key) {
+    return;
+  }
+  trouble.value = "";
+  try {
+    await saveVaultFile(key);
+  } catch (error) {
+    trouble.value = String(error);
+  }
+}
 </script>
 
 <template>
@@ -35,6 +61,14 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
         {{ viewingImage.alt }}
       </figcaption>
     </figure>
+    <div v-if="vaultKey || trouble" class="viewer__tools" @click.stop>
+      <button v-if="vaultKey" class="viewer__tool" type="button" @click="keep">
+        <Download :size="16" :stroke-width="1.9" />
+        另存为
+      </button>
+      <p v-if="trouble" class="viewer__trouble">{{ trouble }}</p>
+    </div>
+
     <button class="viewer__close" type="button" aria-label="关闭" @click.stop="closeImage">
       <X :size="18" :stroke-width="2" />
     </button>
@@ -96,5 +130,31 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   background: var(--surface);
   color: var(--text);
   cursor: pointer;
+}
+
+.viewer__tools {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.viewer__tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.viewer__trouble {
+  margin: 0;
+  color: var(--danger);
 }
 </style>

@@ -5,10 +5,9 @@
 //!
 //! 放在这里而不是各个组件里，是因为阅读视图与编辑器预览都会注入同一份 HTML，
 //! 行为该由同一处决定。
-import { invoke } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { type MenuItem, openMenu } from "./context-menu";
+import { saveVaultFile } from "./file-save";
 import { FILE_SCHEME, fileTargetOf, vaultKeyOf } from "./file-links";
 import { viewImage } from "./image-viewer";
 
@@ -52,7 +51,10 @@ function attachContextMenu(root: HTMLElement) {
       // 只有仓库里的文件才谈得上"另存"：外链图片的字节拿不到（跨域）
       const key = vaultKeyOf(target.getAttribute("src") ?? "");
       if (key) {
-        items.push({ label: "另存为…", run: () => saveAs(key) });
+        items.push({ label: "另存为…", run: () => {
+          // 菜单已经关掉了，出错只能直接弹一句：这里没有"页面上"可以写
+          saveVaultFile(key).catch((error) => window.alert(String(error)));
+        } });
       }
     } else if (target instanceof HTMLAnchorElement) {
       // 内部链接上写的是笔记地址（`data-title`），外部链接就是 href
@@ -73,24 +75,6 @@ function attachContextMenu(root: HTMLElement) {
     event.stopPropagation();
     openMenu(event, items);
   });
-}
-
-/**
- * 另存为：让用户选个位置，然后由**后端**把仓库里那份拷过去。
- *
- * 字节不走前端：一张几 MB 的图先读进 JS 再写出去，是没有必要的来回。
- */
-async function saveAs(key: string) {
-  try {
-    const target = await save({ defaultPath: key, title: "另存为" });
-    if (!target) {
-      return;
-    }
-    await invoke("export_file", { key, target });
-  } catch (error) {
-    // 菜单已经关掉了，出错只能直接弹一句：这里没有别的"页面上"可以写
-    window.alert(String(error));
-  }
 }
 
 /** 笔记 HTML 注入之后的收尾 */
