@@ -57,6 +57,8 @@ fn render_css(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
         return;
     };
     let css = fill::sanitize_css(&fill::substitute(&source, template, &template.body));
+    // 收进正文范围：不然一条 `* { }` 就能把整个界面改掉
+    let css = fill::scope_css(&css);
     fmt.cr();
     fmt.open("style", &[]);
     fmt.text_raw(&css);

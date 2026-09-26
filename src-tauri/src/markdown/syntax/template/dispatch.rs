@@ -75,7 +75,7 @@ fn render_page(template: &Template, page: &str, fmt: &mut dyn Renderer) {
     if lower.ends_with(".css") {
         fmt.cr();
         fmt.open("style", &[]);
-        fmt.text_raw(&fill::sanitize_css(&filled));
+        fmt.text_raw(&fill::scope_css(&fill::sanitize_css(&filled)));
         fmt.close("style");
         fmt.cr();
         return;
