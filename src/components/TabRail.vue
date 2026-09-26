@@ -9,6 +9,7 @@ import {
   X,
 } from "@lucide/vue";
 import { PREFERENCE_KEYS, readFlag, writeFlag } from "../settings";
+import { initialOf } from "../title";
 
 /**
  * 垂直标签栏：只列**打开着的**标签页。
@@ -93,11 +94,6 @@ function toggle() {
   writeFlag(PREFERENCE_KEYS.railCollapsed, collapsed.value);
 }
 
-/** 收起时显示的首字。用 Array.from 取，免得多字节/代理对只取到半个。 */
-function initialOf(tab: { address: string; title: string }) {
-  const source = tab.title || tab.address;
-  return Array.from(source)[0] ?? "•";
-}
 </script>
 
 <template>
@@ -154,7 +150,7 @@ function initialOf(tab: { address: string; title: string }) {
             :title="tab.address"
             @click="emit('select', index)"
           >
-            <span class="rail__initial">{{ initialOf(tab) }}</span>
+            <span class="rail__initial">{{ initialOf(tab.title || tab.address) }}</span>
             <span class="rail__text">{{ tab.title || tab.address }}</span>
           </button>
           <button

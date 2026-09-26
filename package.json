@@ -8,7 +8,7 @@
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test:ts": "node --experimental-strip-types src/template-blocks.test.ts"
+    "test:ts": "node --experimental-strip-types --test src/*.test.ts"
   },
   "dependencies": {
     "@codemirror/lang-css": "^6.3.1",

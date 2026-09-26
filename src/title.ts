@@ -9,6 +9,23 @@
  * （目前只有主命名空间，任何冒号前缀都判非法）。
  */
 
+/**
+ * 列表里那个单字缩略图标：取**名称段**的首字。
+ *
+ * 不能取整个标题的首字：`template:样式.css`、`template:盒子` 会全变成 "t" ——
+ * 一堆一模一样的图标，等于没有图标。去掉命名空间前缀之后，各页才有各自的字
+ * （`special:debug` 也因此从"s"变成"d"）。
+ *
+ * 用 `Array.from` 取，免得多字节字符或代理对被切成半个。
+ */
+export function initialOf(title: string): string {
+  const trimmed = title.trim();
+  // 名称段 = 第一个冒号之后的部分；没有冒号就是整个标题
+  const separator = trimmed.indexOf(":");
+  const name = (separator >= 0 ? trimmed.slice(separator + 1) : trimmed).trim();
+  return Array.from(name || trimmed)[0] ?? "•";
+}
+
 /** MediaWiki 的非法字符，外加本项目自己的 `:` 与 `@` */
 const ILLEGAL = ["#", "<", ">", "[", "]", "|", "{", "}", ":", "@", "$"];
 
