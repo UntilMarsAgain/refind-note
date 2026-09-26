@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { NoteSummary } from "../api-types";
 import { computed, nextTick, ref, watch } from "vue";
 import { Search } from "@lucide/vue";
 
@@ -9,11 +10,6 @@ import { Search } from "@lucide/vue";
  * 等笔记多到一次拿不完（要分页）时，再挪到后端做。
  */
 
-/** 与 Rust 端 `NoteSummary` 对应（这里只用到 title） */
-interface NoteSummary {
-  key: string;
-  title: string;
-}
 
 const props = defineProps<{
   notes: NoteSummary[];

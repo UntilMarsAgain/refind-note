@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { TrashEntry } from "../api-types";
 /**
  * 回收站（`special:trash`）。
  *
@@ -13,13 +14,6 @@
 import { onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 
-interface TrashEntry {
-  title: string;
-  deleted_at: string;
-  bytes: number;
-  /** `null` = 删除时间读不出来（会列出，但不参与自动清理） */
-  days_old: number | null;
-}
 
 const props = defineProps<{
   /** 保留天数（来自设置，用于说明策略与标记"可清理"） */

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { NoteSummary } from "../api-types";
 /**
  * 全部页面（`special:all`）：列出数据库里所有笔记，以及所有可用的特殊页面。
  *
@@ -9,21 +10,7 @@ import { computed, onMounted, ref } from "vue";
 import { labelOf } from "../special";
 import { invoke } from "@tauri-apps/api/core";
 
-interface CommandInfo {
-  /** 短名：`redirect` / `random-redirect` / `unrecognized` */
-  kind: string;
-  /** 中文名，直接显示 */
-  label: string;
-  /** 一句说明（悬停提示用） */
-  detail: string;
-}
 
-interface NoteSummary {
-  key: string;
-  title: string;
-  /** 指令信息；普通页面是 null。**全部来自后端那张指令表**，这里不再自己维护一份文案 */
-  command: CommandInfo | null;
-}
 
 /**
  * 每页最多显示多少篇。

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { DiffResult, DiffLine, RevisionSummary } from "../api-types";
 import { computed, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { ArrowLeft } from "@lucide/vue";
@@ -10,39 +11,8 @@ import { ArrowLeft } from "@lucide/vue";
  * 差异算法已经在 Rust 侧算好并单元测试过，这里只负责折叠上下文与上色。
  */
 
-/** 与 Rust 端 `RevisionSummary` 对应 */
-interface RevisionSummary {
-  rev: number;
-  /** create / commit / draft / delete */
-  kind: string;
-  /** 完整 commit ID */
-  id: string;
-  /** 展示用的缩写（历史页显示的就是它） */
-  short_id: string;
-  at: string;
-  bytes: number;
-  delta: number;
-  supersedes: number[];
-  summary: string | null;
-}
 
-/** 与 Rust 端 `DiffLine` / `DiffResult` 对应 */
-interface DiffLine {
-  kind: string;
-  old_line: number | null;
-  new_line: number | null;
-  text: string;
-}
 
-interface DiffResult {
-  from_rev: number;
-  to_rev: number;
-  from_title: string;
-  to_title: string;
-  lines: DiffLine[];
-  inserted: number;
-  deleted: number;
-}
 
 const props = defineProps<{
   title: string;

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { Task } from "../api-types";
 /**
  * 底部任务状态栏。
  *
@@ -11,14 +12,6 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 
-interface Task {
-  id: number;
-  label: string;
-  state: "queued" | "running" | "done" | "failed";
-  submitted_at: string;
-  finished_at: string;
-  message: string;
-}
 
 const emit = defineEmits<{ (e: "finished"): void }>();
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { VaultSettings } from "../api-types";
 /**
  * 设置页（`special:settings`）。
  *
@@ -10,28 +11,8 @@ import { nextTick, ref, watch } from "vue";
 import NamespaceManager from "./NamespaceManager.vue";
 import { BASE_ZOOM } from "../settings";
 
-interface Settings {
-  root: string;
-  format: number;
-  capital_links: boolean;
-  max_title_bytes: number;
-  delta_chain_limit: number;
-  /** 回收站保留天数（自动清理用） */
-  trash_keep_days: number;
-  /** 自动回收的间隔天数 */
-  gc_interval_days: number;
-  /** 上次清理回收站的时间（只读） */
-  last_trash_purge: string;
-  /** 上次回收的时间（只读） */
-  last_gc: string;
-  theme: string;
-  accent: string;
-  reading_width: number;
-  /** 界面缩放（1.0 = 100%） */
-  zoom: number;
-}
 
-const props = defineProps<{ settings: Settings; focus?: string }>();
+const props = defineProps<{ settings: VaultSettings; focus?: string }>();
 
 /**
  * 当前运行的前端产物文件名（含内容哈希）。
@@ -146,8 +127,6 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
       每一项的 id 可直接用作地址锚点，例如 <code>special:settings#accent</code>
       会跳到主题色并高亮。
     </p>
-
-    <p class="settings__where">界面版本：<code>{{ bundleName }}</code></p>
 
     <h2 class="settings__section">外观</h2>
 

@@ -1,4 +1,12 @@
 <script setup lang="ts">
+import type {
+  Draft,
+  LoadOutcome,
+  Note,
+  NoteSummary,
+  RevisionContent,
+  VaultSettings,
+} from "./api-types";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import FloatingTools from "./components/FloatingTools.vue";
@@ -25,75 +33,14 @@ import TitleBar from "./components/TitleBar.vue";
 import WindowResizeHandles from "./components/WindowResizeHandles.vue";
 import { PREFERENCE_KEYS, readFlag, writeFlag } from "./settings";
 
-/** 与 Rust 端 `NoteSummary` 对应（标签栏用，不含正文） */
-interface NoteSummary {
-  key: string;
-  title: string;
-}
 
-/** 与 Rust 端 `Note` 对应 */
-interface Note {
-  key: string;
-  title: string;
-  markdown: string;
-  html: string;
-  rev: number;
-  modified: string;
-}
 
-/** 与 Rust 端 `LoadOutcome` 对应。`note` 为 null 表示目标还不存在。 */
-interface LoadOutcome {
-  note: Note | null;
-  title: string;
-  deleted: boolean;
-}
 
-/** 与 Rust 端 `Draft` 对应 */
-interface Draft {
-  markdown: string;
-  base_rev: number;
-  at: string;
-  /** 草稿也是链上的一版，所以也有 commit ID —— 预览走的就是它 */
-  id: string;
-  short_id: string;
-}
 
-/** 与 Rust 端 `VaultSettings` 对应 */
-interface VaultSettings {
-  root: string;
-  format: number;
-  capital_links: boolean;
-  max_title_bytes: number;
-  delta_chain_limit: number;
-  /** "system" | "light" | "dark" */
-  theme: string;
-  /** 主题色 #rrggbb */
-  accent: string;
-  reading_width: number;
-  /** 界面缩放（1.0 = 100%），Ctrl + 滚轮调整 */
-  zoom: number;
-  /** 回收站保留天数（自动清理用） */
-  trash_keep_days: number;
-  /** 自动回收的间隔天数 */
-  gc_interval_days: number;
-  /** 上次清理回收站的时间（只读） */
-  last_trash_purge: string;
-  /** 上次回收的时间（只读） */
-  last_gc: string;
-}
 
 /** 站点名：顶栏菜单顶上那一行（纯显示，不参与地址） */
 const APP_NAME = "重逢笔记";
 
-/** 与 Rust 端 `RevisionContent` 对应（历史里某一版的正文） */
-interface RevisionContent {
-  rev: number;
-  kind: string;
-  at: string;
-  title: string;
-  markdown: string;
-  html: string;
-}
 
 type Mode =
   | "read"

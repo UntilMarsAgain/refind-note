@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { Namespace } from "../api-types";
 /**
  * 命名空间管理。
  *
@@ -16,15 +17,6 @@
 import { computed, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 
-interface Namespace {
-  id: string;
-  name: string;
-  aliases: string[];
-  /** 可存储：页面落在本仓库；虚拟与跨站的都不是 */
-  storable: boolean;
-  /** 跨站链接的站点地址模板；null = 普通命名空间 */
-  site: string | null;
-}
 
 const MAIN = "0";
 const SPECIAL = "special";
