@@ -214,7 +214,13 @@ const previewProblem = ref("");
  * 窗口一窄就翻成上下排布，而且再也回不去（那其实不是判定错，是门槛太高：
  * 可用宽度 = 窗口 ÷ 基准缩放 − 标签栏 − 正文内边距，还会被阅读栏上限再夹一次）。
  */
-const PANE_MIN_WIDTH = 260;
+/**
+ * 每栏的最小可读宽度。
+ *
+ * 低于这个宽度就**上下排列**，而不是硬挤成两条窄栏：一行代码在 260px 里要折好几次，
+ * 折过之后比上下排列还难读。300 是"一行十几字符仍能看清"的位置。
+ */
+const PANE_MIN_WIDTH = 300;
 const PANES_GAP = 12;
 const STACK_BREAKPOINT = PANE_MIN_WIDTH * 2 + PANES_GAP;
 

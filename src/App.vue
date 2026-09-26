@@ -1304,12 +1304,16 @@ function onAction(name: string) {
         ref="scrollEl"
         class="app__body"
         :class="{
-          'app__body--wide': !limitWidth,
+          // 编辑态一律用满宽：两栏各占一半，受限宽约束的话每栏只有五百来像素
+          'app__body--wide': !limitWidth || mode === 'edit',
           'app__body--fit': mode === 'edit',
         }"
         @scroll.passive="onScroll"
       >
-        <div class="app__column" :class="{ 'app__column--wide': !limitWidth }">
+        <div
+          class="app__column"
+          :class="{ 'app__column--wide': !limitWidth || mode === 'edit' }"
+        >
           <!-- 特殊页面：由前端渲染（后端只负责把地址解析成 Special） -->
           <NewTab
         v-if="mode === 'special' && specialPage === 'newtab'"
@@ -1351,6 +1355,7 @@ function onAction(name: string) {
           <!-- 编辑中：不显示页头，操作都在编辑器自己那一行里 -->
           <NoteEditor
             v-else-if="mode === 'edit' && note"
+            :key="note.key + ':' + (note.language ?? 'markdown')"
             v-model="draftText"
             :title="note.title"
             :language="note.language"
