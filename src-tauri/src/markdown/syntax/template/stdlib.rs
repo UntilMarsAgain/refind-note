@@ -174,10 +174,13 @@ fn text_on(background: &str) -> &'static str {
     }
 }
 
-/// `::image src=… align=left|center|right width=320 height=200 caption="说明"` —— 插入图片。
+/// `::image src=…` —— 插入图片。`src` 必给；尺寸、位置、注释都可选：
 ///
-/// 尺寸是**上限**（`max-width` / `max-height`），图片不会被拉变形；数量与单位都受限
-/// （见 [`size_rule`]），免得有人拿尺寸参数往 `style` 里塞别的东西。
+/// - `align=left|center|right`（默认居中）；
+/// - `width=` / `height=` —— 都是**上限**（`max-width` / `max-height`），图片不会被拉变形，
+///   数量与单位都受限（见 [`size_rule`]），免得有人拿尺寸参数往 `style` 里塞别的东西；
+/// - 注释有两种写法：**图片下面写一行**（最自然），或者 `caption="…"`。
+///
 /// 协议只挡能执行或能外传数据的三种：`javascript:` / `data:` / `vbscript:`。
 fn render_image(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
     let Some(source) = template.param("src") else {
@@ -231,9 +234,21 @@ fn render_image(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
     }
     fmt.self_close("img", &attrs);
     fmt.cr();
-    if let Some(caption) = template.param("caption") {
+    // 注释：块里的那一行（最自然的写法）优先用 `caption=` 覆盖。
+    // 块内容按行取、去掉缩进再拼成一句：它在块里是被缩进的，不该带着空格显示。
+    let caption = match template.param("caption") {
+        Some(caption) => caption.trim().to_string(),
+        None => template
+            .body
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>()
+            .join(" "),
+    };
+    if !caption.is_empty() {
         fmt.open("figcaption", &[]);
-        fmt.text(caption);
+        fmt.text(&caption);
         fmt.close("figcaption");
         fmt.cr();
     }

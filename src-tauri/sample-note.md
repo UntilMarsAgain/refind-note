@@ -131,7 +131,7 @@
 | `aside` | 右侧信息栏：`title=` 给标题，内部内容仍按 markdown 渲染 |
 | `fields` | 左右两栏的属性表：每行写成 `标签 \| 值` |
 | `banner` | 一条方框标题带（信息栏里那种居中的标题条），文案写在块内；`color=#0055a4` 指定底色（字色按亮度自动配，深底不会配深字） |
-| `image` | 插图：`src=` 必给，另有 `align=left\|center\|right`、`width=`、`height=`（都是上限）、`caption=` |
+| `image` | 插图：`src=` 必给，另有 `align=left\|center\|right`、`width=`、`height=`（都是上限）；注释写在图片**下面**那一行（也可以用 `caption=`） |
 | `css` | 把内容当 CSS 注入页面：本项目的 CSS 变量（`--accent`、`--link-blue`…）在这里直接可用。作用范围是**这一页的内容**（页头 + 正文），所以 `h1 { }` 改得到页面标题；`.note-body` 只框住正文，标题不在里面 |
 | `html` | 把内容当原始 HTML 注入；**默认过滤**脚本与事件属性，要放开得显式写 `js` |
 
@@ -155,7 +155,8 @@
       println!("{answer}");
   }
 
-::image src=/logo.svg align=center width=120 caption="居中的图：最宽 120 像素"
+::image src=/logo.svg align=center width=120
+  居中的图：注释就写在图片下面，最宽 120 像素
 
 信息栏是**浮动**的，所以放在这一节最后，看它怎么让正文绕着走：
 

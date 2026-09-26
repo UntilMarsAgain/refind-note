@@ -348,6 +348,30 @@ mod tests {
     }
 
     #[test]
+    fn image_takes_its_caption_from_the_body() {
+        // 图片下面写一行 —— 最自然的写法
+        let html = render("::image src=/logo.svg\n  桥体（一〇七九年）\n");
+        assert!(html.contains("<figcaption>桥体（一〇七九年）</figcaption>"), "{html}");
+
+        // 块内容在块里是被缩进的，注释不该带着那些空格
+        let indented = render("::image src=/logo.svg\n    两边都有空格\n");
+        assert!(indented.contains("<figcaption>两边都有空格</figcaption>"), "{indented}");
+
+        // 多行拼成一句
+        let multiline = render("::image src=/logo.svg\n  第一行\n  第二行\n");
+        assert!(multiline.contains("<figcaption>第一行 第二行</figcaption>"), "{multiline}");
+
+        // `caption=` 优先于块内容
+        let explicit = render("::image src=/logo.svg caption=显式\n  块里那句\n");
+        assert!(explicit.contains("<figcaption>显式</figcaption>"), "{explicit}");
+        assert!(!explicit.contains("块里那句"), "{explicit}");
+
+        // 都没有：不出现空的图注
+        let none = render("::image src=/logo.svg\n");
+        assert!(!none.contains("<figcaption>"), "{none}");
+    }
+
+    #[test]
     fn image_refuses_dangerous_sources_and_sneaky_sizes() {
         // 危险协议：不渲染图片，只给提示
         // （提示框里会**回显**参数原文，那是文本、不是属性 —— 所以断言针对"有没有 img"）
