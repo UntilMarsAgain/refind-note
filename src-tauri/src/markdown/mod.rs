@@ -75,6 +75,18 @@ static MARKDOWN: LazyLock<MarkdownIt> = LazyLock::new(|| {
         .remove_rule::<markdown_it::plugins::cmark::block::code::CodeScanner>();
 
     markdown_it::plugins::extra::add(&mut md);
+
+    // 摘掉两条排版规则：它们会连**代码片段**一起改。
+    //
+    //   `--accent`  →  `–accent`     （不是那个 CSS 变量名了）
+    //   "引号"      →  “引号”        （不是那段代码了）
+    //
+    // 正文里弯引号、长破折号是锦上添花，在代码里却是**改坏内容**。crate 这两条规则不区分
+    // 代码片段，所以在技术笔记里只能整个摘掉。（对应测试：code_spans_keep_their_literals）
+    md.remove_rule::<markdown_it::plugins::extra::typographer::TypographerRule>();
+    md.remove_rule::<
+        markdown_it::plugins::extra::smartquotes::SmartQuotesRule<'\u{2018}', '\u{2019}', '\u{201c}', '\u{201d}'>,
+    >();
     markdown_it::plugins::extra::heading_anchors::add(&mut md, slugify_heading);
 
     // 自定义语法统一在 syntax/ 里注册
@@ -160,6 +172,23 @@ mod tests {
         // 用 r##"..."## 而不是 r#"..."#：内容里出现了 "# 序列，
         // 那正好是后者的结束分隔符，会把字符串提前截断。
         assert!(html.contains(r##"href="#%E8%A1%A8%E6%A0%BC""##), "{html}");
+    }
+
+    /// 代码片段里的字面量不许被排版规则改写。
+    ///
+    /// 排版规则（typographer / smartquotes）会把 `--` 变成 `–`、把直引号变成弯引号 ——
+    /// 在正文里是锦上添花，在代码片段里则是**改坏了内容**：`--accent` 变成 `–accent`
+    /// 就不再是那个 CSS 变量名了。
+    #[test]
+    fn code_spans_keep_their_literals() {
+        // 用原始字符串写，免得反斜杠在两层转义里走样
+        let source = r#"`--accent` 与 `a -- b` 与 "引号""#;
+        let html = render(source);
+        assert!(html.contains("--accent"), "破折号被改写了：{html}");
+        assert!(html.contains("a -- b"), "破折号被改写了：{html}");
+        // 直引号在 HTML 里会转义成 &quot;，那是应有的转义；要拦的是被换成弯引号
+        assert!(!html.contains('\u{201c}'), "引号被换成弯引号了：{html}");
+        assert!(html.contains("&quot;引号&quot;"), "直引号应当原样保留：{html}");
     }
 
     /// 缩进代码块语法已关闭：四空格开头不再是代码块。

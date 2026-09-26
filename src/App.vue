@@ -1611,6 +1611,15 @@ function onAction(name: string) {
    用 100% 而不是 none —— none 不可插值，上面的过渡会直接断掉。 */
 .app__column--wide {
   max-width: 100%;
+  /*
+   * 取消限宽时要**同时**去掉横向 auto 外边距。
+   *
+   * 编辑态下 `.app__body--fit` 会把正文区变成 flex 列容器，而这一列是它的 flex 项。
+   * 横向 auto 外边距会让 `align-items: stretch` 失效（规范如此），于是这一列变成
+   * "按内容宽度收缩"：示例笔记内容长就宽，短的一页就窄 —— 窄到 612 以下，
+   * 两栏还会因此掉进上下排布。去掉 auto 外边距，stretch 才生效。
+   */
+  margin-inline: 0;
 }
 
 .app__empty {
