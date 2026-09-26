@@ -119,7 +119,8 @@ function onContextMenu(event: MouseEvent) {
     return;
   }
   const wikiLink = target.closest("a.wikilink");
-  if (!wikiLink) {
+  // 跨站链接按外链对待：右键交给系统（"在新窗口打开 / 复制链接"更完整）
+  if (!wikiLink || wikiLink.hasAttribute("href")) {
     return;
   }
 
@@ -154,9 +155,18 @@ function onClick(event: MouseEvent) {
     return;
   }
 
-  // 内部链接没有 href，必须先判它，否则会被下面的 a[href] 分支漏掉
+  // 内部链接没有 href，必须先判它，否则会被下面的 a[href] 分支漏掉。
+  // 例外是**跨站链接**：它带 class="wikilink"，但本来就是外链（后端给了真实 href），
+  // 所以要当外链打开，而不是在本仓库里跳转。
   const wikiLink = target.closest("a.wikilink");
   if (wikiLink) {
+    const href = wikiLink.getAttribute("href");
+    if (href) {
+      event.preventDefault();
+      void openUrl(normalizeUrl(href));
+      return;
+    }
+
     event.preventDefault();
     // 目标是否存在是后端渲染时判定的（data-missing）：红链点了也没东西可开
     const title =

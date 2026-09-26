@@ -7,6 +7,7 @@
  * 多一次忘记点。
  */
 import { nextTick, ref, watch } from "vue";
+import NamespaceManager from "./NamespaceManager.vue";
 import { BASE_ZOOM } from "../settings";
 
 interface Settings {
@@ -52,6 +53,7 @@ const SECTION_IDS = [
   "delta-chain-limit",
   "trash-keep-days",
   "gc-interval-days",
+  "namespaces",
 ];
 
 /** 地址里带了哪个 id，就把哪一项高亮出来 */
@@ -304,6 +306,10 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
       上次清理回收站：{{ settings.last_trash_purge || "从未" }}<br />
       上次回收：{{ settings.last_gc || "从未" }}
     </p>
+    <h2 class="settings__section" id="namespaces">命名空间</h2>
+    <div :class="{ 'row--target': isFocused('namespaces') }">
+      <NamespaceManager />
+    </div>
   </section>
 </template>
 
