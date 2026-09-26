@@ -189,7 +189,13 @@ pub enum Address {
     },
     /// 特殊页面：**虚拟命名空间** `special:`。它不对应任何笔记文件，
     /// 由前端按 `page` 渲染（例如 `special:newtab`）。
-    Special { page: String, address: String },
+    Special {
+        page: String,
+        address: String,
+        /// 是通过哪条指令来到这一页的（直接打开时为 `null`）。
+        /// 虚拟命名空间下的页面同样要能看到来源 —— 它就是普通页面的一种。
+        via: Option<Via>,
+    },
     /// 目标还不存在，交给「不存在 + 创建」那条路
     Missing { title: String, address: String },
 }

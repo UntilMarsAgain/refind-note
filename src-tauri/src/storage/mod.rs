@@ -382,10 +382,11 @@ impl Vault {
                 continue;
             }
 
+            // 目录名就是命名空间标识（**字符串**）。主命名空间是 "0"（没有前缀时占位）
             let Some(ns) = namespace_path
                 .file_name()
                 .and_then(|name| name.to_str())
-                .and_then(|name| name.parse::<i32>().ok())
+                .map(str::to_string)
             else {
                 continue;
             };
@@ -405,7 +406,10 @@ impl Vault {
                     .or_else(|| titles.trashed.get(stem))
                     .cloned()
                     .unwrap_or_else(|| stem.to_string());
-                out.push(ParsedTitle { ns, title });
+                out.push(ParsedTitle {
+                    ns: ns.clone(),
+                    title,
+                });
             }
         }
 
@@ -849,7 +853,7 @@ impl Vault {
         let id = Self::id_from_path(&path);
         let events = self.read_events(&id)?;
 
-        let mut ns = 0;
+        let mut ns = crate::title::MAIN_NS.to_string();
         let mut page = String::new();
         // (类型, 时间, 内容哈希)
         let mut found: Option<(&str, String, String)> = None;
@@ -861,7 +865,7 @@ impl Vault {
                     title: meta_title,
                     ..
                 } => {
-                    ns = *meta_ns;
+                    ns = meta_ns.clone();
                     page = meta_title.clone();
                 }
                 Event::Rev {
@@ -873,7 +877,7 @@ impl Vault {
                     ..
                 } => {
                     if let Some(value) = item_ns {
-                        ns = *value;
+                        ns = value.clone();
                     }
                     if let Some(value) = item_title {
                         page = value.clone();
@@ -1018,6 +1022,7 @@ impl Vault {
             return Ok(Address::Special {
                 address: compose_address(&format!("special:{page}"), None, section),
                 page,
+                via,
             });
         }
 
@@ -1434,32 +1439,47 @@ impl Vault {
         Ok(())
     }
 
-    /// 在某个命名空间里随机挑一篇笔记的标题。
+    /// 在某个命名空间里随机挑一篇页面的标题。
+    ///
+    /// `namespace` 是**命名空间标识字符串**：空或 `0` = 主命名空间；`special` 是虚拟命名空间
+    /// （页面由程序提供，不落存储）；其余按标识去目录里找。
     ///
     /// 会**排除发起随机的那一页自己** —— 否则小仓库里很容易随机到自己，
     /// 然后一路跟到跳数上限，变成一次莫名其妙的失败。
     fn pick_random_title(&self, namespace: Option<&str>, from: &str) -> Result<String, VaultError> {
-        let ns: i32 = match namespace.map(str::trim) {
-            None | Some("") => 0,
-            Some(text) => text.parse::<i32>().map_err(|_| {
-                VaultError::BadAddress(format!(
-                    "《{from}》的 RANDOM_REDIRECT 命名空间要写数字 ID，收到「{text}」"
-                ))
-            })?,
+        let ns = match namespace.map(str::trim) {
+            None | Some("") => crate::title::MAIN_NS.to_string(),
+            Some(text) => text.to_string(),
         };
 
-        let mut candidates: Vec<String> = self
-            .walk(&self.notes_dir())?
-            .iter()
-            .filter(|parsed| {
-                parsed.ns == ns && parsed.display(&self.table) != from
-            })
-            .map(|parsed| parsed.display(&self.table))
-            .collect();
+        let mut candidates: Vec<String> = if self.table.is_virtual(&ns) {
+            // 虚拟命名空间不落存储，候选由程序给出（目前只有 special）
+            if ns == crate::title::SPECIAL_NS {
+                SPECIAL_PAGES
+                    .iter()
+                    .map(|page| format!("{}:{page}", crate::title::SPECIAL_NS))
+                    .filter(|title| title != from)
+                    .collect()
+            } else {
+                Vec::new()
+            }
+        } else {
+            self.walk(&self.notes_dir())?
+                .iter()
+                .filter(|parsed| parsed.ns == ns && parsed.display(&self.table) != from)
+                .map(|parsed| parsed.display(&self.table))
+                .collect()
+        };
 
         if candidates.is_empty() {
+            // 报错时说显示名，别让用户对着 "0" 发愣
+            let label = if ns == crate::title::MAIN_NS {
+                "主命名空间".to_string()
+            } else {
+                format!("命名空间 {ns}")
+            };
             return Err(VaultError::BadAddress(format!(
-                "《{from}》随机不到页面：命名空间 {ns} 里没有别的笔记"
+                "《{from}》随机不到页面：{label} 里没有别的页面"
             )));
         }
 
@@ -2890,7 +2910,7 @@ mod tests {
         let temp = TempVault::new();
 
         match temp.vault.parse_address("special:newtab").unwrap() {
-            Address::Special { page, address } => {
+            Address::Special { page, address, .. } => {
                 assert_eq!(page, "newtab");
                 assert_eq!(address, "special:newtab");
             }
@@ -2899,7 +2919,7 @@ mod tests {
 
         // 大小写不敏感，回显一律小写
         match temp.vault.parse_address("Special:NewTab").unwrap() {
-            Address::Special { page, address } => {
+            Address::Special { page, address, .. } => {
                 assert_eq!(page, "newtab");
                 assert_eq!(address, "special:newtab");
             }
@@ -3057,7 +3077,7 @@ mod tests {
 
         // 状态不合法 → 裁掉，仍然打开那个页面（不当错误）
         match temp.vault.parse_address("special:newtab@edit").unwrap() {
-            Address::Special { page, address } => {
+            Address::Special { page, address, .. } => {
                 assert_eq!(page, "newtab");
                 assert_eq!(address, "special:newtab");
             }
@@ -3082,7 +3102,7 @@ mod tests {
 
         // 新增的页面同样注册在册（special:all）
         match temp.vault.parse_address("special:all").unwrap() {
-            Address::Special { page, address } => {
+            Address::Special { page, address, .. } => {
                 assert_eq!(page, "all");
                 assert_eq!(address, "special:all");
             }
@@ -3383,16 +3403,22 @@ mod tests {
         let error = lonely.vault.parse_address("孤零零").unwrap_err();
         assert!(error.to_string().contains("随机不到"), "{error}");
 
-        // 命名空间 ID 不是数字
-        let bad = TempVault::new();
-        bad.vault.create("候选").unwrap();
-        bad.vault.commit("候选", "正文", None, 0).unwrap();
-        bad.vault.create("写错参数").unwrap();
-        bad.vault
-            .commit("写错参数", "$$COMMAND$$\nRANDOM_REDIRECT: 主\n", None, 0)
+        // 命名空间写成**字符串标识**：`special` 是虚拟命名空间，页面由程序提供
+        let special = TempVault::new();
+        special.vault.create("随便一篇").unwrap();
+        special.vault.commit("随便一篇", "正文", None, 0).unwrap();
+        special.vault.create("跳特殊页").unwrap();
+        special
+            .vault
+            .commit("跳特殊页", "$$COMMAND$$\nRANDOM_REDIRECT: special\n", None, 0)
             .unwrap();
-        let error = bad.vault.parse_address("写错参数").unwrap_err();
-        assert!(error.to_string().contains("数字"), "{error}");
+        match special.vault.parse_address("跳特殊页").unwrap() {
+            Address::Special { page, .. } => assert!(
+                SPECIAL_PAGES.contains(&page.as_str()),
+                "应当落到真实存在的特殊页面：{page}"
+            ),
+            other => panic!("{other:?}"),
+        }
 
         // 命名空间里没有笔记
         let empty_ns = TempVault::new();
@@ -3634,6 +3660,32 @@ mod tests {
         let view = temp.vault.settings_view();
         assert!(!view.last_trash_purge.is_empty(), "上次清理时间要写回去");
         assert!(!view.last_gc.is_empty(), "上次回收时间要写回去");
+    }
+
+    /// 重定向到**特殊页面**时同样带上来源：虚拟命名空间下的页面也是"页面"，
+    /// 用户同样需要知道自己是**被带过来的**。
+    #[test]
+    fn redirect_to_special_page_carries_the_source() {
+        let temp = TempVault::new();
+        temp.vault.create("跳到设置").unwrap();
+        temp.vault
+            .commit(
+                "跳到设置",
+                "$$COMMAND$$\nREDIRECT: special:settings\n",
+                None,
+                0,
+            )
+            .unwrap();
+
+        match temp.vault.parse_address("跳到设置").unwrap() {
+            Address::Special { page, via, .. } => {
+                assert_eq!(page, "settings");
+                let via = via.expect("重定向过来的应当有来源");
+                assert_eq!(via.from, "跳到设置");
+                assert!(!via.random, "这是重定向，不是随机跳转");
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]

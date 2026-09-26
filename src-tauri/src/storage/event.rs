@@ -15,7 +15,7 @@ pub enum Event {
     /// 笔记建立
     Meta {
         at: String,
-        ns: i32,
+        ns: String,
         title: String,
     },
     /// 一次提交
@@ -41,7 +41,7 @@ pub enum Event {
         #[serde(default)]
         supersedes: Vec<u64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        ns: Option<i32>,
+        ns: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         title: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -91,7 +91,7 @@ impl Event {
 /// 折叠日志得到的当前状态
 #[derive(Debug, Clone, Default)]
 pub struct NoteState {
-    pub ns: i32,
+    pub ns: String,
     pub title: String,
     /// 当前提交版本；0 表示还没提交过
     pub rev: u64,
@@ -129,7 +129,7 @@ pub fn fold(events: &[Event]) -> NoteState {
     for event in events {
         match event {
             Event::Meta { at, ns, title } => {
-                state.ns = *ns;
+                state.ns = ns.clone();
                 state.title = title.clone();
                 state.at = at.clone();
             }
@@ -157,7 +157,7 @@ pub fn fold(events: &[Event]) -> NoteState {
                 state.at = at.clone();
                 state.deleted = false;
                 if let Some(ns) = ns {
-                    state.ns = *ns;
+                    state.ns = ns.clone();
                 }
                 if let Some(title) = title {
                     state.title = title.clone();

@@ -15,6 +15,38 @@ use std::sync::Arc;
 /// MediaWiki 的标题长度上限
 pub const MAX_TITLE_BYTES: usize = 255;
 
+/// 主命名空间的**占位标识**。
+///
+/// 主命名空间没有前缀，但键（`<id>:<标题>`）与目录（`notes/<id>/`）总得有个名字，
+/// 于是用 `"0"` 占位 —— 它只是"这里没有前缀"的记号，**不是数字序号**。
+pub const MAIN_NS: &str = "0";
+
+/// 虚拟命名空间：页面由程序提供，不落存储。
+pub const SPECIAL_NS: &str = "special";
+
+/// 命名空间标识。
+///
+/// 它**是字符串**（`special` / `help` / …），因为用户看到的、写在地址里的就是名字；
+/// 主命名空间用 [`MAIN_NS`] 占位。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+enum NamespaceIdRepr {
+    Text(String),
+    Number(i64),
+}
+
+/// 反序列化标识：**同时接受字符串与数字** —— 早期版本写的是数字，
+/// 旧文件不该因为这次模型修正就读不出来。
+fn de_namespace_id<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(match NamespaceIdRepr::deserialize(deserializer)? {
+        NamespaceIdRepr::Text(text) => text,
+        NamespaceIdRepr::Number(number) => number.to_string(),
+    })
+}
+
 /// MediaWiki 的非法标题字符集，外加本项目自己的两条限制
 /// （`:` 是命名空间分隔符，永远不属于标题本身；`@` 被地址栏的 `标题@版本` 占用）
 // `@` 是版本引用、`!` 是模式后缀，所以都不允许出现在标题里 ——
@@ -23,8 +55,10 @@ const ILLEGAL_CHARS: &[char] = &['#', '<', '>', '[', ']', '|', '{', '}', ':', '@
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Namespace {
-    pub id: i32,
-    /// 规范名；主命名空间为空串
+    /// 标识：**字符串**。主命名空间是 [`MAIN_NS`]（"0" 占位）
+    #[serde(deserialize_with = "de_namespace_id")]
+    pub id: String,
+    /// 规范名；主命名空间为空串（没有前缀）
     pub name: String,
     /// 别名（含其它语言）
     #[serde(default)]
@@ -56,21 +90,37 @@ impl NamespaceTable {
     /// 显示标题拼装、以及「冒号前缀不是已知命名空间就报错」这条规则都已经预留好了。
     pub fn builtin() -> Self {
         Self {
-            items: vec![Namespace {
-                id: 0,
-                name: String::new(),
-                aliases: Vec::new(),
-                storable: true,
-            }],
+            items: vec![
+                // 主命名空间：没有前缀，用 "0" 占位
+                Namespace {
+                    id: MAIN_NS.to_string(),
+                    name: String::new(),
+                    aliases: Vec::new(),
+                    storable: true,
+                },
+                // 虚拟命名空间：`special:` 下的页面由程序提供，不落存储
+                Namespace {
+                    id: SPECIAL_NS.to_string(),
+                    name: SPECIAL_NS.to_string(),
+                    aliases: vec!["Special".to_string()],
+                    storable: false,
+                },
+            ],
         }
     }
 
-    pub fn get(&self, id: i32) -> Option<&Namespace> {
+    pub fn get(&self, id: &str) -> Option<&Namespace> {
         self.items.iter().find(|item| item.id == id)
     }
 
-    pub fn name_of(&self, id: i32) -> Option<&str> {
+    /// 命名空间的显示名；`None` 表示这张表里没有它
+    pub fn name_of(&self, id: &str) -> Option<&str> {
         self.get(id).map(|item| item.name.as_str())
+    }
+
+    /// 是不是虚拟命名空间（页面由程序提供，不落存储）
+    pub fn is_virtual(&self, id: &str) -> bool {
+        self.get(id).map(|item| !item.storable).unwrap_or(false)
     }
 
     /// 按规范名或别名查找（大小写不敏感、两侧空白不影响）
@@ -94,14 +144,14 @@ impl NamespaceTable {
 
         let (ns, rest) = match normalized.split_once(':') {
             Some((prefix, rest)) => match self.lookup(prefix) {
-                // 命名空间命中：冒号归命名空间
-                Some(item) if item.storable => (item.id, rest.trim().to_string()),
+                // 命名空间命中：冒号归命名空间（虚拟命名空间不算合法**笔记标题**）
+                Some(item) if item.storable => (item.id.clone(), rest.trim().to_string()),
                 // **与 MediaWiki 明确不同**：冒号前缀不是已知命名空间时不再退回主命名空间，
                 // 而是直接判非法。两条理由：冒号在文件系统路径里是麻烦字符；
                 // 地址栏还要用「标题@版本」表达版本，需要一个干净的标题字符集。
                 _ => return Err(TitleError::Illegal(':')),
             },
-            None => (0, normalized.clone()),
+            None => (MAIN_NS.to_string(), normalized.clone()),
         };
 
         let title = if capital_links {
@@ -129,7 +179,8 @@ impl NamespaceTable {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedTitle {
-    pub ns: i32,
+    /// 命名空间标识（字符串；主命名空间是 [`MAIN_NS`]）
+    pub ns: String,
     pub title: String,
 }
 
@@ -141,7 +192,7 @@ impl ParsedTitle {
 
     /// 显示标题：主命名空间不加前缀
     pub fn display(&self, table: &NamespaceTable) -> String {
-        match table.name_of(self.ns) {
+        match table.name_of(&self.ns) {
             Some(name) if !name.is_empty() => format!("{name}:{}", self.title),
             _ => self.title.clone(),
         }
@@ -235,7 +286,7 @@ impl LinkResolver {
                 return None;
             }
             ParsedTitle {
-                ns: from.ns,
+                ns: from.ns.clone(),
                 title: format!("{}/{suffix}", from.title),
             }
         } else {
@@ -360,18 +411,32 @@ mod tests {
         NamespaceTable::builtin()
     }
 
+    /// 内建命名空间：主命名空间用 `"0"` 占位（它没有前缀），另有虚拟的 `special`。
+    ///
+    /// 标识是**字符串** —— 用户写在地址里的就是名字，没有"数字序号"这回事。
     #[test]
-    fn builtin_has_only_the_main_namespace() {
+    fn builtin_namespaces_are_named_strings() {
         let table = table();
-        assert_eq!(table.items.len(), 1);
-        assert_eq!(table.items[0].id, 0);
-        assert!(table.items[0].name.is_empty(), "主命名空间没有前缀");
+
+        let main = table.get(MAIN_NS).expect("主命名空间应当在表里");
+        assert!(main.name.is_empty(), "主命名空间没有前缀");
+        assert!(main.storable, "主命名空间是可存储的");
+
+        let special = table.get(SPECIAL_NS).expect("special 应当在表里");
+        assert_eq!(special.name, SPECIAL_NS, "规范名就是 special");
+        assert!(!special.storable, "special 是虚拟命名空间：页面由程序提供");
+        assert!(table.is_virtual(SPECIAL_NS));
+
+        assert!(
+            table.items.iter().all(|item| !item.id.is_empty()),
+            "标识不该为空"
+        );
     }
 
     #[test]
     fn main_namespace_has_no_prefix() {
         let parsed = table().parse("平陆运河", true).unwrap();
-        assert_eq!(parsed.ns, 0);
+        assert_eq!(parsed.ns, MAIN_NS);
         assert_eq!(parsed.title, "平陆运河");
         assert_eq!(parsed.key(), "0:平陆运河");
         assert_eq!(parsed.display(&table()), "平陆运河");
@@ -400,7 +465,7 @@ mod tests {
     fn slash_is_part_of_the_title() {
         // 斜杠原样进标题（子页面语义只在链接解析时展开）
         let parsed = table().parse("平陆运河/航道", true).unwrap();
-        assert_eq!(parsed.ns, 0);
+        assert_eq!(parsed.ns, MAIN_NS);
         assert_eq!(parsed.title, "平陆运河/航道");
     }
 
@@ -432,7 +497,7 @@ mod tests {
             Arc::new(keys),
             true,
             Some(ParsedTitle {
-                ns: 0,
+                ns: MAIN_NS.to_string(),
                 title: "当前笔记".into(),
             }),
         );
@@ -452,7 +517,7 @@ mod tests {
             Arc::new(HashSet::new()),
             true,
             Some(ParsedTitle {
-                ns: 0,
+                ns: MAIN_NS.to_string(),
                 title: "平陆运河".into(),
             }),
         );

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Component } from "vue";
 import { History, Pencil, Trash2 } from "@lucide/vue";
+import ViaHint from "./ViaHint.vue";
 
 /**
  * 页面标题行 + 页面操作。
@@ -49,7 +50,7 @@ const actions: {
   <div class="page-header" :class="{ 'page-header--collapsed': collapsed }">
     <div class="page-heading">
       <h1 class="page-title" :title="title">{{ title }}</h1>
-      <p v-if="under" class="page-under">{{ under }}</p>
+      <ViaHint :hint="under" />
       <!-- 子页面（标题里有斜杠）给一个回上一级的出口 -->
       <button
         v-if="parent"
@@ -105,13 +106,6 @@ const actions: {
 .page-heading {
   flex: 1 1 auto;
   min-width: 0;
-}
-
-.page-under {
-  margin: 2px 0 0;
-  color: var(--text-dim);
-  font-size: 12.5px;
-  line-height: 1.6;
 }
 
 .page-up {

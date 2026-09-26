@@ -11,6 +11,7 @@ import AppMenu from "./components/AppMenu.vue";
 import GcPage from "./components/GcPage.vue";
 import TrashPage from "./components/TrashPage.vue";
 import TaskBar from "./components/TaskBar.vue";
+import ViaHint from "./components/ViaHint.vue";
 import { labelOf } from "./special";
 import { BASE_ZOOM } from "./settings";
 import { setThemeMode, themeMode, type ThemeMode } from "./theme";
@@ -134,7 +135,13 @@ type Address =
       short_id: string;
       address: string;
     }
-  | { kind: "special"; page: string; address: string }
+  | {
+      kind: "special";
+      page: string;
+      address: string;
+      /** 是跟某条指令来到这一页的（直接打开时为 null） */
+      via: { from: string; random: boolean } | null;
+    }
   | { kind: "missing"; title: string; address: string };
 
 /** 自动保存：停手三秒后写一条草稿到链上 */
@@ -822,10 +829,15 @@ function runCommand() {
  */
 const viaHint = computed(() => {
   const address = route.value;
-  if (!address || address.kind !== "note" || !address.via) {
+  // 笔记页与特殊页面都要标（虚拟命名空间下的页面同样是"页面"）
+  const via =
+    address && (address.kind === "note" || address.kind === "special")
+      ? address.via
+      : null;
+  if (!via) {
     return "";
   }
-  return address.via.random ? "来自随机重定向" : `重定向自《${address.via.from}》`;
+  return via.random ? "来自随机重定向" : `重定向自《${via.from}》`;
 });
 
 async function reloadSettings() {
@@ -1456,6 +1468,9 @@ function onAction(name: string) {
         }"
         @scroll.passive="onScroll"
       >
+      <!-- 特殊命名空间下的页面也要标出来源：与笔记页共用 ViaHint，文案与样式只写一次 -->
+      <ViaHint v-if="mode === 'special'" :hint="viaHint" />
+
         <div class="app__column" :class="{ 'app__column--wide': !limitWidth }">
           <!-- 特殊页面：由前端渲染（后端只负责把地址解析成 Special） -->
           <NewTab

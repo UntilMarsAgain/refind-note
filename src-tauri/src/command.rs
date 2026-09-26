@@ -150,7 +150,9 @@ fn describe_redirect(command: &Command) -> String {
 
 fn describe_random_redirect(command: &Command) -> String {
     let namespace = command.argument.trim();
-    if namespace.is_empty() {
+    // 空与 "0" 都是主命名空间（它没有前缀，用 0 占位）——
+    // 界面上不该让人看见那个占位符
+    if namespace.is_empty() || namespace == crate::title::MAIN_NS {
         "每次打开随机跳到主命名空间的某一篇".to_string()
     } else {
         format!("每次打开随机跳到命名空间 {namespace} 的某一篇")
