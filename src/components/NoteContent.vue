@@ -3,7 +3,7 @@ import { nextTick, onMounted, ref, watch } from "vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { applyLineNumbers, highlightCode } from "../code-blocks";
-import { resolveFileImages } from "../note-html";
+import { decorateNoteHtml } from "../note-html";
 import { codeLineNumbers } from "../settings";
 
 const props = defineProps<{ html: string }>();
@@ -74,8 +74,8 @@ function decorateCodeBlocks() {
   }
 
   applyLineNumbers(root);
-  // 相对地址的图片指向仓库里的文件（笔记里写的就是文件名）
-  resolveFileImages(root);
+  // 笔记 HTML 的收尾：解析附件地址、给图片挂上点击看大图、取不到时换一句说明
+  decorateNoteHtml(root);
 }
 
 onMounted(decorateCodeBlocks);

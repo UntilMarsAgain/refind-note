@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fileTargetOf } from "./note-html.ts";
+import { fileTargetOf } from "./file-links.ts";
 
 test("相对地址当作仓库里的文件", () => {
   assert.equal(fileTargetOf("图片.png"), "图片.png");

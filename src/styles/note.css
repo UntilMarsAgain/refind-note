@@ -635,3 +635,22 @@
   margin: 0 0 10px;
   color: var(--text);
 }
+
+/* 笔记里的图片：可以点开看大图，所以给一个"可点"的指针 */
+.note-body .note-image {
+  cursor: zoom-in;
+}
+
+/*
+ * 图片取不到时换成的一句说明。
+ *
+ * 不用破图标占位：读者要知道的是"这张图不在了"，而不是对着一个加载失败的方框猜。
+ */
+.note-body .image-missing {
+  display: inline-block;
+  padding: 6px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 0.9em;
+}

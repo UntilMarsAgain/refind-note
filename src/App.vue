@@ -21,6 +21,7 @@ import AllPages from "./components/AllPages.vue";
 import AppMenu from "./components/AppMenu.vue";
 import DebugPage from "./components/DebugPage.vue";
 import FilesPage from "./components/FilesPage.vue";
+import ImageViewer from "./components/ImageViewer.vue";
 import GcPage from "./components/GcPage.vue";
 import TrashPage from "./components/TrashPage.vue";
 import TaskBar from "./components/TaskBar.vue";
@@ -1585,6 +1586,9 @@ function onAction(name: string) {
     </span>
   </div>
 
+
+    <!-- 大图查看器：全局只挂这一份，阅读视图与编辑器预览共用 -->
+    <ImageViewer />
 </template>
 
 <style scoped>

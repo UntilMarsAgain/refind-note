@@ -6,7 +6,7 @@ import type { FileEntry } from "../bindings";
 import { checkTitle } from "../title";
 import { themeMode } from "../theme";
 import { applyLineNumbers, highlightCode } from "../code-blocks";
-import { resolveFileImages } from "../note-html";
+import { decorateNoteHtml } from "../note-html";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   templateBlockLines,
@@ -325,8 +325,8 @@ watch(preview, () => {
     if (previewEl.value) {
       highlightCode(previewEl.value);
       applyLineNumbers(previewEl.value);
-      // 相对地址的图片与附件指向仓库文件（与阅读视图同一条规则）
-      resolveFileImages(previewEl.value);
+      // 与阅读视图同一套收尾：附件地址解析、点击看大图、图片取不到时给说明
+      decorateNoteHtml(previewEl.value);
     }
   });
 });
@@ -569,7 +569,7 @@ const fileProblem = ref<string | null>(null);
  * 快速上传：选文件 → 收进仓库 → 在光标处插入引用。
  *
  * 引用写的是**文件名**（`![名字](名字)`），因为磁盘上的标识是生成的、人记不住；
- * 名字到取件地址的换算在 `resolveFileImages` 里统一做。
+ * 名字到取件地址的换算在 `decorateNoteHtml` 里统一做。
  */
 async function insertFile() {
   fileProblem.value = null;
