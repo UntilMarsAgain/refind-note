@@ -347,3 +347,21 @@ pub struct FileEntry {
     /// 取文件的地址（程序自己的 `refind:` 方案）
     pub url: String,
 }
+
+/// 最近更改里的一条。
+///
+/// 与某一篇笔记的版本历史是同一份数据，只是**汇总到了一起**、按时间倒序 ——
+/// "刚才做了什么"是全仓库的问题，不是某一页的问题。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChangeEntry {
+    pub title: String,
+    /// `commit` / `draft` / `delete`
+    pub kind: String,
+    pub rev: u64,
+    pub at: String,
+    pub bytes: u64,
+    /// 相对上一版的字节增减，一眼看出改了多少
+    pub delta: i64,
+    /// 展示用的提交短 id
+    pub short_id: String,
+}

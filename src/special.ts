@@ -7,7 +7,18 @@
  * 不会因为忘了登记而从界面上消失。
  */
 import type { Component } from "vue";
-import { Dices, FolderOpen, History, List, Plus, Settings, Stethoscope, Trash2, Wrench } from "@lucide/vue";
+import {
+  Clock,
+  Dices,
+  FolderOpen,
+  History,
+  List,
+  Plus,
+  Settings,
+  Stethoscope,
+  Trash2,
+  Wrench,
+} from "@lucide/vue";
 
 export interface SpecialPageMeta {
   /** 显示名 */
@@ -32,6 +43,12 @@ export const SPECIAL_META: Record<string, SpecialPageMeta> = {
     label: "文件",
     tip: "浏览、上传、管理附件",
     icon: FolderOpen,
+    group: "导航",
+  },
+  changes: {
+    label: "最近更改",
+    tip: "全仓库最近的提交；勾选后连草稿一起看",
+    icon: Clock,
     group: "导航",
   },
   history: {

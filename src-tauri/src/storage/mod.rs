@@ -33,9 +33,9 @@ mod trash;
 mod version;
 
 pub use api::{
-    Address, CommandInfo, DiffResult, Draft, FileEntry, GcReport, LoadOutcome, MaintenanceReport,
-    Note, NoteSummary, PurgeReport, RevisionContent, RevisionSummary, TrashEntry, VaultSettings,
-    Via, DebugReport, RenderReport,
+    Address, ChangeEntry, CommandInfo, DiffResult, Draft, FileEntry, GcReport, LoadOutcome,
+    MaintenanceReport, Note, NoteSummary, PurgeReport, RevisionContent, RevisionSummary,
+    TrashEntry, VaultSettings, Via, DebugReport, RenderReport,
 };
 pub use config::VaultConfig;
 pub use files::{decode_key, mime_of};
@@ -895,6 +895,49 @@ impl Vault {
     /// 版本历史：只回元信息（大小、摘要、类型），正文用 [`Self::revision`] 按需取。
     ///
     /// 草稿也在版本序列里，所以会一并列出（`kind` 是 `draft`），由界面决定是否显示。
+    /// 最近更改：把各篇笔记的版本记录汇到一起，按时间倒序。
+    ///
+    /// `include_drafts` 打开时把草稿也算进来。默认关掉是有道理的：草稿**随时在落盘**
+    /// （每敲一会儿就一条），混在里面会把"谁提交了什么"淹掉。
+    ///
+    /// 某一篇读坏了不影响整页：跳过它继续汇总 —— 这一页的用处是"看看最近做了什么"，
+    /// 不该被一篇坏笔记整个挡住。
+    pub fn recent_changes(
+        &self,
+        limit: usize,
+        include_drafts: bool,
+    ) -> Result<Vec<ChangeEntry>, VaultError> {
+        let mut out: Vec<ChangeEntry> = Vec::new();
+        for parsed in self.walk(&self.notes_dir())? {
+            let display = parsed.display(&self.table);
+            let Ok(summaries) = self.history(&display) else {
+                continue;
+            };
+            for summary in summaries {
+                // `create` 是"这一页诞生了"，正文是空的；它的内容出现在第一条提交里
+                if summary.kind == "create" {
+                    continue;
+                }
+                if !include_drafts && summary.kind == "draft" {
+                    continue;
+                }
+                out.push(ChangeEntry {
+                    title: display.clone(),
+                    kind: summary.kind,
+                    rev: summary.rev,
+                    at: summary.at,
+                    bytes: summary.bytes,
+                    delta: summary.delta,
+                    short_id: summary.short_id,
+                });
+            }
+        }
+        // 时间戳是 RFC3339，按字符串倒序就是按时间倒序
+        out.sort_by(|a, b| b.at.cmp(&a.at));
+        out.truncate(limit);
+        Ok(out)
+    }
+
     pub fn history(&self, title: &str) -> Result<Vec<RevisionSummary>, VaultError> {
         let (_parsed, path) = self.locate(title)?;
         let id = Self::id_from_path(&path);
@@ -2095,8 +2138,8 @@ pub fn default_root() -> Result<PathBuf, VaultError> {
 ///
 /// 刻意用 `get(..n)`：直接切 `&value[..n]` 会在多字节字符中间 panic。
 /// 现有的特殊页面。不在这里面的 `special:` 地址直接报「不存在」。
-pub(crate) const SPECIAL_PAGES: [&str; 9] =
-    ["newtab", "settings", "all", "random", "gc", "trash", "debug", "files", "history"];
+pub(crate) const SPECIAL_PAGES: [&str; 10] =
+    ["newtab", "settings", "all", "random", "gc", "trash", "debug", "files", "history", "changes"];
 
 /// 重定向最多跟几跳。超过就报错，而不是让 A→B→A 这类环无限递归。
 ///

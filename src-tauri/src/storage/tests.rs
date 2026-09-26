@@ -2332,3 +2332,36 @@ fn model_version_gates_opening() {
     fs::write(&config_path, &original).unwrap();
     assert!(Vault::open(&temp.root).is_ok());
 }
+
+/// 最近更改：时间倒序、默认不含草稿、上限生效
+#[test]
+fn recent_changes_lists_newest_first_and_can_hide_drafts() {
+    let temp = TempVault::new();
+    temp.vault.commit("甲", "第一版", Some("起头"), 0).unwrap();
+    temp.vault.commit("乙", "另一篇", None, 0).unwrap();
+
+    let current = temp.vault.load("甲").unwrap();
+    temp.vault.save_draft("甲", "改到一半", current.rev).unwrap();
+
+    // 默认不含草稿：草稿随时在落盘，混进来会把"谁提交了什么"淹掉
+    let commits = temp.vault.recent_changes(50, false).unwrap();
+    assert!(!commits.is_empty());
+    assert!(commits.iter().all(|entry| entry.kind != "draft"));
+    assert!(commits.iter().any(|entry| entry.title == "甲"));
+    assert!(commits.iter().any(|entry| entry.title == "乙"));
+    // `create` 是"这一页诞生了"，不该单独占一条
+    assert!(commits.iter().all(|entry| entry.kind != "create"));
+
+    // 勾上之后草稿也在
+    let with_drafts = temp.vault.recent_changes(50, true).unwrap();
+    assert!(with_drafts.iter().any(|entry| entry.kind == "draft"));
+    assert!(with_drafts.len() > commits.len());
+
+    // 时间倒序（时间戳是 RFC3339，字符串比较即时间比较）
+    for pair in with_drafts.windows(2) {
+        assert!(pair[0].at >= pair[1].at, "应当按时间倒序：{:?}", pair);
+    }
+
+    // 上限生效
+    assert_eq!(temp.vault.recent_changes(1, true).unwrap().len(), 1);
+}

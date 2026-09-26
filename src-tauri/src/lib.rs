@@ -13,9 +13,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 use storage::{
-    Address, CommandInfo, Namespace, DiffResult, Draft, FileEntry, GcReport, LoadOutcome,
-    MaintenanceReport, Note, NoteSummary, PurgeReport, RevisionContent, RevisionSummary,
-    TrashEntry, Vault, VaultSettings, DebugReport, RenderReport,
+    Address, ChangeEntry, CommandInfo, Namespace, DiffResult, Draft, FileEntry, GcReport,
+    LoadOutcome, MaintenanceReport, Note, NoteSummary, PurgeReport, RevisionContent,
+    RevisionSummary, TrashEntry, Vault, VaultSettings, DebugReport, RenderReport,
 };
 use tauri::Manager;
 
@@ -45,6 +45,14 @@ fn open() -> Result<Vault, String> {
 }
 
 // ---------------------------------------------------------------- 设置
+
+/// 最近更改：`include_drafts` 打开时把草稿也算上（默认不看草稿）
+#[tauri::command]
+fn recent_changes(limit: usize, include_drafts: bool) -> Result<Vec<ChangeEntry>, String> {
+    Ok(open()?
+        .recent_changes(limit, include_drafts)
+        .map_err(|error| error.to_string())?)
+}
 
 #[tauri::command]
 fn list_files() -> Result<Vec<FileEntry>, String> {
@@ -686,6 +694,7 @@ pub fn run() {
             get_settings,
             update_settings,
             list_files,
+            recent_changes,
             upload_file,
             upload_bytes,
             rename_file,

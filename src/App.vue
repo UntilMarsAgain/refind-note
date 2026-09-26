@@ -24,6 +24,7 @@ import AllPages from "./components/AllPages.vue";
 import AppMenu from "./components/AppMenu.vue";
 import DebugPage from "./components/DebugPage.vue";
 import FilesPage from "./components/FilesPage.vue";
+import ChangesPage from "./components/ChangesPage.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import HistoryPage from "./components/HistoryPage.vue";
 import ImageViewer from "./components/ImageViewer.vue";
@@ -1481,6 +1482,15 @@ function onAction(name: string) {
         文件：附件的浏览、上传与管理。与别的系统页面同类，所以放在同一串分支里。
       -->
       <FilesPage v-else-if="mode === 'special' && specialPage === 'files'" />
+
+      <!--
+        最近更改：全仓库的提交（可勾选连草稿一起看）。数据来自后端汇总，
+        这一页只负责呈现与那个勾选框。
+      -->
+      <ChangesPage
+        v-else-if="mode === 'special' && specialPage === 'changes'"
+        @open="openFromList"
+      />
 
       <!--
         浏览历史：内容是**界面状态**（存在 localStorage），所以这一页完全由前端渲染 ——
