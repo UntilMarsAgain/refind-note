@@ -6,7 +6,7 @@
  * 数组再走一遍 IPC。磁盘上的名字与显示名是分开的（见后端 `storage/files.rs`），
  * 所以这里看到的文件名，就是笔记里引用时该写的名字。
  */
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -23,6 +23,9 @@ const notice = ref("");
 const problem = ref("");
 /** 正在等第二次确认的那个附件：删除不可撤销，值得多问一句 */
 const confirming = ref("");
+/** 正在改名的那个附件（空串表示没有），以及输入框里的草稿 */
+const renaming = ref("");
+const renameText = ref("");
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) {
@@ -100,6 +103,43 @@ async function upload() {
   }
 }
 
+/**
+ * 开始改名：输入框拿焦点并**全选** —— 直接打就是新名字，不必先删掉旧的。
+ *
+ * 名字只是表里的一行（磁盘上是生成的标识），所以改名不动任何文件。
+ */
+async function beginRename(file: FileEntry) {
+  confirming.value = "";
+  renaming.value = file.id;
+  renameText.value = file.name;
+  await nextTick();
+  document.querySelector<HTMLInputElement>(".files__rename")?.select();
+}
+
+function cancelRename() {
+  renaming.value = "";
+  renameText.value = "";
+}
+
+async function submitRename(file: FileEntry) {
+  const wanted = renameText.value.trim();
+  // 没改、或者改空了：当作没这回事（空名字后端也会拒绝，不必来回一趟）
+  if (wanted === "" || wanted === file.name) {
+    cancelRename();
+    return;
+  }
+  problem.value = "";
+  try {
+    const entry = await invoke<FileEntry>("rename_file", { id: file.id, name: wanted });
+    // 旧名字已经写在别人笔记里的话，这里改了并不会跟着变 —— 这句必须说
+    notice.value = "已改名为 " + entry.name + "（笔记里已经写下的旧名字不会自动改）";
+    cancelRename();
+    await refresh();
+  } catch (error) {
+    problem.value = String(error);
+  }
+}
+
 async function copyReference(file: FileEntry) {
   try {
     await writeText(referenceOf(file));
@@ -115,6 +155,7 @@ function onRowMenu(event: MouseEvent, file: FileEntry) {
   event.stopPropagation();
   openMenu(event, [
     { label: "复制引用", run: () => copyReference(file) },
+    { label: "重命名", run: () => beginRename(file) },
     { label: "删除", danger: true, run: () => askDelete(file) },
   ]);
 }
@@ -184,7 +225,16 @@ onBeforeUnmount(() => window.removeEventListener("paste", onPaste));
         </div>
 
         <div class="files__meta">
-          <p class="files__name">{{ file.name }}</p>
+          <input
+            v-if="renaming === file.id"
+            v-model="renameText"
+            class="files__rename"
+            type="text"
+            aria-label="新的文件名"
+            @keydown.enter.prevent="submitRename(file)"
+            @keydown.esc.prevent="cancelRename"
+          />
+          <p v-else class="files__name">{{ file.name }}</p>
           <p class="files__sub">
             {{ formatSize(file.size) }} · {{ file.mime }} · {{ file.uploaded }}
           </p>
@@ -192,15 +242,22 @@ onBeforeUnmount(() => window.removeEventListener("paste", onPaste));
         </div>
 
         <div class="files__actions">
-          <button @click="copyReference(file)">复制引用</button>
-          <template v-if="confirming === file.id">
+          <template v-if="renaming === file.id">
+            <button @click="submitRename(file)">确认改名</button>
+            <button @click="cancelRename">取消</button>
+          </template>
+          <template v-else-if="confirming === file.id">
             <button class="files__danger" @click="remove(file)">确认删除</button>
             <button @click="confirming = ''">取消</button>
           </template>
-          <button v-else class="files__danger" @click="confirming = file.id">
-            <Trash2 :size="15" />
-            删除
-          </button>
+          <template v-else>
+            <button @click="copyReference(file)">复制引用</button>
+            <button @click="beginRename(file)">重命名</button>
+            <button class="files__danger" @click="askDelete(file)">
+              <Trash2 :size="15" />
+              删除
+            </button>
+          </template>
         </div>
       </li>
     </ul>
@@ -321,6 +378,18 @@ onBeforeUnmount(() => window.removeEventListener("paste", onPaste));
   margin: 0 0 4px;
   font-weight: 600;
   word-break: break-all;
+}
+
+.files__rename {
+  width: 100%;
+  margin: 0 0 4px;
+  padding: 5px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 600;
 }
 
 .files__sub {

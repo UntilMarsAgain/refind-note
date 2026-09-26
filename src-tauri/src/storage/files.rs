@@ -138,6 +138,43 @@ impl Vault {
         Ok(entry)
     }
 
+    /// 重命名一个附件：**只改表里的那一行**。
+    ///
+    /// 磁盘上的名字是生成的标识，所以改名一个文件都不用动 —— 这正是当初把"磁盘名"与
+    /// "显示名"分开的理由之一。
+    ///
+    /// 内容类型（`extension` / `mime`）**不跟着名字走**：它们描述的是内容本身，
+    /// 把 `图.png` 改成 `照片.jpg` 并不会让里面的字节变成 JPEG。
+    ///
+    /// 重名时**报错**而不是自动加后缀：上传时加后缀是体贴（用户只想把文件放进来），
+    /// 改名是刻意动作 —— 这时"这个名字有人用了"才是他需要知道的事。
+    pub fn rename_file(&self, id: &str, name: &str) -> Result<FileEntry, VaultError> {
+        let clean = clean_name(name);
+        if clean.is_empty() {
+            return Err(VaultError::Corrupt("文件名不能为空".to_string()));
+        }
+        let mut table = self.read_files()?;
+        let index = table
+            .items
+            .iter()
+            .position(|file| file.id == id)
+            .ok_or_else(|| VaultError::NotFound(format!("附件 {id}")))?;
+
+        let taken = table
+            .items
+            .iter()
+            .enumerate()
+            .any(|(other, file)| other != index && file.name == clean);
+        if taken {
+            return Err(VaultError::NameTaken(clean));
+        }
+
+        table.items[index].name = clean;
+        let entry = table.items[index].to_entry();
+        self.write_files(&table)?;
+        Ok(entry)
+    }
+
     /// 全部附件，最新的在前
     pub fn list_files(&self) -> Result<Vec<FileEntry>, VaultError> {
         let mut table = self.read_files()?;
@@ -344,6 +381,62 @@ mod tests {
         let entry = temp.vault.add_file("说明", b"z").unwrap();
         assert!(entry.url.starts_with("refind://localhost/files/"));
         assert_eq!(entry.mime, "application/octet-stream");
+    }
+
+    #[test]
+    fn rename_only_touches_the_table() {
+        let temp = TempVault::new();
+        let entry = temp.vault.add_file("旧名.png", b"data").unwrap();
+        let stored = temp.vault.files_dir().join(format!("{}.png", entry.id));
+        assert!(stored.exists());
+
+        let renamed = temp.vault.rename_file(&entry.id, "新名.png").unwrap();
+        assert_eq!(renamed.name, "新名.png");
+        // 标识与磁盘上的那份都没动 —— 改名只是改表
+        assert_eq!(renamed.id, entry.id);
+        assert!(stored.exists(), "内容不该被搬动");
+        assert_eq!(temp.vault.list_files().unwrap()[0].name, "新名.png");
+
+        // 名字里的路径部分照样只取文件名
+        let cleaned = temp.vault.rename_file(&entry.id, "../别处/第三个名字.png").unwrap();
+        assert_eq!(cleaned.name, "第三个名字.png");
+    }
+
+    #[test]
+    fn rename_reports_a_taken_name_instead_of_suffixing() {
+        let temp = TempVault::new();
+        let first = temp.vault.add_file("甲.png", b"one").unwrap();
+        let second = temp.vault.add_file("乙.png", b"two").unwrap();
+
+        let message = temp
+            .vault
+            .rename_file(&second.id, "甲.png")
+            .err()
+            .expect("重名应当报错")
+            .to_string();
+        assert!(message.contains("甲.png"), "{message}");
+        assert!(message.contains("换一个名字"), "{message}");
+
+        // 改成自己原来的名字不算冲突
+        assert!(temp.vault.rename_file(&second.id, "乙.png").is_ok());
+        // 空名字要拒绝
+        assert!(temp.vault.rename_file(&first.id, "   ").is_err());
+        // 不存在的标识要报"找不到"，不是静静成功
+        assert!(temp.vault.rename_file("deadbeef", "随便.png").is_err());
+    }
+
+    #[test]
+    fn rename_keeps_the_content_type() {
+        let temp = TempVault::new();
+        let entry = temp.vault.add_file("图.png", b"\x89PNG").unwrap();
+        let renamed = temp.vault.rename_file(&entry.id, "照片.jpg").unwrap();
+        // 内容没有变，所以类型与磁盘上的扩展名都不该跟着名字走
+        assert_eq!(renamed.mime, "image/png");
+        assert!(temp
+            .vault
+            .files_dir()
+            .join(format!("{}.png", entry.id))
+            .exists());
     }
 
     #[test]

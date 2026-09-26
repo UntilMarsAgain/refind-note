@@ -89,6 +89,13 @@ fn upload_bytes(request: tauri::ipc::Request<'_>) -> Result<FileEntry, String> {
 }
 
 #[tauri::command]
+fn rename_file(id: String, name: String) -> Result<FileEntry, String> {
+    open()?
+        .rename_file(&id, &name)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn delete_file(id: String) -> Result<(), String> {
     open()?.delete_file(&id).map_err(|error| error.to_string())
 }
@@ -614,6 +621,7 @@ pub fn run() {
             list_files,
             upload_file,
             upload_bytes,
+            rename_file,
             delete_file,
             special_pages,
             render_markdown,
