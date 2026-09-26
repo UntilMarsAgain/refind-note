@@ -5,7 +5,11 @@ import { Check, Pencil, Save, Trash2, X } from "@lucide/vue";
 import { checkTitle } from "../title";
 import { themeMode } from "../theme";
 import { applyLineNumbers } from "../code-blocks";
-import { templateBlockLines, templateRanges } from "../template-blocks";
+import {
+  templateBlockLines,
+  templateFoldRange,
+  templateRanges,
+} from "../template-blocks";
 import StatePanel from "./StatePanel.vue";
 import { codeLineNumbers } from "../settings";
 // `codemirror` 是元包（提供 basicSetup 等），EditorState 由 @codemirror/state 提供 ——
@@ -16,7 +20,7 @@ import { EditorView } from "@codemirror/view";
 import { markdown } from "@codemirror/lang-markdown";
 import { css as cssLanguage } from "@codemirror/lang-css";
 import { html as htmlLanguage } from "@codemirror/lang-html";
-import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { HighlightStyle, foldService, syntaxHighlighting } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 import type { DecorationSet, ViewUpdate } from "@codemirror/view";
 import { Decoration, MatchDecorator, ViewPlugin } from "@codemirror/view";
@@ -233,6 +237,25 @@ function buildTemplateDecorations(view: EditorView): DecorationSet {
 }
 
 
+
+/**
+ * 模板块的折叠。
+ *
+ * CM6 默认按 markdown 的结构折（段落、标题…），而模板块对它只是一段普通文字 ——
+ * 折到第一个空行就停了，与渲染的"跨空行"对不上。这里按**同一套规则**给出范围：
+ * 头行到块的最后一行（含块内空行）。
+ *
+ * 折叠服务优先于语法树自带的折叠属性，所以这里的结论会盖过默认行为。
+ */
+const templateFold = foldService.of((state, lineStart) => {
+  const doc = state.doc;
+  const line = doc.lineAt(lineStart);
+  const range = templateFoldRange(doc.toString().split("\n"), line.number - 1);
+  if (!range) {
+    return null;
+  }
+  return { from: line.to, to: doc.line(range.to + 1).to };
+});
 
 const wikilinkHighlight = ViewPlugin.fromClass(
   class {
@@ -456,6 +479,7 @@ onMounted(() => {
         syntaxHighlighting(appHighlight),
         wikilinkHighlight,
         templateHighlight,
+        templateFold,
         EditorView.lineWrapping,
         EditorView.updateListener.of((update) => {
           // 光标与选区：状态面板要报，而 CM6 只有编辑器自己知道

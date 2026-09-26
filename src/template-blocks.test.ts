@@ -13,6 +13,7 @@ import {
   templateBlockEnd,
   templateMarks,
   templateBlockLines,
+  templateFoldRange,
   templateRanges,
 } from "./template-blocks.ts";
 
@@ -144,4 +145,17 @@ test("块覆盖的行包含块内的空行（这样左边缘才跨得过去）",
 
 test("块外的行不覆盖", () => {
   assert.deepEqual(templateBlockLines(["::note", "  块内", "", "块外"]), [0, 1]);
+});
+
+test("折叠范围跨过块内空行，一直到块尾", () => {
+  const lines = ["::quote", "  第一段", "", "  第二段", "块外"];
+  assert.deepEqual(templateFoldRange(lines, 0), { from: 1, to: 3 });
+});
+
+test("没有内容的头行不折叠（不该出现折叠箭头）", () => {
+  assert.equal(templateFoldRange(["::note", "块外"], 0), null);
+});
+
+test("不是头行就没有折叠范围", () => {
+  assert.equal(templateFoldRange(["普通一行", "  缩进"], 0), null);
 });

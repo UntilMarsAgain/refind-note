@@ -200,3 +200,26 @@ export function templateBlockLines(lines: string[]): number[] {
   }
   return [...covered].sort((a, b) => a - b);
 }
+
+/**
+ * 模板块的**折叠范围**：`index` 是头行（0 基）时给出块内行的区间（0 基，含端点）。
+ *
+ * 给 CM6 的折叠服务用。默认它按 markdown 的结构折（段落、标题…），而模板块对它只是
+ * 一段普通文字 —— 于是折到第一个空行就停了，跟渲染的"跨空行"对不上。
+ *
+ * 头行没有内容可折时返回 `null`（没有内容的行不该出现折叠箭头）。
+ */
+export function templateFoldRange(
+  lines: string[],
+  index: number,
+): { from: number; to: number } | null {
+  const text = lines[index] ?? "";
+  if (!isTemplateHead(text)) {
+    return null;
+  }
+  const last = templateBlockEnd(lines, index, headIndent(text));
+  if (last <= index) {
+    return null;
+  }
+  return { from: index + 1, to: last };
+}
