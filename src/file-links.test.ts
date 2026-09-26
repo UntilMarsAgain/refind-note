@@ -61,9 +61,9 @@ test("只有 http/https 才算可下载的网址", () => {
 test("另存网页图片的默认名从网址猜", () => {
   assert.equal(fileNameOfUrl("https://example.com/a/b.png?y=1"), "b.png");
   assert.equal(fileNameOfUrl("https://example.com/a/%E6%A1%A5.png"), "桥.png");
-  // 猜不出就给一个看着像话的名字，不猜路径
+  // 没有路径时给一个看着像话的名字，不把主机名当文件名（存成 `example.com` 很怪）
   assert.equal(fileNameOfUrl("https://example.com/"), "图片");
-  assert.equal(fileNameOfUrl("https://example.com"), "example.com");
+  assert.equal(fileNameOfUrl("https://example.com"), "图片");
   // 坏编码原样用，不抛
   assert.equal(fileNameOfUrl("https://example.com/%ZZ"), "%ZZ");
 });

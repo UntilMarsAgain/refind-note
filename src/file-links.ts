@@ -64,7 +64,15 @@ export function httpUrlOf(source: string): string | null {
  * 坏编码不抛：文件名而已，原样用就行。
  */
 export function fileNameOfUrl(url: string): string {
-  const path = (url.split("?")[0] ?? "").split("#")[0] ?? "";
+  let path = "";
+  try {
+    // 用 URL 解析而不是切字符串：这样"没有路径"（`https://example.com`）能认出来，
+    // 否则会把主机名当成文件名（存成 `example.com` 很怪）
+    path = new URL(url).pathname;
+  } catch {
+    // 不是合法网址：那就按字符串切，能猜多少算多少
+    path = (url.split("?")[0] ?? "").split("#")[0] ?? "";
+  }
   const last = path.split("/").filter((piece) => piece !== "").pop() ?? "";
   let name = last;
   try {

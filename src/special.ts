@@ -7,7 +7,7 @@
  * 不会因为忘了登记而从界面上消失。
  */
 import type { Component } from "vue";
-import { Dices, FolderOpen, List, Plus, Settings, Stethoscope, Trash2, Wrench } from "@lucide/vue";
+import { Dices, FolderOpen, History, List, Plus, Settings, Stethoscope, Trash2, Wrench } from "@lucide/vue";
 
 export interface SpecialPageMeta {
   /** 显示名 */
@@ -32,6 +32,12 @@ export const SPECIAL_META: Record<string, SpecialPageMeta> = {
     label: "文件",
     tip: "浏览、上传、管理附件",
     icon: FolderOpen,
+    group: "导航",
+  },
+  history: {
+    label: "浏览历史",
+    tip: "看过的页面；可单独清空，也能在设置里关掉",
+    icon: History,
     group: "导航",
   },
   settings: { label: "设置", tip: "外观与存储设置", icon: Settings, group: "工具" },

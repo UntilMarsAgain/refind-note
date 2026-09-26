@@ -13,6 +13,7 @@ import type {
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { type MenuItem, closeMenu, openMenu } from "./context-menu";
+import { recordVisit } from "./history";
 import { invoke } from "@tauri-apps/api/core";
 import FloatingTools from "./components/FloatingTools.vue";
 import HistoryView from "./components/HistoryView.vue";
@@ -24,6 +25,7 @@ import AppMenu from "./components/AppMenu.vue";
 import DebugPage from "./components/DebugPage.vue";
 import FilesPage from "./components/FilesPage.vue";
 import ContextMenu from "./components/ContextMenu.vue";
+import HistoryPage from "./components/HistoryPage.vue";
 import ImageViewer from "./components/ImageViewer.vue";
 import GcPage from "./components/GcPage.vue";
 import TrashPage from "./components/TrashPage.vue";
@@ -320,6 +322,9 @@ async function loadNote(title: string, codeBlock = false) {
     }
 
     note.value = outcome.note;
+    // 记一次浏览。存在 localStorage（界面状态，不是仓库数据），设置里可以关掉
+    // 存的是**地址栏那串字**：这样点历史里的一条，回到的是当时那个位置（含章节）
+    recordVisit(addressText.value || title, outcome.note.title);
     missingTitle.value = "";
     loadError.value = "";
     scrolled.value = false;
@@ -601,6 +606,11 @@ function onGlobalKey(event: KeyboardEvent) {
     case "t":
       event.preventDefault();
       openNewTab();
+      return;
+    case "h":
+      // 与浏览器一致：Ctrl+H 打开浏览历史
+      event.preventDefault();
+      void navigate("special:history");
       return;
     default:
       return;
@@ -1471,6 +1481,15 @@ function onAction(name: string) {
         文件：附件的浏览、上传与管理。与别的系统页面同类，所以放在同一串分支里。
       -->
       <FilesPage v-else-if="mode === 'special' && specialPage === 'files'" />
+
+      <!--
+        浏览历史：内容是**界面状态**（存在 localStorage），所以这一页完全由前端渲染 ——
+        后端只需要在特殊页面清单里认这个名字。
+      -->
+      <HistoryPage
+        v-else-if="mode === 'special' && specialPage === 'history'"
+        @open="openFromList"
+      />
 
           <!-- 编辑中：不显示页头，操作都在编辑器自己那一行里 -->
           <NoteEditor

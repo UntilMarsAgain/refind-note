@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { VaultSettings } from "../bindings";
 import ViaHint from "./ViaHint.vue";
+import { historyEnabled, setHistoryEnabled } from "../history";
 import { codeLineNumbers, setCodeLineNumbers } from "../settings";
 import type { Via } from "../bindings";
 /**
@@ -27,6 +28,13 @@ const lineNumbersOn = computed(() => codeLineNumbers.value);
 
 function onLineNumbers(event: Event) {
   setCodeLineNumbers((event.target as HTMLInputElement).checked);
+}
+
+/** 浏览历史同样是**界面偏好**（存这台机器上），不走后端设置 */
+const historyOn = computed(() => historyEnabled.value);
+
+function onHistory(event: Event) {
+  setHistoryEnabled((event.target as HTMLInputElement).checked);
 }
 
 /* 每个设置项的 id 是**地址的一部分**（`special:settings#accent` 能直接跳过去），
@@ -156,6 +164,19 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
           {{ theme.label }}
         </button>
       </div>
+    </div>
+
+    <div
+      id="browsing-history"
+      class="row"
+      :class="{ 'row--target': isFocused('browsing-history') }"
+    >
+      <span class="row__label">浏览历史</span>
+      <code class="row__id">#browsing-history</code>
+      <label class="row__check">
+        <input type="checkbox" :checked="historyOn" @change="onHistory" />
+        <span>记录看过的页面（在 special:history 里可以单独清空）</span>
+      </label>
     </div>
 
     <div

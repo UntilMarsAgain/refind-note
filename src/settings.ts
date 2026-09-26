@@ -32,6 +32,10 @@ export const PREFERENCE_KEYS = {
   railCollapsed: "refind-note:rail-collapsed",
   /** 代码块是否显示行号 */
   codeLineNumbers: "refind-note:code-line-numbers",
+  /** 是否记录浏览历史 */
+  historyOn: "refind-note:history-on",
+  /** 浏览历史本身（JSON 数组） */
+  history: "refind-note:history",
 } as const;
 
 /**

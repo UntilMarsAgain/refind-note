@@ -2095,8 +2095,8 @@ pub fn default_root() -> Result<PathBuf, VaultError> {
 ///
 /// 刻意用 `get(..n)`：直接切 `&value[..n]` 会在多字节字符中间 panic。
 /// 现有的特殊页面。不在这里面的 `special:` 地址直接报「不存在」。
-pub(crate) const SPECIAL_PAGES: [&str; 8] =
-    ["newtab", "settings", "all", "random", "gc", "trash", "debug", "files"];
+pub(crate) const SPECIAL_PAGES: [&str; 9] =
+    ["newtab", "settings", "all", "random", "gc", "trash", "debug", "files", "history"];
 
 /// 重定向最多跟几跳。超过就报错，而不是让 A→B→A 这类环无限递归。
 ///
