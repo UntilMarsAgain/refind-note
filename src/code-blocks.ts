@@ -80,13 +80,30 @@ function paintMarkedLines(pre: HTMLElement, total: number) {
     return;
   }
 
-  const style = getComputedStyle(pre);
-  const lineHeight = Number.parseFloat(style.lineHeight);
+  const preStyle = getComputedStyle(pre);
+  // 行高与内边距都从**真正排版文字的那一层**（code）取：它可能与 pre 各有各的内边距
+  const code = pre.querySelector("code") ?? pre;
+  const codeStyle = getComputedStyle(code);
+  const lineHeight = Number.parseFloat(codeStyle.lineHeight);
   if (!Number.isFinite(lineHeight) || lineHeight <= 0) {
     return;
   }
-  // 代码区上方的内边距：色带的起点要跟着它走
-  const padding = Number.parseFloat(style.paddingTop);
+
+  /*
+   * 色带的起点：**实测**代码内容区的上沿，而不是假设"只有 pre 有内边距"。
+   *
+   * 这里踩过一次：`pre` 与它里面的 `code` 各有一份内边距，只减一份就会整体偏上十几像素 ——
+   * 行号对得上、色带却压在文字上头。实测两个盒子的位置差，就不必关心谁有几个内边距。
+   *
+   * 两处都随横向滚动一起移动，所以差值不受滚动影响。
+   */
+  const preRect = pre.getBoundingClientRect();
+  const codeRect = code.getBoundingClientRect();
+  const offset =
+    codeRect.top -
+    preRect.top -
+    (Number.parseFloat(preStyle.borderTopWidth) || 0) +
+    (Number.parseFloat(codeStyle.paddingTop) || 0);
 
   const marks = document.createElement("div");
   marks.className = "code-marks";
@@ -94,7 +111,7 @@ function paintMarkedLines(pre: HTMLElement, total: number) {
   for (const line of lines) {
     const band = document.createElement("span");
     band.className = "code-mark";
-    band.style.top = (Number.isFinite(padding) ? padding : 0) + (line - 1) * lineHeight + "px";
+    band.style.top = offset + (line - 1) * lineHeight + "px";
     band.style.height = lineHeight + "px";
     marks.append(band);
   }
