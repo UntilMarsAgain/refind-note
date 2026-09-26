@@ -9,7 +9,7 @@
 //! - 标题里不允许 `@`：地址栏用 `标题@版本` 表达版本。
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 /// MediaWiki 的标题长度上限
@@ -460,6 +460,11 @@ pub struct LinkResolver {
     capital_links: bool,
     /// 当前笔记，用于展开 `/子页面`
     from: Option<ParsedTitle>,
+    /// 模板命名空间里的页面（名字 → 正文）。
+    ///
+    /// 预先把正文带进解析器，是为了让**渲染器**能按名字取素材：渲染发生在
+    /// markdown-it 的回调里，那时没有仓库可查（见 `markdown::current_resolver`）。
+    templates: Arc<HashMap<String, String>>,
 }
 
 impl std::fmt::Debug for LinkResolver {
@@ -483,7 +488,19 @@ impl LinkResolver {
             keys,
             capital_links,
             from,
+            templates: Arc::new(HashMap::new()),
         }
+    }
+
+    /// 带上模板命名空间里的页面（[`crate::storage::Vault`] 构造时调用）
+    pub fn with_templates(mut self, templates: Arc<HashMap<String, String>>) -> Self {
+        self.templates = templates;
+        self
+    }
+
+    /// 按名字取模板页的正文（`template:` 下的页面）
+    pub fn template(&self, name: &str) -> Option<&str> {
+        self.templates.get(name).map(String::as_str)
     }
 
     /// 解析一个内部链接目标；返回 `None` 表示解析不了（应留作字面文本）

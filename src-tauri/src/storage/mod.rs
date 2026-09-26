@@ -40,7 +40,7 @@ pub use event::{
 };
 
 use atomic::{append_line, hash_bytes, write_atomic, BlobStore};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
@@ -512,12 +512,22 @@ impl Vault {
 
     // ------------------------------------------------------------ 链接解析
 
-    /// 构造渲染用的解析器：键集合来自目录遍历（没有全局索引可查）
+    /// 构造渲染用的解析器：键集合来自目录遍历（没有全局索引可查）。
+    ///
+    /// 同一次遍历里顺带把**模板命名空间**的正文读进解析器：模板渲染器只能通过解析器取素材
+    /// （渲染发生在 markdown-it 的回调里，那里没有仓库）。模板通常只有几个、都很小，
+    /// 每次渲染读一遍不值得优化；真到了要优化的时候，再换成带失效的缓存。
     fn resolver(&self, from: Option<ParsedTitle>) -> LinkResolver {
-        let keys: HashSet<String> = self
-            .walk(&self.notes_dir())
-            .map(|items| items.iter().map(|parsed| parsed.key()).collect())
-            .unwrap_or_default();
+        let mut keys: HashSet<String> = HashSet::new();
+        let mut templates: HashMap<String, String> = HashMap::new();
+        for parsed in self.walk(&self.notes_dir()).unwrap_or_default() {
+            keys.insert(parsed.key());
+            if parsed.ns == crate::title::TEMPLATE_NS {
+                if let Ok(Some(text)) = self.current_markdown(&parsed.display(&self.table)) {
+                    templates.insert(parsed.title.clone(), text);
+                }
+            }
+        }
 
         LinkResolver::new(
             Arc::clone(&self.table),
@@ -525,6 +535,7 @@ impl Vault {
             self.config.capital_links,
             from,
         )
+        .with_templates(Arc::new(templates))
     }
 
     // ------------------------------------------------------------ 设置

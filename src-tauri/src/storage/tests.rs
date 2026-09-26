@@ -1660,6 +1660,53 @@ fn cross_site_url_is_editable() {
     }
 }
 
+/// 模板命名空间里的页面可以当模板用：`::名字` 就是那一页
+#[test]
+fn template_page_is_used_by_name() {
+    let temp = TempVault::new();
+
+    // markdown 模板：`{{参数}}` 取参数，`{{body}}` 取块内容
+    temp.vault.create("template:盒子").unwrap();
+    temp.vault
+        .commit("template:盒子", "**{{origin}}**\n\n{{body}}\n", None, 0)
+        .unwrap();
+
+    temp.vault.create("用了模板的页").unwrap();
+    temp.vault
+        .commit("用了模板的页", "::盒子 origin=标题\n  内容一行\n", None, 0)
+        .unwrap();
+
+    let html = temp
+        .vault
+        .load_outcome("用了模板的页")
+        .unwrap()
+        .note
+        .unwrap()
+        .html;
+    assert!(html.contains("<strong>标题</strong>"), "参数应当填进去：{html}");
+    assert!(html.contains("内容一行"), "块内容应当填进去：{html}");
+
+    // .css 模板页：用 `::css src=页面名` 取；注入的样式能直接读我们的变量
+    temp.vault.create("template:样式.css").unwrap();
+    temp.vault
+        .commit("template:样式.css", ".x { color: var(--accent); }\n", None, 0)
+        .unwrap();
+    temp.vault.create("带样式的页").unwrap();
+    temp.vault
+        .commit("带样式的页", "::css src=样式.css\n", None, 0)
+        .unwrap();
+
+    let html = temp
+        .vault
+        .load_outcome("带样式的页")
+        .unwrap()
+        .note
+        .unwrap()
+        .html;
+    assert!(html.contains("<style>"), "{html}");
+    assert!(html.contains("var(--accent)"), "{html}");
+}
+
 /// 模板命名空间里的 .css / .html 页面：阅读时当代码块显示，不按 markdown 解析
 #[test]
 fn css_template_renders_as_code_block() {

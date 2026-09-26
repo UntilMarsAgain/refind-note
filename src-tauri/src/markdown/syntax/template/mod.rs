@@ -8,12 +8,14 @@
 //! 三个子模块各管一段，本文件只管**认出块**：
 //!
 //! - [`parse`]：头解析（引号、转义）—— 这里能写的东西最多，所以单独一个文件；
+//! - [`fill`]：`{{}}` 填空与 HTML / CSS 过滤；
 //! - [`dispatch`]：按名字分发，查不到就渲染"未知模板"的框；
 //! - [`stdlib`]：模板标准库（`quote`），加模板只改那一个文件。
 //!
 //! 块内容的边界规则只有一条：**缩进**。头行之后缩进更深的行属于块内，遇到不更深的行
 //! 就结束，不需要结束标记。
 mod dispatch;
+mod fill;
 mod parse;
 mod stdlib;
 
@@ -193,6 +195,40 @@ mod tests {
         let depth =
             before.matches("<blockquote").count() - before.matches("</blockquote>").count();
         assert_eq!(depth, 2, "内容应当嵌在内层 blockquote 里：{html}");
+    }
+
+    #[test]
+    fn css_template_injects_style_with_our_variables() {
+        // 注入的 CSS 与界面同一个文档，所以 var(--accent) 这类变量直接用
+        let html = render("::css\n  .我有自己的样式 { color: var(--accent); }\n");
+        assert!(html.contains("<style>"), "{html}");
+        assert!(html.contains("var(--accent)"), "{html}");
+    }
+
+    #[test]
+    fn css_cannot_close_the_style_block_early() {
+        let html = render("::css\n  a { } </style><p>顶出来了</p>\n");
+        assert_eq!(html.matches("</style>").count(), 1, "{html}");
+        assert!(html.contains("<p>顶出来了</p>"), "它仍然只是普通正文：{html}");
+    }
+
+    #[test]
+    fn html_template_filters_scripts_by_default() {
+        let html = render("::html\n  <b>粗</b><script>alert(1)</script>\n");
+        assert!(html.contains("<b>粗</b>"), "{html}");
+        assert!(!html.contains("<script"), "默认必须过滤掉脚本：{html}");
+    }
+
+    #[test]
+    fn html_template_allows_scripts_only_when_asked() {
+        let html = render("::html js\n  <script>alert(1)</script>\n");
+        assert!(html.contains("<script>alert(1)</script>"), "{html}");
+    }
+
+    #[test]
+    fn placeholders_are_filled_from_params() {
+        let html = render("::css 颜色=red\n  .a { color: {{颜色}}; }\n");
+        assert!(html.contains("color: red"), "{html}");
     }
 
     #[test]
