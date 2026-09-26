@@ -10,7 +10,7 @@ import type {
   RevisionContent,
   VaultSettings,
 } from "./bindings";
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import FloatingTools from "./components/FloatingTools.vue";
 import HistoryView from "./components/HistoryView.vue";
@@ -514,7 +514,28 @@ watch(draftText, () => {
   autosaveTimer = window.setTimeout(() => void saveDraft(), AUTOSAVE_DELAY_MS);
 });
 
+/**
+ * Ctrl+W（macOS 上是 Cmd+W）关掉当前标签页。
+ *
+ * 自己拦是有意的：WebView 不会把这组键交给我们，而"关标签"是浏览器时代的肌肉记忆 ——
+ * 按下去没反应，人会以为界面卡了。只在**真有标签页**时才拦，别去吞别的场合。
+ */
+function onGlobalKey(event: KeyboardEvent) {
+  const closing = (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey;
+  if (!closing || event.key.toLowerCase() !== "w") {
+    return;
+  }
+  if (tabs.value.length === 0) {
+    return;
+  }
+  event.preventDefault();
+  closeTab(activeTab.value);
+}
+
+onBeforeUnmount(() => window.removeEventListener("keydown", onGlobalKey));
+
 onMounted(async () => {
+  window.addEventListener("keydown", onGlobalKey);
   try {
     const settings = await invoke<VaultSettings>("get_settings");
     vaultSettings.value = settings;
