@@ -14,11 +14,12 @@ import type { TrashEntry } from "../bindings";
 import { onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import ViaHint from "./ViaHint.vue";
+import type { Via } from "../bindings";
 
 
 const props = defineProps<{
-  /** 跟重定向来到这一页时的来源提示（空串 = 直接打开） */
-  via?: string;
+  /** 是被哪条指令带到这一页的（null = 直接打开） */
+  via: Via | null;
   /** 保留天数（来自设置，用于说明策略与标记"可清理"） */
   keepDays: number;
   /** 上次自动清理的时间（空 = 从未） */
@@ -27,6 +28,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "open", address: string): void;
+  (e: "open-via", title: string): void;
 }>();
 
 const entries = ref<TrashEntry[]>([]);
@@ -102,7 +104,7 @@ onMounted(refresh);
 <template>
   <section class="trash">
     <h1 class="trash__title">回收站</h1>
-    <ViaHint :hint="via ?? ''" />
+    <ViaHint :via="via" @open-via="emit('open-via', $event)" />
     <p class="trash__lead">
       删过的笔记都在这里，<strong>历史一条没丢</strong>，可以随时还原。
       超过 {{ keepDays }} 天的条目会在启动时自动清理（天数可在设置里改）。

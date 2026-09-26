@@ -5,6 +5,7 @@ import {
   PanelLeftOpen,
   Plus,
   Settings,
+  Trash2,
   X,
 } from "@lucide/vue";
 import { PREFERENCE_KEYS, readFlag, writeFlag } from "../settings";
@@ -37,6 +38,7 @@ const emit = defineEmits<{
   /** 拖放调整顺序 */
   (e: "move", from: number, to: number): void;
   (e: "settings"): void;
+  (e: "trash"): void;
 }>();
 
 /** 正在抖的是哪一格（连索引一起记下来：之后切标签不该把动画挪走） */
@@ -168,9 +170,20 @@ function initialOf(tab: { address: string; title: string }) {
       </li>
     </TransitionGroup>
 
+    <!-- 回收站入口：与设置一样放在标签列表底下（它不是一个标签） -->
+    <button
+      class="rail__entry"
+      type="button"
+      aria-label="回收站"
+      @click="emit('trash')"
+    >
+      <Trash2 :size="16" :stroke-width="1.75" />
+      <span class="rail__text">回收站</span>
+    </button>
+
     <!-- 设置入口：放在标签列表底下，与标签区分开（它不是一个标签） -->
     <button
-      class="rail__settings"
+      class="rail__entry"
       type="button"
       aria-label="设置"
       @click="emit('settings')"
@@ -369,7 +382,7 @@ function initialOf(tab: { address: string; title: string }) {
   }
 }
 /* 设置入口：贴在列表底下，视觉上与标签错开 */
-.rail__settings {
+.rail__entry {
   display: flex;
   flex-shrink: 0;
   align-items: center;
@@ -385,16 +398,16 @@ function initialOf(tab: { address: string; title: string }) {
   text-align: left;
 }
 
-.rail__settings:hover {
+.rail__entry:hover {
   background: var(--hover);
   color: var(--text);
 }
 
-.rail--collapsed .rail__settings {
+.rail--collapsed .rail__entry {
   justify-content: center;
 }
 
-.rail--collapsed .rail__settings .rail__text {
+.rail--collapsed .rail__entry .rail__text {
   display: none;
 }
 /*
@@ -416,7 +429,7 @@ function initialOf(tab: { address: string; title: string }) {
   overflow-y: auto;
 }
 
-.rail__settings {
+.rail__entry {
   margin-top: auto;
 }
 
@@ -428,13 +441,13 @@ function initialOf(tab: { address: string; title: string }) {
  * 于是被压成一条细缝（看起来"几乎一个像素"）。现在收掉侧边距与内边距，
  * 并把图标设为不可压缩。
  */
-.rail--collapsed .rail__settings {
+.rail--collapsed .rail__entry {
   justify-content: center;
   margin: 4px 2px;
   padding: 6px 0;
 }
 
-.rail__settings svg {
+.rail__entry svg {
   flex-shrink: 0;
 }
 /* ---------- 抖动：关掉最后一个标签、于是又新建了一个 ---------- */

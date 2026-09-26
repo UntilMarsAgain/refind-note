@@ -2,6 +2,7 @@
 import type { Component } from "vue";
 import { History, Pencil, Trash2 } from "@lucide/vue";
 import ViaHint from "./ViaHint.vue";
+import type { Via } from "../bindings";
 
 /**
  * 页面标题行 + 页面操作。
@@ -21,15 +22,16 @@ defineProps<{
   /** 正文已滚下去：收起并冻结 */
   collapsed: boolean;
   /**
-   * 标题下方的补充一行（目前用于"重定向自 X"）。
+   * 是被哪条指令带到这一页的（`null` = 直接打开）。
    *
    * 与 MediaWiki 标题下面那行"(重定向自 CommonMark)"同理：让人知道自己是**被带过来的**，
-   * 而不是这一页本来就长这样。空串表示不显示。
+   * 而不是这一页本来就长这样；来源可点，点它去那一页本身（`@no-command`）。
    */
-  under: string;
+  via: Via | null;
 }>();
 
 const emit = defineEmits<{
+  (e: "open-via", title: string): void;
   (e: "action", name: string): void;
   (e: "open-parent", title: string): void;
 }>();
@@ -50,7 +52,7 @@ const actions: {
   <div class="page-header" :class="{ 'page-header--collapsed': collapsed }">
     <div class="page-heading">
       <h1 class="page-title" :title="title">{{ title }}</h1>
-      <ViaHint :hint="under" />
+      <ViaHint :via="via" @open-via="emit('open-via', $event)" />
       <!-- 子页面（标题里有斜杠）给一个回上一级的出口 -->
       <button
         v-if="parent"

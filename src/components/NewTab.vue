@@ -8,12 +8,16 @@ import { ref } from "vue";
  * 按名字打开。以后要放最近打开、搜索之类的，都回到这一页上加。
  */
 import ViaHint from "./ViaHint.vue";
+import type { Via } from "../bindings";
 const props = defineProps<{
-  /** 跟重定向来到这一页时的来源提示（空串 = 直接打开） */
-  via?: string;
+  /** 是被哪条指令带到这一页的（null = 直接打开） */
+  via: Via | null;
 }>();
 
-const emit = defineEmits<{ (e: "open", value: string): void }>();
+const emit = defineEmits<{
+  (e: "open", value: string): void;
+  (e: "open-via", title: string): void;
+}>();
 
 const typed = ref("");
 
@@ -28,7 +32,7 @@ function submit() {
 <template>
   <section class="newtab">
     <h1 class="newtab__title">新标签页</h1>
-    <ViaHint :hint="via ?? ''" />
+    <ViaHint :via="via" @open-via="emit('open-via', $event)" />
     <p class="newtab__hint">
       输入笔记名打开；名字不存在时进入创建流程。地址栏同样可用。
     </p>

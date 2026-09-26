@@ -10,6 +10,7 @@ import { computed, onMounted, ref } from "vue";
 import { labelOf } from "../special";
 import { invoke } from "@tauri-apps/api/core";
 import ViaHint from "./ViaHint.vue";
+import type { Via } from "../bindings";
 
 
 
@@ -25,6 +26,7 @@ const emit = defineEmits<{
   (e: "open", address: string): void;
   (e: "open-new", address: string): void;
   (e: "page", page: number): void;
+  (e: "open-via", title: string): void;
 }>();
 
 const props = defineProps<{
@@ -36,8 +38,8 @@ const props = defineProps<{
    */
   pageSection?: string;
 
-  /** 跟重定向来到这一页时的来源提示（空串 = 直接打开） */
-  via?: string;
+  /** 是被哪条指令带到这一页的（null = 直接打开） */
+  via: Via | null;
 }>();
 
 const notes = ref<NoteSummary[]>([]);
@@ -113,7 +115,7 @@ onMounted(async () => {
 <template>
   <section class="all">
     <h1 class="all__title">全部页面</h1>
-    <ViaHint :hint="via ?? ''" />
+    <ViaHint :via="via" @open-via="emit('open-via', $event)" />
 
     <p v-if="error" class="all__error">{{ error }}</p>
     <p v-else-if="loading" class="all__hint">正在读取…</p>

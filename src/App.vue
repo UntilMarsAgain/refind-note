@@ -710,22 +710,26 @@ function runCommand() {
 }
 
 /**
- * 标题下方的来源提示：跟重定向来到这一页时才显示。
+ * 这一页是被哪条指令带过来的（`null` = 直接打开）。
  *
- * 随机跳转不写来源页名 —— 那个名字不是"目标"，写了反而误导；只说"来自随机重定向"。
+ * 笔记页与特殊页面都要标（虚拟命名空间下的页面同样是"页面"）。
+ * 文案与"来源可点"都在 `ViaHint` 里，这里只负责把数据递下去。
  */
-const viaHint = computed(() => {
+const viaOf = computed(() => {
   const address = route.value;
-  // 笔记页与特殊页面都要标（虚拟命名空间下的页面同样是"页面"）
-  const via =
-    address && (address.kind === "note" || address.kind === "special")
-      ? address.via
-      : null;
-  if (!via) {
-    return "";
-  }
-  return via.random ? "来自随机重定向" : `重定向自《${via.from}》`;
+  return address && (address.kind === "note" || address.kind === "special")
+    ? address.via
+    : null;
 });
+
+/**
+ * 点来源：去那一页本身（`@no-command`）。
+ *
+ * 直接跳 `名称` 会再执行一次它的指令、又被带走 —— 那就等于没看到来源页。
+ */
+function openVia(title: string) {
+  void navigate(`${title}@no-command`);
+}
 
 async function reloadSettings() {
   try {
@@ -859,6 +863,10 @@ function openFromList(address: string) {
  * 立即生效保手感，落盘节流：滚轮一次会连发很多事件，逐个写文件既慢也没意义。
  */
 /** 标签栏底部的设置入口 */
+function openTrash() {
+  void navigate("special:trash");
+}
+
 function openSettings() {
   void navigate("special:settings");
 }
@@ -1291,6 +1299,7 @@ function onAction(name: string) {
         @close="closeTab"
         @new-tab="openNewTab"
         @settings="openSettings"
+        @trash="openTrash"
         @move="moveTab"
       />
 
@@ -1307,13 +1316,15 @@ function onAction(name: string) {
           <!-- 特殊页面：由前端渲染（后端只负责把地址解析成 Special） -->
           <NewTab
         v-if="mode === 'special' && specialPage === 'newtab'"
-        :via="viaHint"
+        :via="viaOf"
+        @open-via="openVia"
         @open="onSubmit"
       />
       <AllPages
         v-else-if="mode === 'special' && specialPage === 'all'"
         :page-section="allPagesSection"
-        :via="viaHint"
+        :via="viaOf"
+        @open-via="openVia"
         @open="openFromList"
         @open-new="openTabWith"
         @page="goToAllPage"
@@ -1322,18 +1333,21 @@ function onAction(name: string) {
         v-else-if="mode === 'special' && specialPage === 'settings' && vaultSettings"
         :settings="vaultSettings"
         :focus="settingsFocus"
-        :via="viaHint"
+        :via="viaOf"
+        @open-via="openVia"
         @update="updateSettings"
       />
       <GcPage
         v-else-if="mode === 'special' && specialPage === 'gc'"
-        :via="viaHint"
+        :via="viaOf"
+        @open-via="openVia"
       />
       <TrashPage
         v-else-if="mode === 'special' && specialPage === 'trash'"
         :keep-days="vaultSettings?.trash_keep_days ?? 30"
         :last-purge="vaultSettings?.last_trash_purge ?? ''"
-        :via="viaHint"
+        :via="viaOf"
+        @open-via="openVia"
         @open="openFromList"
       />
 
@@ -1442,7 +1456,8 @@ function onAction(name: string) {
               :title="note.title"
               :parent="parentTitle"
               :collapsed="scrolled"
-              :under="viaHint"
+              :via="viaOf"
+              @open-via="openVia"
               @action="onAction"
               @open-parent="onNoteSelected"
             />

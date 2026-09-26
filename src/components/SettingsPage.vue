@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { VaultSettings } from "../bindings";
 import ViaHint from "./ViaHint.vue";
+import type { Via } from "../bindings";
 /**
  * 设置页（`special:settings`）。
  *
@@ -16,8 +17,8 @@ import { BASE_ZOOM } from "../settings";
 const props = defineProps<{
   settings: VaultSettings;
   focus?: string;
-  /** 跟重定向来到这一页时的来源提示（空串 = 直接打开） */
-  via?: string;
+  /** 是被哪条指令带到这一页的（null = 直接打开） */
+  via: Via | null;
 }>();
 
 /* 每个设置项的 id 是**地址的一部分**（`special:settings#accent` 能直接跳过去），
@@ -43,7 +44,10 @@ watch(
   },
   { immediate: true },
 );
-const emit = defineEmits<{ (e: "update", patch: Record<string, unknown>): void }>();
+const emit = defineEmits<{
+  (e: "update", patch: Record<string, unknown>): void;
+  (e: "open-via", title: string): void;
+}>();
 
 const THEMES = [
   { value: "system", label: "跟随系统" },
@@ -117,7 +121,7 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
 <template>
   <section class="settings">
     <h1 class="settings__title">设置</h1>
-    <ViaHint :hint="via ?? ''" />
+    <ViaHint :via="via" @open-via="emit('open-via', $event)" />
     <p class="settings__where">
       外观存在 <code>{{ settings.root }}</code> 下的 <code>preferences.json</code>，
       存储相关的存在同目录的 <code>vault.json</code>
