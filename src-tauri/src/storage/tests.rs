@@ -2033,3 +2033,53 @@ fn a_renamed_version_keeps_the_title_of_its_time() {
     assert_eq!(new.title, "新标题");
     assert_eq!(new.markdown, "正文");
 }
+
+/// 草稿事件数（自动保存只该在**真的变了**的时候追加）
+fn draft_event_count(vault: &Vault, title: &str) -> usize {
+    vault
+        .events_for(title)
+        .unwrap()
+        .iter()
+        .filter(|event| matches!(event, Event::Auto { .. }))
+        .count()
+}
+
+/// 草稿没变动就不再存草稿：自动保存反复调用，空版本会把历史灌满
+#[test]
+fn unchanged_draft_is_not_saved_again() {
+    let temp = TempVault::new();
+    temp.vault.create("草稿页").unwrap();
+    temp.vault.commit("草稿页", "第一版", None, 0).unwrap();
+
+    // 与**正文**一致：不该产生草稿。
+    // 提交之后自动保存常常就是这样调的 —— 草稿已被提交取代，再存就等于凭空多一个空版本。
+    temp.vault.save_draft("草稿页", "第一版", 1).unwrap();
+    assert!(
+        temp.vault.load_draft("草稿页").unwrap().is_none(),
+        "与正文一致时不该有草稿"
+    );
+    assert_eq!(draft_event_count(&temp.vault, "草稿页"), 0);
+
+    // 真的改了：存一份
+    temp.vault.save_draft("草稿页", "第二版", 1).unwrap();
+    assert!(temp.vault.load_draft("草稿页").unwrap().is_some());
+    assert_eq!(draft_event_count(&temp.vault, "草稿页"), 1);
+
+    // 同样的内容再存：不该追加
+    temp.vault.save_draft("草稿页", "第二版", 1).unwrap();
+    assert_eq!(
+        draft_event_count(&temp.vault, "草稿页"),
+        1,
+        "同样的草稿不该重复追加"
+    );
+
+    // 提交草稿 → 再存同样的内容：仍然不该冒出一个新草稿。
+    // 提交后 rev 是 3：草稿自己占了一版（草稿也是链上的一版）。
+    temp.vault.commit("草稿页", "第二版", None, 1).unwrap();
+    temp.vault.save_draft("草稿页", "第二版", 3).unwrap();
+    assert!(
+        temp.vault.load_draft("草稿页").unwrap().is_none(),
+        "刚提交过的内容不该又变成草稿"
+    );
+    assert_eq!(draft_event_count(&temp.vault, "草稿页"), 1, "自动保存不该再追加");
+}

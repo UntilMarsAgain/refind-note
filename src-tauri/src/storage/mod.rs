@@ -1772,11 +1772,25 @@ impl Vault {
         }
 
         let content_hash = hash_bytes(markdown_text.as_bytes());
-        // 内容没变就不追加，免得自动保存把日志灌满
-        if let Some(draft) = &state.draft {
-            if draft.blob == content_hash {
-                return Ok(());
+        // 内容没变就不追加，免得自动保存把日志灌满。
+        //
+        // 两种"没变"都要挡：
+        // - 与上一份草稿相同（自动保存按节流反复调用）；
+        // - 与**最新提交的正文**相同 —— 提交之后草稿被取代，此时再存一次，就会凭空
+        //   多出一个与正文一模一样的草稿，历史里看着就是一堆空版本。
+        let unchanged = match &state.draft {
+            Some(draft) => draft.blob == content_hash,
+            None => {
+                let committed = if state.rev == 0 {
+                    String::new()
+                } else {
+                    self.content_of(&events, state.rev, 0)?
+                };
+                committed == markdown_text
             }
+        };
+        if unchanged {
+            return Ok(());
         }
 
         let rev = next_rev(&events);
