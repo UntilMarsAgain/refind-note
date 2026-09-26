@@ -101,10 +101,11 @@ fn render_fields(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
     fmt.cr();
 }
 
-/// `::banner` —— 一条方框标题带（信息栏里那种居中的标题条）。
+/// `::banner color=#0055a4` —— 一条方框标题带（信息栏里那种居中的标题条）。
 ///
-/// 文案取自块内容（一行），也可以用 `text=` 给。名字取 `banner` 而不是"方框标题"之类：
-/// 它是一个**横条**，越短越不容易和别的模板混淆。
+/// 文案取自块内容（一行），也可以用 `text=` 给；`color=` 给底色（只认 `#rgb` / `#rrggbb`），
+/// 字色由 [`text_on`] 按亮度定，免得深底配深字。
+/// 名字取 `banner` 而不是"方框标题"之类：它是一个**横条**，越短越不容易与别的模板混淆。
 fn render_banner(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
     let text = match template.param("text") {
         Some(text) => text.to_string(),
@@ -114,11 +115,63 @@ fn render_banner(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
         render_problem(template, fmt, "内容是空的：标题带要写一行字，或用 text=… 给");
         return;
     }
+
+    // 颜色只认十六进制：这个值会写进 style 属性，宽松了就等于允许塞任意声明
+    let mut attrs: Vec<(&str, String)> = vec![("class", "banner".to_string())];
+    if let Some(color) = template.param("color") {
+        let Some(hex) = normalize_hex(color) else {
+            render_problem(template, fmt, "color= 只认 #rgb 或 #rrggbb 这两种写法");
+            return;
+        };
+        attrs.push((
+            "style",
+            format!("background: {hex}; color: {};", text_on(&hex)),
+        ));
+    }
+
     fmt.cr();
-    fmt.open("p", &[("class", "banner".to_string())]);
+    fmt.open("p", &attrs);
     fmt.text(&text);
     fmt.close("p");
     fmt.cr();
+}
+
+/// `#abc` / `#aabbcc` → 规范的 `#aabbcc`；别的写法一律不认
+fn normalize_hex(text: &str) -> Option<String> {
+    let body = text.trim().strip_prefix('#')?;
+    let expanded: String = match body.len() {
+        3 => body.chars().flat_map(|ch| [ch, ch]).collect(),
+        6 => body.to_string(),
+        _ => return None,
+    };
+    if !expanded.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(format!("#{}", expanded.to_lowercase()))
+}
+
+/// 底色 → 该配什么颜色的字。
+///
+/// 作者只给底色，字色由这里定：深底配深字是最常见的"自己给自己挖坑"。
+/// 用 sRGB 亮度的常见近似，够用且一眼能看懂为什么这么算。
+fn text_on(background: &str) -> &'static str {
+    let Some(body) = background.strip_prefix('#') else {
+        return "var(--text)";
+    };
+    let Ok(value) = u32::from_str_radix(body, 16) else {
+        return "var(--text)";
+    };
+    let (r, g, b) = (
+        (value >> 16) & 0xff,
+        (value >> 8) & 0xff,
+        value & 0xff,
+    );
+    let luminance = (0.299 * r as f64 + 0.587 * g as f64 + 0.114 * b as f64) / 255.0;
+    if luminance > 0.6 {
+        "#101010"
+    } else {
+        "#f5f5f5"
+    }
 }
 
 /// `::image src=… align=left|center|right width=320 height=200 caption="说明"` —— 插入图片。

@@ -594,7 +594,8 @@ mod tests {
         for marker in [
             r#"<aside class="aside">"#,
             r#"<table class="fields">"#,
-            r#"<p class="banner">"#,
+            // banner 可能带 style（指定了底色），所以只匹配到类名
+            r#"<p class="banner""#,
             r#"<figure class="image image--center">"#,
             r#"<pre class="template-code""#,
         ] {

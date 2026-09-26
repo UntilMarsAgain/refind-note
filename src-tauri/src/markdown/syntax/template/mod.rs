@@ -318,6 +318,27 @@ mod tests {
     }
 
     #[test]
+    fn banner_color_sets_background_and_readable_text() {
+        // 深蓝底 → 浅色字
+        let dark = render("::banner color=#0055a4\n  深蓝底\n");
+        assert!(dark.contains("background: #0055a4"), "{dark}");
+        assert!(dark.contains("color: #f5f5f5"), "{dark}");
+
+        // 浅黄底 → 深色字（深底配深字是最常见的自挖坑）
+        let light = render("::banner color=#ffe680\n  浅黄底\n");
+        assert!(light.contains("color: #101010"), "{light}");
+
+        // `#abc` 这种简写也认，并规范成六位
+        let short = render("::banner color=#0af\n  简写\n");
+        assert!(short.contains("background: #00aaff"), "{short}");
+
+        // 乱写的颜色：不猜，直接说清楚（值会进 style 属性，不能宽松）
+        let bad = render("::banner color=red\n  乱写\n");
+        assert!(bad.contains("template--problem"), "{bad}");
+        assert!(!bad.contains("style="), "不该拼出 style 属性：{bad}");
+    }
+
+    #[test]
     fn image_carries_alignment_and_limits() {
         let html = render("::image src=/logo.svg align=right width=320 caption=\"桥体\"\n");
         assert!(html.contains(r#"<figure class="image image--right">"#), "{html}");
