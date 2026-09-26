@@ -106,6 +106,11 @@ pub fn render_with(markdown: &str, resolver: Option<&LinkResolver>) -> String {
 
 /// 把一段文本包进代码块。围栏要比正文里最长的一串反引号更长，否则会被提前闭合。
 pub fn fence_code(text: &str) -> String {
+    fence_code_in(text, "")
+}
+
+/// 同上，但给围栏标上语言（`language-css` 之类），供前端分词。
+pub fn fence_code_in(text: &str, language: &str) -> String {
     let mut longest = 0usize;
     let mut run = 0usize;
     for ch in text.chars() {
@@ -117,7 +122,7 @@ pub fn fence_code(text: &str) -> String {
         }
     }
     let fence = "`".repeat((longest + 1).max(3));
-    format!("{fence}\n{}\n{fence}\n", text.trim_end())
+    format!("{fence}{language}\n{}\n{fence}\n", text.trim_end())
 }
 
 #[cfg(test)]

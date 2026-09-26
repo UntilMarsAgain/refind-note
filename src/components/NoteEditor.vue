@@ -12,6 +12,8 @@ import { basicSetup } from "codemirror";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { markdown } from "@codemirror/lang-markdown";
+import { css as cssLanguage } from "@codemirror/lang-css";
+import { html as htmlLanguage } from "@codemirror/lang-html";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 import type { DecorationSet, ViewUpdate } from "@codemirror/view";
@@ -36,6 +38,8 @@ const props = defineProps<{
   busy: boolean;
   /** 状态行：已保存草稿 / 提交冲突 / 失败原因 */
   status: string;
+  /** 后端给出的语言（`css` / `html`）；null = markdown。判定只在后端一处 */
+  language: string | null;
 }>();
 
 /**
@@ -283,7 +287,12 @@ onMounted(() => {
       doc: props.modelValue,
       extensions: [
         basicSetup,
-        markdown(),
+        // 语言按后端判定选：模板命名空间里的 .css / .html 用各自语言，其余 markdown
+        props.language === "css"
+          ? cssLanguage()
+          : props.language === "html"
+            ? htmlLanguage()
+            : markdown(),
         // 顺序有讲究：主题与高亮都要排在 basicSetup **之后**，才能盖掉它的浅色默认值
         appTheme,
         syntaxHighlighting(appHighlight),

@@ -373,6 +373,27 @@ impl NamespaceTable {
     }
 }
 
+/// 模板命名空间里以 `.css` / `.html` 结尾的页面所用的语言标签。
+///
+/// 它们不是 markdown 文档，而是给 `::css` / `::html` 用的素材：阅读时当代码块显示，
+/// 编辑器里用对应语言高亮。返回 `None` 表示按普通 markdown 处理。
+///
+/// 后缀不区分大小写（`样式.CSS` 也算）；只看**模板命名空间**，别处叫 `a.css` 的普通笔记
+/// 不受影响。
+pub fn code_template_language(ns: &str, name: &str) -> Option<&'static str> {
+    if ns != TEMPLATE_NS {
+        return None;
+    }
+    let lower = name.to_lowercase();
+    if lower.ends_with(".css") {
+        Some("css")
+    } else if lower.ends_with(".html") {
+        Some("html")
+    } else {
+        None
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedTitle {
     /// 命名空间标识（字符串；主命名空间是 [`MAIN_NS`]）
@@ -636,6 +657,15 @@ pub fn decode_from_path(name: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn code_template_language_only_in_template_namespace() {
+        assert_eq!(code_template_language(TEMPLATE_NS, "样式.css"), Some("css"));
+        assert_eq!(code_template_language(TEMPLATE_NS, "片段.HTML"), Some("html"));
+        assert_eq!(code_template_language(TEMPLATE_NS, "普通模板"), None);
+        // 别处叫 .css 的普通笔记不受影响
+        assert_eq!(code_template_language(MAIN_NS, "样式.css"), None);
+    }
+
     use super::*;
 
     fn table() -> NamespaceTable {

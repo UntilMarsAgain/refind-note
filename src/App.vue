@@ -1353,6 +1353,7 @@ function onAction(name: string) {
             v-else-if="mode === 'edit' && note"
             v-model="draftText"
             :title="note.title"
+            :language="note.language"
             :busy="busy"
             :status="editorStatus"
             @rename="renameCurrent"

@@ -10,6 +10,8 @@ export interface Note {
   title: string;
   markdown: string;
   html: string;
+  /** `css` / `html`（模板命名空间里的代码模板）；null = 按 markdown */
+  language: string | null;
   rev: number;
   modified: string;
 }

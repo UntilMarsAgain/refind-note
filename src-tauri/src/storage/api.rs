@@ -67,6 +67,10 @@ pub struct Note {
     pub markdown: String,
     /// 阅读用的 HTML（Rust 端编译，含红/蓝链标记）
     pub html: String,
+    /// 这一页该按什么语言对待：`css` / `html`（模板命名空间里的代码模板），
+    /// 其余为 `null`（按 markdown）。编辑器据此选高亮规则 ——
+    /// 判定只写在后端一处，前端不再自己认一遍后缀。
+    pub language: Option<String>,
     pub rev: u64,
     pub modified: String,
 }

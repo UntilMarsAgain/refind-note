@@ -1660,6 +1660,50 @@ fn cross_site_url_is_editable() {
     }
 }
 
+/// 模板命名空间里的 .css / .html 页面：阅读时当代码块显示，不按 markdown 解析
+#[test]
+fn css_template_renders_as_code_block() {
+    let temp = TempVault::new();
+    temp.vault.create("template:样式.css").unwrap();
+    temp.vault
+        .commit(
+            "template:样式.css",
+            ".note-body { color: red; }\n\n# 这不是标题\n",
+            None,
+            0,
+        )
+        .unwrap();
+
+    let note = temp
+        .vault
+        .load_outcome("template:样式.css")
+        .unwrap()
+        .note
+        .expect("应当读得到");
+    assert!(
+        note.html.contains("language-css"),
+        "应当当代码块渲染：{}",
+        note.html
+    );
+    assert!(
+        !note.html.contains("<h1"),
+        "不该按 markdown 解析：{}",
+        note.html
+    );
+    // 原始文本照旧给编辑器
+    assert!(note.markdown.contains(".note-body"));
+
+    // 主命名空间里叫同样名字的笔记不受影响
+    temp.vault.create("样式.css").unwrap();
+    temp.vault.commit("样式.css", "# 这是标题\n", None, 0).unwrap();
+    let main = temp.vault.load_outcome("样式.css").unwrap().note.unwrap();
+    assert!(
+        main.html.contains("<h1"),
+        "主命名空间里的同名笔记照常解析：{}",
+        main.html
+    );
+}
+
 /// 模板命名空间：内置、可存储、保留（删不掉也改不了名），但照常放页面、走完整链路
 #[test]
 fn template_namespace_is_builtin() {

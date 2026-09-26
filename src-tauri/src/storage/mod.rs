@@ -810,7 +810,16 @@ impl Vault {
         };
 
         let resolver = self.resolver(Some(parsed.clone()));
-        let html = markdown::render_with(&markdown_text, Some(&resolver));
+        // 语言判定一次，html 与给前端的字段共用同一结果
+        let language = crate::title::code_template_language(&parsed.ns, &parsed.title);
+        let html = match language {
+            // 模板命名空间里的 .css / .html 是**素材**，不是文档：当代码块显示
+            Some(language) => markdown::render_with(
+                &markdown::fence_code_in(&markdown_text, language),
+                Some(&resolver),
+            ),
+            None => markdown::render_with(&markdown_text, Some(&resolver)),
+        };
 
         Ok(LoadOutcome {
             note: Some(Note {
@@ -818,6 +827,7 @@ impl Vault {
                 title: parsed.display(&self.table),
                 markdown: markdown_text,
                 html,
+                language: language.map(str::to_string),
                 rev: state.rev,
                 modified: state.at,
             }),
@@ -1009,7 +1019,14 @@ impl Vault {
         let parsed = ParsedTitle { ns, title: page };
         let markdown_text = self.content_of(&events, rev, 0)?;
         let resolver = self.resolver(Some(parsed.clone()));
-        let html = markdown::render_with(&markdown_text, Some(&resolver));
+        let html = match crate::title::code_template_language(&parsed.ns, &parsed.title) {
+            // 模板命名空间里的 .css / .html 是**素材**，不是文档：当代码块显示
+            Some(language) => markdown::render_with(
+                &markdown::fence_code_in(&markdown_text, language),
+                Some(&resolver),
+            ),
+            None => markdown::render_with(&markdown_text, Some(&resolver)),
+        };
 
         Ok(RevisionContent {
             rev,
