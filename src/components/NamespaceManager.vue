@@ -13,7 +13,7 @@
  * 注意：模板里**不要用反引号模板字符串** —— Vue 的模板表达式解析不了它们，整个模板会
  * 绑定失败（本项目在 NoteEditor 上踩过一次，这次又踩了一次）。要拼接就用 `+`。
  */
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 
 interface Namespace {
@@ -45,8 +45,15 @@ const aliasDraft = ref<string[]>([]);
 const aliasInput = ref("");
 
 const newName = ref("");
-const newAliases = ref("");
 const newSite = ref("");
+
+/**
+ * 即时例子：光说"命名空间名称"不好理解，看到"建好就能写 `help:入门`"就懂了。
+ */
+const exampleAddress = computed(() => {
+  const name = newName.value.trim();
+  return name ? name + ":入门" : "help:入门";
+});
 
 function labelOf(item: Namespace): string {
   return item.name || "（主）";
@@ -109,22 +116,20 @@ onMounted(async () => {
   }
 });
 
-function parseAliases(text: string): string[] {
-  return text
-    .split(/[,，\s]+/)
-    .map((alias) => alias.trim())
-    .filter((alias) => alias.length > 0);
-}
-
+/**
+ * 新建命名空间：**只带名称**（外加可选的跨站地址）。
+ *
+ * 别名不在这里加 —— 那是另一件事，建好之后在列表里点「别名」编辑。两件事挤在同一个
+ * 表单里，只会让人以为"必须一次填完"。
+ */
 async function add() {
   await act("add", async () => {
     const next = await invoke<Namespace[]>("add_namespace", {
       name: newName.value,
-      aliases: parseAliases(newAliases.value),
+      aliases: [],
       site: newSite.value.trim() || null,
     });
     newName.value = "";
-    newAliases.value = "";
     newSite.value = "";
     return next;
   });
@@ -333,39 +338,51 @@ function remove(item: Namespace) {
         </div>
       </div>
 
-      <h3 class="ns__add-title">新增命名空间</h3>
-      <div class="ns__add">
-        <label class="ns__field">
-          <span>名称</span>
-          <input v-model="newName" class="ns__input" type="text" placeholder="如 help" />
-        </label>
-        <label class="ns__field">
-          <span>别名（逗号分隔，可留空）</span>
-          <input v-model="newAliases" class="ns__input" type="text" placeholder="如 帮助, 百科" />
-        </label>
-        <label class="ns__field ns__field--wide">
-          <span>跨站地址模板（可留空；填了就是跨站命名空间）</span>
-          <input
-            v-model="newSite"
-            class="ns__input"
-            type="text"
-            placeholder="https://zh.wikipedia.org/wiki/$1"
-          />
-        </label>
-        <button
-          class="ns__btn ns__btn--primary"
-          type="button"
-          :disabled="busy === 'add' || !newName.trim()"
-          @click="add"
-        >
-          添加
-        </button>
-      </div>
-      <p class="ns__hint">
-        名称与别名都不许重复（大小写与空白不影响判重），也不许含
-        <code>/</code> <code>:</code> <code>@</code> <code>#</code> 等符号。
-        清空与删除都会把里面的页面送进回收站。
-      </p>
+      <section class="ns__create">
+        <h3 class="ns__create-title">新建命名空间</h3>
+        <p class="ns__create-lead">
+          只需一个名称；建好之后就能写 <code>{{ exampleAddress }}</code>。
+          <strong>别名是另一回事</strong>：建好之后在上面的列表里点「别名」再加，可以加多个。
+        </p>
+
+        <div class="ns__create-fields">
+          <label class="ns__field">
+            <span>名称（必填）</span>
+            <input
+              v-model="newName"
+              class="ns__input"
+              type="text"
+              placeholder="如 help"
+              @keydown.enter.prevent="add"
+            />
+          </label>
+
+          <label class="ns__field ns__field--wide">
+            <span>跨站地址模板（可选；填了表示页面在别的站上）</span>
+            <input
+              v-model="newSite"
+              class="ns__input"
+              type="text"
+              placeholder="https://zh.wikipedia.org/wiki/$1"
+            />
+          </label>
+
+          <button
+            class="ns__btn ns__btn--primary ns__btn--big"
+            type="button"
+            :disabled="busy === 'add' || !newName.trim()"
+            @click="add"
+          >
+            创建命名空间
+          </button>
+        </div>
+
+        <p class="ns__hint">
+          名称不许重复（大小写与空白不影响判重），也不许含
+          <code>/</code> <code>:</code> <code>@</code> <code>#</code> 等符号。
+          清空与删除都会把里面的页面送进回收站。
+        </p>
+      </section>
     </template>
   </div>
 </template>
@@ -494,16 +511,37 @@ function remove(item: Namespace) {
   font-size: 12px;
 }
 
-/* ---------- 新增表单 ---------- */
+/* ---------- 新建命名空间：单独一块，别和"别名"混在一起 ---------- */
 
-.ns__add-title {
-  margin: 0 0 8px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-dim);
+.ns__create {
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
 }
 
-.ns__add {
+.ns__create-title {
+  margin: 0 0 6px;
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.ns__create-lead {
+  margin: 0 0 12px;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.ns__create-lead code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--code-bg);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.ns__create-fields {
   display: flex;
   align-items: flex-end;
   flex-wrap: wrap;
@@ -568,6 +606,11 @@ function remove(item: Namespace) {
 
 .ns__btn--primary {
   color: var(--accent-soft);
+}
+
+.ns__create .ns__btn--big {
+  padding: 6px 14px;
+  font-size: 13px;
 }
 
 .ns__error {
