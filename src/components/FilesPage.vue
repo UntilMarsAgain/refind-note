@@ -8,7 +8,7 @@
  */
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { FolderOpen, Trash2, Upload } from "@lucide/vue";
 import type { FileEntry } from "../bindings";
@@ -140,6 +140,26 @@ async function submitRename(file: FileEntry) {
   }
 }
 
+/**
+ * 另存为：把仓库里那份拷到用户选的位置。
+ *
+ * 与笔记里图片右键的那一项走同一条命令（`export_file` 认标识也认显示名），
+ * 所以两处的行为不会分家。
+ */
+async function saveOut(file: FileEntry) {
+  problem.value = "";
+  try {
+    const target = await save({ defaultPath: file.name, title: "另存为" });
+    if (!target) {
+      return;
+    }
+    await invoke("export_file", { key: file.id, target });
+    notice.value = "已另存为：" + target;
+  } catch (error) {
+    problem.value = String(error);
+  }
+}
+
 async function copyReference(file: FileEntry) {
   try {
     await writeText(referenceOf(file));
@@ -156,6 +176,7 @@ function onRowMenu(event: MouseEvent, file: FileEntry) {
   openMenu(event, [
     { label: "复制引用", run: () => copyReference(file) },
     { label: "重命名", run: () => beginRename(file) },
+    { label: "另存为…", run: () => saveOut(file) },
     { label: "删除", danger: true, run: () => askDelete(file) },
   ]);
 }

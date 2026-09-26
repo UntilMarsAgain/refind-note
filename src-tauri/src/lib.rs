@@ -88,6 +88,20 @@ fn upload_bytes(request: tauri::ipc::Request<'_>) -> Result<FileEntry, String> {
         .map_err(|error| error.to_string())
 }
 
+/// 把附件另存到用户选定的位置。
+///
+/// 由后端直接拷贝：`key` 只在仓库的表里查（与取件同一条解析），
+/// 所以这里既不接受任意源路径，也不必让字节经过前端。
+#[tauri::command]
+fn export_file(key: String, target: String) -> Result<(), String> {
+    let vault = open()?;
+    let Some(source) = vault.file_path_by_key(&key).map_err(|error| error.to_string())? else {
+        return Err(format!("仓库里没有这个附件：{key}"));
+    };
+    fs::copy(&source, &target).map_err(|error| format!("写不进那个位置：{error}"))?;
+    Ok(())
+}
+
 #[tauri::command]
 fn rename_file(id: String, name: String) -> Result<FileEntry, String> {
     open()?
@@ -622,6 +636,7 @@ pub fn run() {
             upload_file,
             upload_bytes,
             rename_file,
+            export_file,
             delete_file,
             special_pages,
             render_markdown,

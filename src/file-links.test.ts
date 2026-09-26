@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fileReferenceOf, fileTargetOf } from "./file-links.ts";
+import { fileReferenceOf, fileTargetOf, vaultKeyOf } from "./file-links.ts";
 
 test("相对地址当作仓库里的文件", () => {
   assert.equal(fileTargetOf("图片.png"), "图片.png");
@@ -29,4 +29,15 @@ test("绝对地址与程序自己的资源一律不动", () => {
 test("引用写法：图片写图，其它写链接", () => {
   assert.equal(fileReferenceOf({ name: "桥.png", mime: "image/png" }), "![桥.png](桥.png)");
   assert.equal(fileReferenceOf({ name: "说明.pdf", mime: "application/pdf" }), "[说明.pdf](说明.pdf)");
+});
+
+test("从取件地址反解出文件名；别的地址一律不算", () => {
+  assert.equal(vaultKeyOf("refind://localhost/files/%E6%A1%A5.png"), "桥.png");
+  assert.equal(vaultKeyOf("refind://localhost/files/a.png"), "a.png");
+  // 外部图片拿不到字节，所以不是"仓库里的文件"
+  assert.equal(vaultKeyOf("https://example.com/a.png"), null);
+  assert.equal(vaultKeyOf("/logo.svg"), null);
+  assert.equal(vaultKeyOf("refind://localhost/files/"), null);
+  // 坏编码给 null，不抛
+  assert.equal(vaultKeyOf("refind://localhost/files/%ZZ"), null);
 });

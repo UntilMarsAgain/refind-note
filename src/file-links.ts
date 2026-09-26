@@ -30,6 +30,25 @@ export function fileTargetOf(source: string): string | null {
   return trimmed;
 }
 
+/**
+ * 这颗图片是不是**仓库里的文件**？是就给出它的键（显示名）。
+ *
+ * 反解我们自己写上去的那种地址。外部图片（http）不算 —— 它们的字节拿不到（跨域），
+ * 所以"另存为"这一项不该出现在它们身上：给一个点了没用的项，比不给更糟。
+ */
+export function vaultKeyOf(source: string): string | null {
+  if (!source.startsWith(FILE_SCHEME)) {
+    return null;
+  }
+  try {
+    const key = decodeURIComponent(source.slice(FILE_SCHEME.length));
+    return key === "" ? null : key;
+  } catch {
+    // 坏编码不抛：这只是"认不认得出来"的判断，认不出就当不是
+    return null;
+  }
+}
+
 /** 笔记里引用这个附件时该写什么：图片写 markdown 图，其它写成链接 */
 export function fileReferenceOf(file: { name: string; mime: string }): string {
   const name = file.name;
