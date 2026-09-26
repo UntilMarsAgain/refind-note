@@ -1243,12 +1243,29 @@ impl Vault {
         self.save_namespaces()
     }
 
+    /// 把"名字或别名"解析成**标识**。
+    ///
+    /// 两跳寻址的关键一步：外面（界面、命令、地址）用名字，里面（目录、键）用标识。
+    fn namespace_id(&self, name_or_alias: &str) -> String {
+        let needle = name_or_alias.trim();
+        // 空与 "0" 都是主命名空间
+        if needle.is_empty() {
+            return crate::title::MAIN_NS.to_string();
+        }
+        self.table
+            .lookup(needle)
+            .map(|item| item.id.clone())
+            .unwrap_or_else(|| needle.to_string())
+    }
+
     /// 清空一个命名空间：里面的页面全部进回收站（可还原），命名空间本身留着。
     pub fn empty_namespace(&self, key: &str) -> Result<usize, VaultError> {
+        // 传进来的可能是名字（界面按名字称呼它），这里换成标识再比 —— 目录用的是标识
+        let id = self.namespace_id(key);
         let titles: Vec<String> = self
             .walk(&self.notes_dir())?
             .iter()
-            .filter(|parsed| parsed.ns == key)
+            .filter(|parsed| parsed.ns == id)
             .map(|parsed| parsed.display(&self.table))
             .collect();
 
@@ -1266,15 +1283,16 @@ impl Vault {
     /// 键就是名字，所以**删掉再建同名 = 没删过**（你说的那条）。
     /// 主命名空间与 `special` 不可删。
     pub fn delete_namespace(&mut self, key: &str) -> Result<usize, VaultError> {
-        if NamespaceTable::is_reserved(key) {
+        let id = self.namespace_id(key);
+        if NamespaceTable::is_reserved(&id) {
             return Err(VaultError::BadAddress(format!(
                 "「{key}」是不可删除的命名空间"
             )));
         }
-        let count = self.empty_namespace(key)?;
+        let count = self.empty_namespace(&id)?;
 
         let mut table = (*self.table).clone();
-        table.items.retain(|item| item.id != key);
+        table.items.retain(|item| item.id != id);
         self.table = Arc::new(table);
         self.save_namespaces()?;
         Ok(count)
@@ -3501,6 +3519,9 @@ mod tests {
                 SPECIAL_PAGES.contains(&page.as_str()),
                 "应当落到真实存在的特殊页面：{page}"
             ),
+            // 也可能正好抽中 `special:random` —— 它自己还会再跳一次，于是最终落在
+            // 某一篇笔记上。这是正确行为（它就是"随机"），不是失败。
+            Address::Note { .. } => {}
             other => panic!("{other:?}"),
         }
 

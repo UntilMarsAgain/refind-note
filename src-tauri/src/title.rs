@@ -55,10 +55,13 @@ const ILLEGAL_CHARS: &[char] = &['#', '<', '>', '[', ']', '|', '{', '}', ':', '@
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Namespace {
-    /// 标识：**字符串**。主命名空间是 [`MAIN_NS`]（"0" 占位）
+    /// 标识：**稳定键**，与名字分开。
+    ///
+    /// 磁盘目录（`notes/<id>/`）与标题键（`<id>:<标题>`）都用它，所以**改名不动一个文件**。
+    /// 主命名空间是 [`MAIN_NS`]（"0" 占位）；`special` 是特例，标识与名字同为 "special"。
     #[serde(deserialize_with = "de_namespace_id")]
     pub id: String,
-    /// 规范名；主命名空间为空串（没有前缀）
+    /// 规范名（用户写在地址里的前缀）；主命名空间为空串（没有前缀）
     pub name: String,
     /// 别名（含其它语言）
     #[serde(default)]
@@ -160,6 +163,13 @@ impl NamespaceTable {
             // 内建的那两个本来就叫 main / special：它们自己用保留名是应该的，
             // 只是不许别人占用 —— 所以照旧进 seen，但不因此报错
             let reserved = Self::is_reserved(&item.id);
+            // 名字里的符号在建表时就该被拦下，但文件可能是手改的 —— 这里再兜一道
+            if !item.name.is_empty() {
+                Self::check_name(&item.name)?;
+            }
+            for alias in &item.aliases {
+                Self::check_name(alias.trim())?;
+            }
             let mut names: Vec<String> = Vec::new();
             if !item.name.is_empty() {
                 names.push(item.name.clone());
@@ -186,23 +196,51 @@ impl NamespaceTable {
         Ok(())
     }
 
-    /// 加一个命名空间。**标识就是名字本身**（你说的"只使用名称作为键"）。
+    /// 名字里不许有的符号：地址分隔符与文件系统敏感字符。
+    ///
+    /// `/` 尤其要拦：名字若进了路径就会变成目录层级。
+    fn check_name(name: &str) -> Result<(), String> {
+        for ch in name.chars() {
+            if ch == '/' || ch == '\\' || ILLEGAL_CHARS.contains(&ch) {
+                return Err(format!("命名空间名里不能有「{ch}」"));
+            }
+            if ch.is_control() {
+                return Err("命名空间名里不能有控制字符".to_string());
+            }
+        }
+        Ok(())
+    }
+
+    /// 下一个可用的标识。**生成的、与名字无关**，所以改名不必搬任何文件。
+    fn next_id(&self) -> String {
+        let mut n = 1;
+        loop {
+            let candidate = format!("ns{n}");
+            if self.items.iter().all(|item| item.id != candidate) {
+                return candidate;
+            }
+            n += 1;
+        }
+    }
+
+    /// 加一个命名空间：名字用于显示与匹配，**标识另外生成**（两跳寻址）。
     pub fn add(&mut self, name: &str, aliases: Vec<String>, site: Option<String>) -> Result<(), String> {
-        let name = name.trim();
+        let name = name.trim().to_string();
         if name.is_empty() {
             return Err("命名空间名不能为空".to_string());
         }
-        if name.contains(':') || name.contains('@') || name.contains('#') || name.contains('/') {
-            return Err("命名空间名里不能有 `:` `@` `#` `/`".to_string());
+        Self::check_name(&name)?;
+        for alias in &aliases {
+            Self::check_name(alias.trim())?;
         }
-        if self.lookup(name).is_some() || self.get(name).is_some() {
+        if self.lookup(&name).is_some() {
             return Err(format!("「{name}」已经存在（或与某个别名相同）"));
         }
 
         let mut next = self.clone();
         next.items.push(Namespace {
-            id: name.to_string(),
-            name: name.to_string(),
+            id: next.next_id(),
+            name,
             aliases,
             storable: true,
             site,
