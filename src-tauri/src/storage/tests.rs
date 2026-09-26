@@ -1599,6 +1599,65 @@ fn renaming_a_namespace_moves_nothing() {
     assert!(temp.vault.rename_namespace("special", "别的").is_err());
 }
 
+/// 站点地址可以改，也可以清空（清空后变回内容命名空间）
+#[test]
+fn cross_site_url_is_editable() {
+    let mut temp = TempVault::new();
+
+    // 换一个站点地址
+    temp.vault
+        .update_namespace(
+            "zhwiki",
+            vec!["中文维基百科".to_string()],
+            Some("https://zh.m.wikipedia.org/wiki/$1".to_string()),
+        )
+        .unwrap();
+    let item = temp
+        .vault
+        .namespaces()
+        .into_iter()
+        .find(|item| item.name == "zhwiki")
+        .unwrap();
+    assert_eq!(
+        item.site.as_deref(),
+        Some("https://zh.m.wikipedia.org/wiki/$1")
+    );
+    assert!(!item.storable, "有站点地址就是跨站命名空间");
+
+    // 清空站址 → 变回内容命名空间，可以放本仓库的页面
+    temp.vault.update_namespace("zhwiki", Vec::new(), None).unwrap();
+    let item = temp
+        .vault
+        .namespaces()
+        .into_iter()
+        .find(|item| item.name == "zhwiki")
+        .unwrap();
+    assert!(item.site.is_none());
+    assert!(item.storable, "没有站点地址就是本仓库的内容命名空间");
+    temp.vault.create("zhwiki:自建条目").unwrap();
+    temp.vault
+        .commit("zhwiki:自建条目", "正文", None, 0)
+        .unwrap();
+    match temp.vault.parse_address("zhwiki:自建条目").unwrap() {
+        Address::Note { title, .. } => assert_eq!(title, "zhwiki:自建条目"),
+        other => panic!("{other:?}"),
+    }
+
+    // 保留的命名空间不能配站点地址
+    for key in ["special", "0"] {
+        assert!(
+            temp.vault
+                .update_namespace(
+                    key,
+                    Vec::new(),
+                    Some("https://example.com/$1".to_string()),
+                )
+                .is_err(),
+            "{key} 不该能配站点地址"
+        );
+    }
+}
+
 /// 默认就有两个跨站命名空间：`zhwiki` 与 `qw`
 #[test]
 fn default_cross_site_namespaces() {
@@ -1701,7 +1760,7 @@ fn aliases_are_editable_everywhere() {
 
     // 一次给两个别名，两个都认
     temp.vault
-        .update_namespace_aliases("help", vec!["帮助".to_string(), "百科".to_string()])
+        .update_namespace("help", vec!["帮助".to_string(), "百科".to_string()], None)
         .unwrap();
     for alias in ["帮助", "百科"] {
         let address = format!("{alias}:条目");
@@ -1713,19 +1772,19 @@ fn aliases_are_editable_everywhere() {
 
     // 删到一个：去掉的那个不再认
     temp.vault
-        .update_namespace_aliases("help", vec!["帮助".to_string()])
+        .update_namespace("help", vec!["帮助".to_string()], None)
         .unwrap();
     assert!(temp.vault.parse_address("百科:条目").is_err(), "别名已删掉");
 
     // 别名之间不许重复（大小写与空白不影响判重）
     assert!(temp
         .vault
-        .update_namespace_aliases("help", vec!["帮助".to_string(), " 帮助 ".to_string()])
+        .update_namespace("help", vec!["帮助".to_string(), " 帮助 ".to_string()], None)
         .is_err());
 
     // special 的别名要真的路由到特殊页面
     temp.vault
-        .update_namespace_aliases("special", vec!["特殊".to_string()])
+        .update_namespace("special", vec!["特殊".to_string()], None)
         .unwrap();
     match temp.vault.parse_address("特殊:gc").unwrap() {
         Address::Special { page, .. } => assert_eq!(page, "gc"),
@@ -1736,7 +1795,7 @@ fn aliases_are_editable_everywhere() {
     // 没建过那一页时应当是"缺失"，而不是报标题非法 —— 这说明前缀被正确认成了
     // 主命名空间（主命名空间没有前缀，所以显示标题里看不到它）。
     temp.vault
-        .update_namespace_aliases("0", vec!["主".to_string()])
+        .update_namespace("0", vec!["主".to_string()], None)
         .unwrap();
     match temp.vault.parse_address("主:不存在的页").unwrap() {
         Address::Missing { title, .. } => assert_eq!(title, "不存在的页"),

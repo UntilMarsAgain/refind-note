@@ -70,21 +70,40 @@ impl Vault {
         Ok(count)
     }
 
-    /// 改一个命名空间的别名（增、删、一次给多个都用它）。
+    /// 改一个命名空间的别名与站点地址（别名增删、站址修改都用它）。
     ///
     /// 名称与标识都不动 —— 别名只是"另外几个也能写的前缀"。保留的两个（主命名空间与
     /// `special`）**也可以有别名**：给主命名空间配 `主`，`[[主:某页]]` 就落在主命名空间。
-    pub fn update_namespace_aliases(
+    pub fn update_namespace(
         &mut self,
         key: &str,
         aliases: Vec<String>,
+        site: Option<String>,
     ) -> Result<(), VaultError> {
         let id = self.namespace_id(key);
+        let site = site
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+
+        // 主命名空间与 special 不是"内容在别处"，不给它们配站点地址
+        if NamespaceTable::is_reserved(&id) && site.is_some() {
+            return Err(VaultError::BadAddress(format!(
+                "「{key}」是保留的命名空间，不能配站点地址"
+            )));
+        }
+
         let mut table = (*self.table).clone();
         let Some(item) = table.items.iter_mut().find(|item| item.id == id) else {
             return Err(VaultError::BadAddress(format!("命名空间「{key}」不存在")));
         };
         item.aliases = aliases;
+        if !NamespaceTable::is_reserved(&id) {
+            // **与 `add` 同一条规则**：配了站点地址就是跨站命名空间，页面在别的站上，
+            // 本仓库不存它的页面。站址与"可存储"因此必须一起改 —— 否则会出现
+            // "外部却没有地址"这种自相矛盾的状态。
+            item.storable = site.is_none();
+        }
+        item.site = site;
         // 先校验、通过了才替换：重名与非法字符都在这里拦下
         table.validate().map_err(VaultError::BadAddress)?;
         self.table = Arc::new(table);

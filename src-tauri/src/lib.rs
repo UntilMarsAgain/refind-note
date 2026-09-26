@@ -129,16 +129,17 @@ fn add_namespace(
     Ok(vault.namespaces())
 }
 
-/// 改一个命名空间的别名（增删都用它；一次给一整套）
+/// 改一个命名空间的别名与站点地址（别名增删、站址修改都用它，一次给一整套）
 #[tauri::command]
-fn update_namespace_aliases(
+fn update_namespace(
     key: String,
     aliases: Vec<String>,
+    site: Option<String>,
 ) -> Result<Vec<Namespace>, String> {
     let _guard = write_guard();
     let mut vault = open()?;
     vault
-        .update_namespace_aliases(&key, aliases)
+        .update_namespace(&key, aliases, site)
         .map_err(|error| error.to_string())?;
     Ok(vault.namespaces())
 }
@@ -511,7 +512,7 @@ pub fn run() {
             namespaces,
             add_namespace,
             rename_namespace,
-            update_namespace_aliases,
+            update_namespace,
             empty_namespace,
             delete_namespace,
             list_trash,

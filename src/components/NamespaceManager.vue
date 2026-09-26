@@ -610,6 +610,13 @@ function remove(item: Namespace) {
   outline: 1px solid var(--accent);
 }
 
+/* 站址是长字符串，给它更宽的一档；操作格本身允许换行，放不下时按钮会落到下一行 */
+.ns__input--wide {
+  width: 240px;
+  max-width: 100%;
+  flex: 1 1 200px;
+}
+
 /*
  * 原生下拉在深色主题下会白底（WebKitGTK 按系统主题画）—— 只能自己画：
  * `appearance: none` 去掉原生外观，再补一个箭头。
