@@ -146,7 +146,8 @@ impl Vault {
                 table
             }
         };
-        // 老仓库升级上来时补一次默认的跨站命名空间；播过之后就不再动，用户删掉的不会回来
+        // 老仓库升级上来时补一次默认的跨站命名空间；播过之后就不再动，用户删掉的不会回来。
+        // （模板命名空间不做升级补齐：需要它的仓库还一个都没有。）
         if table.sow_defaults() {
             write_atomic(&namespaces_path, &serde_json::to_vec_pretty(&table)?)?;
         }

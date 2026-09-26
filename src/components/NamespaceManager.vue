@@ -19,6 +19,8 @@ import { invoke } from "@tauri-apps/api/core";
 
 
 const MAIN = "0";
+/** 模板命名空间（与后端 `TEMPLATE_NS` 对应） */
+const TEMPLATE = "template";
 const SPECIAL = "special";
 
 const items = ref<Namespace[]>([]);
@@ -57,8 +59,14 @@ function labelOf(item: Namespace): string {
 }
 
 /** 主命名空间与 special：不能改名、不能清空、不能删除 */
+/**
+ * 保留的命名空间：主命名空间、`special` 与 `template`。
+ *
+ * 判定以后端为准（`NamespaceTable::is_reserved` 是唯一真相），这里只是**别给出注定失败的
+ * 按钮**：后端多一个保留名，就在这里多写一个标识。
+ */
 function isReserved(item: Namespace): boolean {
-  return item.id === MAIN || item.id === SPECIAL;
+  return item.id === MAIN || item.id === SPECIAL || item.id === TEMPLATE;
 }
 
 /**

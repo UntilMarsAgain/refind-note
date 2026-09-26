@@ -24,6 +24,13 @@ pub const MAIN_NS: &str = "0";
 /// 虚拟命名空间：页面由程序提供，不落存储。
 pub const SPECIAL_NS: &str = "special";
 
+/// 模板命名空间：用户自己写的模板。
+///
+/// 与主命名空间一样**可存储**（里面就是普通笔记，一样有历史与草稿），也一样**不能删**——
+/// 它承载的是所有笔记都可能引用到的定义，删掉等于把别人的页面一起弄坏。
+/// 里面以 `.css` / `.html` 结尾的页面另有特判（见 `crate::markdown`）。
+pub const TEMPLATE_NS: &str = "template";
+
 /// 命名空间标识。
 ///
 /// 它**是字符串**（`special` / `help` / …），因为用户看到的、写在地址里的就是名字；
@@ -125,6 +132,14 @@ impl NamespaceTable {
                     storable: true,
                     site: None,
                 },
+                // 模板命名空间：用户自己写的模板（`.css` / `.html` 结尾的另有特判）
+                Namespace {
+                    id: TEMPLATE_NS.to_string(),
+                    name: TEMPLATE_NS.to_string(),
+                    aliases: Vec::new(),
+                    storable: true,
+                    site: None,
+                },
                 // 虚拟命名空间：`special:` 下的页面由程序提供，不落存储
                 Namespace {
                     id: SPECIAL_NS.to_string(),
@@ -214,7 +229,7 @@ impl NamespaceTable {
     /// 这两个命名空间**删不掉、也不许占用它们的名字**：
     /// 主命名空间（`"0"`）与虚拟的 `special`。
     pub fn is_reserved(id: &str) -> bool {
-        id == MAIN_NS || id == SPECIAL_NS
+        id == MAIN_NS || id == SPECIAL_NS || id == TEMPLATE_NS
     }
 
     /// 校验整张表：**名称与别名都不许重复**（大小写不敏感），别名也不许撞别人的规范名。

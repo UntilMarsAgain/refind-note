@@ -1660,6 +1660,37 @@ fn cross_site_url_is_editable() {
     }
 }
 
+/// 模板命名空间：内置、可存储、保留（删不掉也改不了名），但照常放页面、走完整链路
+#[test]
+fn template_namespace_is_builtin() {
+    let mut temp = TempVault::new();
+    let template = temp
+        .vault
+        .namespaces()
+        .into_iter()
+        .find(|item| item.id == "template")
+        .expect("应当默认有 template 命名空间");
+    assert_eq!(template.name, "template");
+    assert!(template.storable, "里面放的就是普通笔记");
+    assert!(template.site.is_none());
+
+    // 保留名：与主命名空间、special 一样，删不掉也改不了名
+    assert!(temp.vault.delete_namespace("template").is_err());
+    assert!(temp.vault.rename_namespace("template", "别的").is_err());
+
+    // 但它照常能放页面，历史与草稿也照常
+    temp.vault.create("template:我的模板").unwrap();
+    temp.vault
+        .commit("template:我的模板", "正文", None, 0)
+        .unwrap();
+    temp.vault.save_draft("template:我的模板", "草稿", 1).unwrap();
+    assert!(temp.vault.load_draft("template:我的模板").unwrap().is_some());
+    match temp.vault.parse_address("template:我的模板").unwrap() {
+        Address::Note { title, .. } => assert_eq!(title, "template:我的模板"),
+        other => panic!("{other:?}"),
+    }
+}
+
 /// 默认就有两个跨站命名空间：`zhwiki` 与 `qw`
 #[test]
 fn default_cross_site_namespaces() {
