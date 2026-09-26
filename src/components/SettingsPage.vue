@@ -578,5 +578,8 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
 /* 复选框那一行：勾选框与文字之间别挤在一起 */
 .row__check {
   gap: 8px;
+  /* 原来这里是 `margin-left: auto`，于是复选框被顶到整行最右边 —— 与别的控件
+     （主题按钮、数字输入）不在同一条竖线上，看着像掉队了。现在跟它们对齐。 */
+  margin-left: 0;
 }
 </style>
