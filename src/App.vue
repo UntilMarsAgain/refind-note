@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// 地址的判别式**只有后端一处定义**：这份类型由 `cargo test` 从 Rust 导出到 src/bindings/
+import type { Address } from "./bindings/Address";
 import type {
   Draft,
   LoadOutcome,
@@ -51,45 +53,6 @@ type Mode =
   | "rollback"
   | "special";
 
-/** 与 Rust 端 `Address` 对应：地址栏那一行的解析结果（后端解析到底） */
-type Address =
-  | { kind: "empty" }
-  | {
-      kind: "note";
-      title: string;
-      address: string;
-      /** 指令页面 + `@no-command`：正文按代码块显示（不执行指令） */
-      code_block: boolean;
-      /** 是跟某条指令来到这一页的（直接打开时为 null） */
-      via: { from: string; random: boolean } | null;
-    }
-  | { kind: "edit"; title: string; address: string }
-  | { kind: "history"; title: string; address: string }
-  | { kind: "delete"; title: string; address: string }
-  | {
-      kind: "view-version";
-      title: string;
-      rev: number;
-      id: string;
-      short_id: string;
-      address: string;
-    }
-  | {
-      kind: "rollback-confirm";
-      title: string;
-      rev: number;
-      id: string;
-      short_id: string;
-      address: string;
-    }
-  | {
-      kind: "special";
-      page: string;
-      address: string;
-      /** 是跟某条指令来到这一页的（直接打开时为 null） */
-      via: { from: string; random: boolean } | null;
-    }
-  | { kind: "missing"; title: string; address: string };
 
 /** 自动保存：停手三秒后写一条草稿到链上 */
 const AUTOSAVE_DELAY_MS = 3000;

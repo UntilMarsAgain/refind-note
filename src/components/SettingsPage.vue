@@ -14,14 +14,6 @@ import { BASE_ZOOM } from "../settings";
 
 const props = defineProps<{ settings: VaultSettings; focus?: string }>();
 
-/**
- * 当前运行的前端产物文件名（含内容哈希）。
- *
- * 没有 devtools 时，这是判断"看到的是不是最新构建"的唯一可靠依据 ——
- * 把它和构建日志里的文件名对一下即可。
- */
-const bundleName = import.meta.url.split("/").pop() ?? "";
-
 /* 每个设置项的 id 是**地址的一部分**（`special:settings#accent` 能直接跳过去），
    因此它们等于对外接口：改名要同步改 id 与文案。滚动不再依赖白名单，
    凡是页面上存在的 id 都能跳（见下面的 watch）。 */

@@ -3,6 +3,7 @@
 //! 单独放着，是为了让「对外形状」和「内部实现」分开：改内部不必动前端契约。
 
 use serde::Serialize;
+use ts_rs::TS;
 
 // ---------------------------------------------------------------- 对外结构
 
@@ -18,7 +19,8 @@ pub struct NoteSummary {
 }
 
 /// 是通过哪条指令来到这一页的（跟过重定向的阅读路径会带上）。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 pub struct Via {
     /// 来源页面标题；随机跳转时它是**发起随机的页面**，不是目标
     pub from: String,
@@ -151,8 +153,12 @@ pub struct DiffResult {
 ///
 /// 返回的 `title` / `short_id` 都是**规范全称**，界面直接拿来回显地址栏
 /// （所以用 `@缩写` 跳转之后，地址栏会显示成 `名称@缩写`）。
-#[derive(Debug, Clone, Serialize)]
+///
+/// **判别式只有这一处定义**：TypeScript 那一侧由 `ts-rs` 从这里导出
+/// （`cargo test` 会写进 `src/bindings/`），前端不再手写第二份 —— 手写的那份已经漂移过。
+#[derive(Debug, Clone, Serialize, TS)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
+#[ts(export, export_to = "../../src/bindings/")]
 pub enum Address {
     /// 空输入
     Empty,
@@ -174,6 +180,8 @@ pub enum Address {
     /// 只读查看某一版（`view-版本`）
     ViewVersion {
         title: String,
+        /// 版本号：远小于 2^53，前端按普通数字处理即可（默认会导成 bigint，用不了）
+        #[ts(type = "number")]
         rev: u64,
         id: String,
         short_id: String,
@@ -182,6 +190,8 @@ pub enum Address {
     /// 回退的**二次确认页**（`rollback-版本`）
     RollbackConfirm {
         title: String,
+        /// 版本号：远小于 2^53，前端按普通数字处理即可（默认会导成 bigint，用不了）
+        #[ts(type = "number")]
         rev: u64,
         id: String,
         short_id: String,

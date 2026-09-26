@@ -20,6 +20,8 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
+# 由 Rust 端导出前端类型：地址的判别式只应有一处定义（见 storage/api.rs）
+ts-rs = { version = "12", features = ["serde-compat"] }
 # 单实例：同一个登录会话里只能有一个重逢笔记在跑。第二次启动时由它把已有窗口
 # 拉到前面（而不是又开一个进程去抢同一个仓库）。放在最前面注册，见 lib.rs。
 tauri-plugin-single-instance = "2"
