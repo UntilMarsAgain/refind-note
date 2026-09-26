@@ -119,7 +119,14 @@ export function templateMarks(lines: string[]): TemplateMark[] {
       if (isHead.has(inner) || markedBodies.has(inner)) {
         continue;
       }
-      const indent = headIndent(lines[inner] ?? "");
+      const text = lines[inner] ?? "";
+      // 空行不标 —— **哪怕它带着空白**。打字时很容易留下几个空格，
+      // 而按"缩进大于零"来判就会给这种行画出一条孤零零的色块，
+      // 看上去像块在这里断了（其实没有）。
+      if (isBlank(text)) {
+        continue;
+      }
+      const indent = headIndent(text);
       if (indent === 0) {
         // 没有缩进就没有可标的列；零长度装饰 CM6 会直接抛异常
         continue;
