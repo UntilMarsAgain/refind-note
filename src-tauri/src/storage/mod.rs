@@ -39,6 +39,11 @@ pub use api::{
 };
 pub use config::VaultConfig;
 pub use files::{decode_key, mime_of};
+
+/// 单个附件的大小上限（上传与"另存网页图片"共用同一个数 —— 两处写死会各自漂移）
+pub fn files_max_bytes() -> u64 {
+    files::MAX_FILE_BYTES
+}
 pub use error::VaultError;
 pub use event::{
     drafts_of, fold, next_rev, revision_id, revision_of, short_revision_id, Event,

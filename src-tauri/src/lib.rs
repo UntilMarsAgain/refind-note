@@ -92,6 +92,59 @@ fn upload_bytes(request: tauri::ipc::Request<'_>) -> Result<FileEntry, String> {
 ///
 /// 由后端直接拷贝：`key` 只在仓库的表里查（与取件同一条解析），
 /// 所以这里既不接受任意源路径，也不必让字节经过前端。
+/// 只放行 http/https。
+///
+/// 抽成一个小函数，是因为这是"另存网页图片"里唯一需要想清楚的地方（其余都是下载与写盘），
+/// 而它正好可以测 —— `file:`、`data:` 之类不该从这条路上走。
+fn http_url(text: &str) -> Option<&str> {
+    let trimmed = text.trim();
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        Some(trimmed)
+    } else {
+        None
+    }
+}
+
+/// 把网上的图片另存到用户选定的位置。
+///
+/// **下载在后端做**：前端的 `fetch` 会被跨域拦住，而后端没有这个限制。
+/// 字节因此也不必经过前端 —— 与仓库里的附件走的是同一个思路。
+#[tauri::command]
+async fn export_url(url: String, target: String) -> Result<(), String> {
+    let Some(url) = http_url(&url) else {
+        return Err("只能另存 http/https 地址".to_string());
+    };
+    let client = tauri_plugin_http::reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|error| format!("连不上：{error}"))?;
+
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|error| format!("下载失败：{error}"))?
+        .error_for_status()
+        .map_err(|error| format!("那个地址回应了错误：{error}"))?;
+
+    // 先看声明的大小，超限就别下了（与上传同一个上限）
+    if let Some(length) = response.content_length() {
+        if length > storage::files_max_bytes() {
+            return Err(format!("这个文件太大（{length} 字节），不下载"));
+        }
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|error| format!("下载中断：{error}"))?;
+    if bytes.len() as u64 > storage::files_max_bytes() {
+        return Err(format!("这个文件太大（{} 字节），不下载", bytes.len()));
+    }
+
+    fs::write(&target, &bytes).map_err(|error| format!("写不进那个位置：{error}"))?;
+    Ok(())
+}
+
 #[tauri::command]
 fn export_file(key: String, target: String) -> Result<(), String> {
     let vault = open()?;
@@ -637,6 +690,7 @@ pub fn run() {
             upload_bytes,
             rename_file,
             export_file,
+            export_url,
             delete_file,
             special_pages,
             render_markdown,
@@ -703,6 +757,13 @@ mod tests {
             "示例里的 ::quote 应当生效"
         );
         assert!(html.contains("quote__origin"), "示例里的署名应当渲染出来");
+
+        // "另存网页图片"只放行 http/https：这条判断是那条路上唯一需要想清楚的地方
+        assert_eq!(http_url("https://example.com/a.png"), Some("https://example.com/a.png"));
+        assert_eq!(http_url("  http://a/b  "), Some("http://a/b"));
+        for bad in ["file:///etc/passwd", "data:image/png;base64,AA", "/logo.svg", ""] {
+            assert_eq!(http_url(bad), None, "{bad} 不该被放行");
+        }
 
         // 示例里演示了每个内置模板：演示要是渲染不出来，示例就退化成死文字
         for marker in [

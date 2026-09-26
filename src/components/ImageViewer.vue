@@ -8,8 +8,8 @@
 import { X } from "@lucide/vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { Download } from "@lucide/vue";
-import { saveVaultFile } from "../file-save";
-import { vaultKeyOf } from "../file-links";
+import { saveRemoteFile, saveVaultFile } from "../file-save";
+import { httpUrlOf, vaultKeyOf } from "../file-links";
 import { closeImage, viewingImage } from "../image-viewer";
 
 function onKey(event: KeyboardEvent) {
@@ -30,23 +30,24 @@ watch(viewingImage, (value) => {
 onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 
 /**
- * 能不能另存：只有仓库里的文件可以。
- *
- * 外链图片的字节在别的站上（跨域拿不到），所以对它们不给这个按钮 ——
- * 给一个点了没用的按钮比不给更糟。
+ * 能不能另存：仓库里的文件可以；网上的图片也可以（下载由后端做，不受跨域限制）。
+ * 其余（`data:`、程序自己的静态资源）给不出字节，所以不给按钮。
  */
 const vaultKey = computed(() => (viewingImage.value ? vaultKeyOf(viewingImage.value.url) : null));
+const remoteUrl = computed(() => (viewingImage.value ? httpUrlOf(viewingImage.value.url) : null));
+const canSave = computed(() => Boolean(vaultKey.value || remoteUrl.value));
 
 const trouble = ref("");
 
 async function keep() {
   const key = vaultKey.value;
-  if (!key) {
+  const remote = remoteUrl.value;
+  if (!key && !remote) {
     return;
   }
   trouble.value = "";
   try {
-    await saveVaultFile(key);
+    await (key ? saveVaultFile(key) : saveRemoteFile(remote as string));
   } catch (error) {
     trouble.value = String(error);
   }
@@ -61,8 +62,8 @@ async function keep() {
         {{ viewingImage.alt }}
       </figcaption>
     </figure>
-    <div v-if="vaultKey || trouble" class="viewer__tools" @click.stop>
-      <button v-if="vaultKey" class="viewer__tool" type="button" @click="keep">
+    <div v-if="canSave || trouble" class="viewer__tools" @click.stop>
+      <button v-if="canSave" class="viewer__tool" type="button" @click="keep">
         <Download :size="16" :stroke-width="1.9" />
         另存为
       </button>

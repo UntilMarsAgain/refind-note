@@ -1,7 +1,13 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fileReferenceOf, fileTargetOf, vaultKeyOf } from "./file-links.ts";
+import {
+  fileNameOfUrl,
+  fileReferenceOf,
+  fileTargetOf,
+  httpUrlOf,
+  vaultKeyOf,
+} from "./file-links.ts";
 
 test("相对地址当作仓库里的文件", () => {
   assert.equal(fileTargetOf("图片.png"), "图片.png");
@@ -40,4 +46,24 @@ test("从取件地址反解出文件名；别的地址一律不算", () => {
   assert.equal(vaultKeyOf("refind://localhost/files/"), null);
   // 坏编码给 null，不抛
   assert.equal(vaultKeyOf("refind://localhost/files/%ZZ"), null);
+});
+
+test("只有 http/https 才算可下载的网址", () => {
+  assert.equal(httpUrlOf("https://example.com/a.png"), "https://example.com/a.png");
+  assert.equal(httpUrlOf(" http://example.com/a.png "), "http://example.com/a.png");
+  // 这些都不该从"另存网页图片"那条路上走
+  assert.equal(httpUrlOf("file:///etc/passwd"), null);
+  assert.equal(httpUrlOf("data:image/png;base64,AAAA"), null);
+  assert.equal(httpUrlOf("/logo.svg"), null);
+  assert.equal(httpUrlOf("refind://localhost/files/a.png"), null);
+});
+
+test("另存网页图片的默认名从网址猜", () => {
+  assert.equal(fileNameOfUrl("https://example.com/a/b.png?y=1"), "b.png");
+  assert.equal(fileNameOfUrl("https://example.com/a/%E6%A1%A5.png"), "桥.png");
+  // 猜不出就给一个看着像话的名字，不猜路径
+  assert.equal(fileNameOfUrl("https://example.com/"), "图片");
+  assert.equal(fileNameOfUrl("https://example.com"), "example.com");
+  // 坏编码原样用，不抛
+  assert.equal(fileNameOfUrl("https://example.com/%ZZ"), "%ZZ");
 });

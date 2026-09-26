@@ -49,6 +49,32 @@ export function vaultKeyOf(source: string): string | null {
   }
 }
 
+/**
+ * 这是个可以下载的网址吗？是就原样给出（另存网页图片那条路只认 http/https）。
+ */
+export function httpUrlOf(source: string): string | null {
+  const trimmed = source.trim();
+  return trimmed.startsWith("http://") || trimmed.startsWith("https://") ? trimmed : null;
+}
+
+/**
+ * 从一个网址猜另存时的默认文件名：取路径最后一段、去掉查询串与片段。
+ *
+ * 猜不出就给"图片" —— 这里图的是"默认名看着像话"，不值得为它做太多推理。
+ * 坏编码不抛：文件名而已，原样用就行。
+ */
+export function fileNameOfUrl(url: string): string {
+  const path = (url.split("?")[0] ?? "").split("#")[0] ?? "";
+  const last = path.split("/").filter((piece) => piece !== "").pop() ?? "";
+  let name = last;
+  try {
+    name = decodeURIComponent(last);
+  } catch {
+    // 坏编码就用原样
+  }
+  return name === "" ? "图片" : name;
+}
+
 /** 笔记里引用这个附件时该写什么：图片写 markdown 图，其它写成链接 */
 export function fileReferenceOf(file: { name: string; mime: string }): string {
   const name = file.name;

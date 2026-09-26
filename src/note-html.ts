@@ -7,8 +7,8 @@
 //! 行为该由同一处决定。
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { type MenuItem, openMenu } from "./context-menu";
-import { saveVaultFile } from "./file-save";
-import { FILE_SCHEME, fileTargetOf, vaultKeyOf } from "./file-links";
+import { saveRemoteFile, saveVaultFile } from "./file-save";
+import { FILE_SCHEME, fileTargetOf, httpUrlOf, vaultKeyOf } from "./file-links";
 import { viewImage } from "./image-viewer";
 
 /**
@@ -48,13 +48,25 @@ function attachContextMenu(root: HTMLElement) {
     if (target instanceof HTMLImageElement) {
       items.push({ label: "看大图", run: () => viewImage(target.src, target.alt) });
       items.push({ label: "复制图片地址", run: () => writeText(target.src) });
-      // 只有仓库里的文件才谈得上"另存"：外链图片的字节拿不到（跨域）
-      const key = vaultKeyOf(target.getAttribute("src") ?? "");
+      const source = target.getAttribute("src") ?? "";
+      const key = vaultKeyOf(source);
+      const remote = httpUrlOf(source);
       if (key) {
-        items.push({ label: "另存为…", run: () => {
-          // 菜单已经关掉了，出错只能直接弹一句：这里没有"页面上"可以写
-          saveVaultFile(key).catch((error) => window.alert(String(error)));
-        } });
+        items.push({
+          label: "另存为…",
+          run: () => {
+            // 菜单已经关掉了，出错只能直接弹一句：这里没有"页面上"可以写
+            saveVaultFile(key).catch((error) => window.alert(String(error)));
+          },
+        });
+      } else if (remote) {
+        // 网上的图片：由**后端**下载（前端的 fetch 会被跨域拦住）
+        items.push({
+          label: "另存为…",
+          run: () => {
+            saveRemoteFile(remote).catch((error) => window.alert(String(error)));
+          },
+        });
       }
     } else if (target instanceof HTMLAnchorElement) {
       // 内部链接上写的是笔记地址（`data-title`），外部链接就是 href
