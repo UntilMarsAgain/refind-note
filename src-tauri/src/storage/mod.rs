@@ -1046,20 +1046,31 @@ impl Vault {
             return Ok(Address::Empty);
         }
 
-        // 虚拟命名空间 `special:`：不对应笔记文件，交给前端渲染特殊页面。
+        // 虚拟命名空间（`special:` 及其别名）：不对应笔记文件，交给前端渲染特殊页面。
         // 优先于笔记形态判断；标题里不允许冒号，所以不可能有笔记叫这个名字。
-        // ⚠️ 这里必须用 get(..n) 而不是 &raw[..n]：后者按**字节**切，中文标题（如
-        // 「平陆运河」12 字节）会让切口落在字符中间直接 panic；而这个 panic 发生在
-        // GTK 回调里不能 unwind，会把整个应用 abort。
-        if let Some(rest) = strip_prefix_ci(raw, "special:") {
+        //
+        // **走命名空间表，而不是写死 `"special:"`** —— 给 special 配了别名之后，别名同样
+        // 要能进这一支。写死的话 `特殊:settings` 会掉进普通笔记解析，最后报「标题里有冒号」，
+        // 让人以为别名没配上。
+        //
+        // 顺带说明为什么只认 special：跨站命名空间也是"非存储"的，但它的地址不该被当成
+        // 特殊页面（那会跑到不存在的页面上）。
+        let special = raw
+            .split(['@', '#'])
+            .next()
+            .unwrap_or("")
+            .split_once(':')
+            .and_then(|(prefix, rest)| {
+                self.table
+                    .lookup(prefix)
+                    .filter(|item| item.id == crate::title::SPECIAL_NS)
+                    .map(|_| rest.trim().to_string())
+            });
+
+        if let Some(rest) = special {
             // 特殊页面**没有状态**：`special:newtab@edit` 这类把状态裁掉（不当错误）。
-            let page = rest
-                .split(['@', '#'])
-                .next()
-                .unwrap_or("")
-                .trim()
-                .to_ascii_lowercase();
-            let section = rest
+            let page = rest.trim().to_ascii_lowercase();
+            let section = raw
                 .split_once('#')
                 .map(|(_, tail)| tail.trim())
                 .filter(|value| !value.is_empty());
@@ -1350,6 +1361,27 @@ impl Vault {
             count += 1;
         }
         Ok(count)
+    }
+
+    /// 改一个命名空间的别名（增、删、一次给多个都用它）。
+    ///
+    /// 名称与标识都不动 —— 别名只是"另外几个也能写的前缀"。保留的两个（主命名空间与
+    /// `special`）**也可以有别名**：给主命名空间配 `主`，`[[主:某页]]` 就落在主命名空间。
+    pub fn update_namespace_aliases(
+        &mut self,
+        key: &str,
+        aliases: Vec<String>,
+    ) -> Result<(), VaultError> {
+        let id = self.namespace_id(key);
+        let mut table = (*self.table).clone();
+        let Some(item) = table.items.iter_mut().find(|item| item.id == id) else {
+            return Err(VaultError::BadAddress(format!("命名空间「{key}」不存在")));
+        };
+        item.aliases = aliases;
+        // 先校验、通过了才替换：重名与非法字符都在这里拦下
+        table.validate().map_err(VaultError::BadAddress)?;
+        self.table = Arc::new(table);
+        self.save_namespaces()
     }
 
     /// 给命名空间改名。
@@ -2362,12 +2394,6 @@ pub fn default_root() -> Result<PathBuf, VaultError> {
 /// 大小写不敏感地去掉 ASCII 前缀。
 ///
 /// 刻意用 `get(..n)`：直接切 `&value[..n]` 会在多字节字符中间 panic。
-fn strip_prefix_ci<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
-    let head = value.get(..prefix.len())?;
-    head.eq_ignore_ascii_case(prefix)
-        .then(|| &value[prefix.len()..])
-}
-
 /// 现有的特殊页面。不在这里面的 `special:` 地址直接报「不存在」。
 pub(crate) const SPECIAL_PAGES: [&str; 6] =
     ["newtab", "settings", "all", "random", "gc", "trash"];
@@ -3180,9 +3206,19 @@ mod tests {
             let _ = temp.vault.validate_title(title);
         }
 
-        // 大小写不敏感的前缀判断本身也要能处理多字节
-        assert!(strip_prefix_ci("Special:newtab", "special:").is_some());
-        assert!(strip_prefix_ci("特殊:newtab", "special:").is_none());
+        // 前缀判断本身也要能处理多字节（这里曾按字节切，直接 panic）。
+        // 现在前缀解析走命名空间表，所以用**行为**来断言，而不是测某个内部函数。
+        assert!(
+            matches!(
+                temp.vault.parse_address("Special:newtab").unwrap(),
+                Address::Special { .. }
+            ),
+            "特殊页面前缀大小写不敏感"
+        );
+        assert!(
+            temp.vault.parse_address("特殊:newtab").is_err(),
+            "没登记过的前缀不是命名空间"
+        );
     }
 
     /// 数据模型：**文件名是纯 ASCII id，标题只存在 titles.json 里**
@@ -4066,6 +4102,81 @@ mod tests {
             !html.contains("data-missing"),
             "跨站链接不该被判成红链（那是本仓库有没有这一页的事）：{html}"
         );
+    }
+
+    /// 别名可增可减；保留的两个也能配别名（special 的别名要真的路由过去）；
+    /// 主命名空间可以清空
+    #[test]
+    fn aliases_are_editable_everywhere() {
+        let mut temp = TempVault::new();
+        temp.vault.add_namespace("help", Vec::new(), None).unwrap();
+        temp.vault.create("help:条目").unwrap();
+        temp.vault.commit("help:条目", "正文", None, 0).unwrap();
+
+        // 一次给两个别名，两个都认
+        temp.vault
+            .update_namespace_aliases("help", vec!["帮助".to_string(), "百科".to_string()])
+            .unwrap();
+        for alias in ["帮助", "百科"] {
+            let address = format!("{alias}:条目");
+            match temp.vault.parse_address(&address).unwrap() {
+                Address::Note { title, .. } => assert_eq!(title, "help:条目"),
+                other => panic!("{address} → {other:?}"),
+            }
+        }
+
+        // 删到一个：去掉的那个不再认
+        temp.vault
+            .update_namespace_aliases("help", vec!["帮助".to_string()])
+            .unwrap();
+        assert!(temp.vault.parse_address("百科:条目").is_err(), "别名已删掉");
+
+        // 别名之间不许重复（大小写与空白不影响判重）
+        assert!(temp
+            .vault
+            .update_namespace_aliases("help", vec!["帮助".to_string(), " 帮助 ".to_string()])
+            .is_err());
+
+        // special 的别名要真的路由到特殊页面
+        temp.vault
+            .update_namespace_aliases("special", vec!["特殊".to_string()])
+            .unwrap();
+        match temp.vault.parse_address("特殊:gc").unwrap() {
+            Address::Special { page, .. } => assert_eq!(page, "gc"),
+            other => panic!("{other:?}"),
+        }
+
+        // 主命名空间也能配别名：`主:某页` 落在主命名空间。
+        // 没建过那一页时应当是"缺失"，而不是报标题非法 —— 这说明前缀被正确认成了
+        // 主命名空间（主命名空间没有前缀，所以显示标题里看不到它）。
+        temp.vault
+            .update_namespace_aliases("0", vec!["主".to_string()])
+            .unwrap();
+        match temp.vault.parse_address("主:不存在的页").unwrap() {
+            Address::Missing { title, .. } => assert_eq!(title, "不存在的页"),
+            other => panic!("{other:?}"),
+        }
+        temp.vault.create("主:另一页").unwrap();
+        temp.vault.commit("主:另一页", "正文", None, 0).unwrap();
+        match temp.vault.parse_address("主:另一页").unwrap() {
+            Address::Note { title, .. } => assert_eq!(title, "另一页"),
+            other => panic!("{other:?}"),
+        }
+
+        // 主命名空间可以**清空**（它只不能改名与删除）
+        temp.vault.create("常规条目").unwrap();
+        temp.vault.commit("常规条目", "正文", None, 0).unwrap();
+        assert!(temp.vault.empty_namespace("0").unwrap() >= 1);
+        assert!(
+            !temp
+                .vault
+                .list_notes()
+                .unwrap()
+                .iter()
+                .any(|item| item.title == "常规条目"),
+            "清空之后主命名空间里不该还有它"
+        );
+        assert!(temp.vault.delete_namespace("0").is_err());
     }
 
     #[test]
