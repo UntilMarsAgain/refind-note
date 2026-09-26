@@ -521,3 +521,117 @@
   right: 0;
   background: var(--accent-tint);
 }
+
+/* ---------- 内置模板：aside / fields / banner / image ---------- */
+
+/*
+ * `::aside` 信息栏：右侧浮动，正文绕着它走 —— 这是信息栏该有的样子。
+ * 窄屏取消浮动：浮动的栏在窄屏上会把正文挤成一条。
+ */
+.note-body .aside {
+  float: right;
+  width: min(320px, 42%);
+  margin: 0 0 16px 20px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.note-body .aside__title {
+  margin: 0 0 8px;
+  font-weight: 600;
+  text-align: center;
+}
+
+@media (max-width: 720px) {
+  .note-body .aside {
+    float: none;
+    width: auto;
+    margin: 1em 0;
+  }
+}
+
+/* `::fields` 左右两栏的属性表 */
+.note-body .fields {
+  width: 100%;
+  margin: 1em 0;
+  border-collapse: collapse;
+}
+
+.note-body .fields th,
+.note-body .fields td {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  font-size: 0.95em;
+}
+
+.note-body .fields th {
+  width: 34%;
+  color: var(--text-dim);
+  font-weight: 400;
+  background: var(--surface);
+}
+
+/* `::banner` 方框标题带 */
+.note-body .banner {
+  margin: 1.2em 0;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--accent-solid);
+  color: var(--text);
+  text-align: center;
+  font-weight: 600;
+}
+
+/* `::image` 图片：尺寸是上限，位置由 align 决定 */
+.note-body .image {
+  margin: 1.2em 0;
+}
+
+.note-body .image img {
+  display: block;
+  border-radius: 6px;
+}
+
+.note-body .image figcaption {
+  margin-top: 6px;
+  color: var(--text-dim);
+  font-size: 0.92em;
+}
+
+.note-body .image--center {
+  text-align: center;
+}
+
+.note-body .image--center img {
+  margin-inline: auto;
+}
+
+.note-body .image--left {
+  text-align: left;
+}
+
+.note-body .image--left img {
+  margin-right: auto;
+}
+
+.note-body .image--right {
+  text-align: right;
+}
+
+.note-body .image--right img {
+  margin-left: auto;
+}
+
+/* 模板用法有问题：与"未知模板"同一套外观，只多一句为什么 */
+.note-body .template--problem {
+  border-left-color: var(--accent);
+}
+
+.note-body .template__why {
+  margin: 0 0 10px;
+  color: var(--text);
+}

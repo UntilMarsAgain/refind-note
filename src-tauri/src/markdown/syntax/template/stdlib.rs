@@ -2,7 +2,7 @@
 //!
 //! 与指令表同样的规矩：**有什么模板只写在这一个地方**（下面那张表）。
 //! 加一个模板 = 写一个渲染器 + 在表里加一行。
-use super::dispatch::render_unknown;
+use super::dispatch::{render_problem, render_unknown};
 use super::dispatch::TemplateRenderer;
 use super::fill;
 use super::parse::Template;
@@ -12,6 +12,10 @@ use markdown_it::{Node, Renderer};
 pub static TEMPLATES: &[(&str, TemplateRenderer)] = &[
     ("quote", render_quote),
     ("code", render_code),
+    ("aside", render_aside),
+    ("fields", render_fields),
+    ("banner", render_banner),
+    ("image", render_image),
     ("css", render_css),
     ("html", render_html),
 ];
@@ -43,6 +47,166 @@ fn render_quote(template: &Template, node: &Node, fmt: &mut dyn Renderer) {
     fmt.cr();
     fmt.close("blockquote");
     fmt.cr();
+}
+
+/// `::aside title="十四门桥"` —— 右侧的信息栏，**内容照常按 markdown 渲染**。
+///
+/// 用 `node.children`（已经解析好的内容）而不是原文：信息栏里也要能写链接、强调、列表。
+/// 它是一条**浮动**的栏：正文会绕着它走，这是信息栏该有的样子；窄屏上由样式取消浮动。
+fn render_aside(template: &Template, node: &Node, fmt: &mut dyn Renderer) {
+    fmt.cr();
+    fmt.open("aside", &[("class", "aside".to_string())]);
+    if let Some(title) = template.param("title") {
+        fmt.open("p", &[("class", "aside__title".to_string())]);
+        fmt.text(title);
+        fmt.close("p");
+    }
+    fmt.cr();
+    fmt.contents(&node.children);
+    fmt.cr();
+    fmt.close("aside");
+    fmt.cr();
+}
+
+/// `::fields` —— 左右两栏的属性表：每行 `标签 | 值`。
+///
+/// 值用的是**原文**（不解析 markdown）：这一栏是"查参数"用的，一行一项最清楚。
+/// 没有 `|` 的行把整行当标签、值留空 —— 宁可少一栏，也不丢作者写下的字。
+fn render_fields(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
+    fmt.cr();
+    fmt.open("table", &[("class", "fields".to_string())]);
+    fmt.open("tbody", &[]);
+    for line in template.body.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let (label, value) = match line.split_once('|') {
+            Some((label, value)) => (label.trim(), value.trim()),
+            None => (line, ""),
+        };
+        fmt.cr();
+        fmt.open("tr", &[]);
+        fmt.open("th", &[]);
+        fmt.text(label);
+        fmt.close("th");
+        fmt.open("td", &[]);
+        fmt.text(value);
+        fmt.close("td");
+        fmt.close("tr");
+    }
+    fmt.cr();
+    fmt.close("tbody");
+    fmt.close("table");
+    fmt.cr();
+}
+
+/// `::banner` —— 一条方框标题带（信息栏里那种居中的标题条）。
+///
+/// 文案取自块内容（一行），也可以用 `text=` 给。名字取 `banner` 而不是"方框标题"之类：
+/// 它是一个**横条**，越短越不容易和别的模板混淆。
+fn render_banner(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
+    let text = match template.param("text") {
+        Some(text) => text.to_string(),
+        None => template.body.replace('\n', " ").trim().to_string(),
+    };
+    if text.is_empty() {
+        render_problem(template, fmt, "内容是空的：标题带要写一行字，或用 text=… 给");
+        return;
+    }
+    fmt.cr();
+    fmt.open("p", &[("class", "banner".to_string())]);
+    fmt.text(&text);
+    fmt.close("p");
+    fmt.cr();
+}
+
+/// `::image src=… align=left|center|right width=320 height=200 caption="说明"` —— 插入图片。
+///
+/// 尺寸是**上限**（`max-width` / `max-height`），图片不会被拉变形；数量与单位都受限
+/// （见 [`size_rule`]），免得有人拿尺寸参数往 `style` 里塞别的东西。
+/// 协议只挡能执行或能外传数据的三种：`javascript:` / `data:` / `vbscript:`。
+fn render_image(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
+    let Some(source) = template.param("src") else {
+        render_problem(template, fmt, "缺少 src=…：图片模板至少要给出图片地址");
+        return;
+    };
+    let lowered = source.trim().to_lowercase();
+    if ["javascript:", "data:", "vbscript:"]
+        .iter()
+        .any(|bad| lowered.starts_with(bad))
+    {
+        render_problem(
+            template,
+            fmt,
+            "src 用的是不允许的协议（javascript / data / vbscript 会被拒绝）",
+        );
+        return;
+    }
+
+    let align = match template.param("align").map(str::trim) {
+        Some("left") => "left",
+        Some("right") => "right",
+        _ => "center",
+    };
+
+    let mut style = String::new();
+    if let Some(rule) = template.param("width").and_then(|value| size_rule("max-width", value)) {
+        style.push_str(&rule);
+    }
+    if let Some(rule) = template
+        .param("height")
+        .and_then(|value| size_rule("max-height", value))
+    {
+        style.push_str(&rule);
+    }
+
+    fmt.cr();
+    fmt.open("figure", &[("class", format!("image image--{align}"))]);
+    fmt.cr();
+    let mut attrs: Vec<(&str, String)> = vec![
+        ("src", source.trim().to_string()),
+        (
+            "alt",
+            template.param("alt").unwrap_or("").trim().to_string(),
+        ),
+        // 长文里的图片不该抢首屏带宽
+        ("loading", "lazy".to_string()),
+    ];
+    if !style.is_empty() {
+        attrs.push(("style", style));
+    }
+    fmt.self_close("img", &attrs);
+    fmt.cr();
+    if let Some(caption) = template.param("caption") {
+        fmt.open("figcaption", &[]);
+        fmt.text(caption);
+        fmt.close("figcaption");
+        fmt.cr();
+    }
+    fmt.close("figure");
+    fmt.cr();
+}
+
+/// 尺寸参数 → 一条 CSS 声明。只认"数字 + 可选白名单单位"，别的写法一律不认。
+///
+/// 严格是有理由的：这个值会被写进 `style` 属性，宽松了就等于允许往里面塞任意声明
+/// （比如 `width="1px; background: url(//追踪地址)"`）。
+fn size_rule(name: &str, value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    let digits: String = trimmed
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit() || *ch == '.')
+        .collect();
+    if digits.is_empty() || digits.parse::<f64>().is_err() {
+        return None;
+    }
+    let unit = &trimmed[digits.len()..];
+    if !matches!(unit, "" | "px" | "%" | "em" | "rem" | "vh" | "vw") {
+        return None;
+    }
+    let unit = if unit.is_empty() { "px" } else { unit };
+    Some(format!("{name}: {digits}{unit};"))
 }
 
 /// `::code lang=rust lines=off start=10 highlight=2-3` —— 像 markdown 的代码块，

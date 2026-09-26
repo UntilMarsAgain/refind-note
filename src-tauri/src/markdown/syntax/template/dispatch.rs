@@ -98,9 +98,39 @@ pub(super) fn render_unknown(template: &Template, fmt: &mut dyn Renderer) {
     fmt.cr();
     fmt.open("div", &[("class", "template template--unknown".to_string())]);
     fmt.cr();
+    head(fmt, "未知模板", template);
+    fmt.cr();
+    body_as_code(template, fmt);
+    fmt.cr();
+    fmt.close("div");
+    fmt.cr();
+}
+
+/// 名字认识、但用法不对时的提示。
+///
+/// 与"未知模板"分开：一个是"没这个名字"，一个是"名字对、参数不对" ——
+/// 提示词要跟着这个区别走，否则作者会往错的方向查。
+pub(super) fn render_problem(template: &Template, fmt: &mut dyn Renderer, why: &str) {
+    fmt.cr();
+    fmt.open("div", &[("class", "template template--problem".to_string())]);
+    fmt.cr();
+    head(fmt, "模板用法有问题", template);
+    fmt.cr();
+    fmt.open("p", &[("class", "template__why".to_string())]);
+    fmt.text(why);
+    fmt.close("p");
+    fmt.cr();
+    body_as_code(template, fmt);
+    fmt.cr();
+    fmt.close("div");
+    fmt.cr();
+}
+
+/// 徽标 + 模板名 + 解析到的参数（回显成等号写法，一眼看出解析成了什么）
+fn head(fmt: &mut dyn Renderer, badge: &str, template: &Template) {
     fmt.open("p", &[("class", "template__head".to_string())]);
     fmt.open("span", &[("class", "template__badge".to_string())]);
-    fmt.text("未知模板");
+    fmt.text(badge);
     fmt.close("span");
     fmt.open("code", &[("class", "template__name".to_string())]);
     fmt.text(&template.name);
@@ -116,16 +146,15 @@ pub(super) fn render_unknown(template: &Template, fmt: &mut dyn Renderer) {
         fmt.close("code");
     }
     fmt.close("p");
-    fmt.cr();
-    // 内容原样给出来：写错了也不该让内容静静消失
+}
+
+/// 内容原样给出来（代码块）：写错了也不该让内容静静消失
+fn body_as_code(template: &Template, fmt: &mut dyn Renderer) {
     fmt.open("pre", &[]);
     fmt.open("code", &[]);
     fmt.text(&template.body);
     fmt.close("code");
     fmt.close("pre");
-    fmt.cr();
-    fmt.close("div");
-    fmt.cr();
 }
 
 #[cfg(test)]

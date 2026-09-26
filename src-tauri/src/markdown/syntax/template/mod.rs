@@ -281,6 +281,71 @@ mod tests {
     }
 
     #[test]
+    fn aside_renders_its_body_as_markdown() {
+        let html = render("::aside title=\"十四门桥\"\n  正文里的**强调**\n");
+        assert!(html.contains(r#"<aside class="aside">"#), "{html}");
+        assert!(html.contains("aside__title"), "{html}");
+        assert!(
+            html.contains("<strong>强调</strong>"),
+            "信息栏的内容仍按 markdown 解析：{html}"
+        );
+    }
+
+    #[test]
+    fn fields_split_label_and_value() {
+        let html = render("::fields\n  地址 | 福建省某村\n  分类 | 古建筑\n");
+        assert!(html.contains(r#"<table class="fields">"#), "{html}");
+        assert!(html.contains("<th>地址</th>"), "{html}");
+        assert!(html.contains("<td>福建省某村</td>"), "{html}");
+
+        // 没有 `|` 的行：整行当标签、值留空 —— 宁可少一栏，也不丢作者写下的字
+        let one = render("::fields\n  只有标签\n");
+        assert!(one.contains("<th>只有标签</th>"), "{one}");
+    }
+
+    #[test]
+    fn banner_takes_the_body_or_the_text_param() {
+        let html = render("::banner\n  福建省文物保护单位\n");
+        assert!(
+            html.contains(r#"<p class="banner">福建省文物保护单位</p>"#),
+            "{html}"
+        );
+        let param = render("::banner text=另一种写法\n");
+        assert!(param.contains("另一种写法"), "{param}");
+        // 空内容要给提示，而不是画一条空带
+        let empty = render("::banner\n");
+        assert!(empty.contains("template--problem"), "{empty}");
+    }
+
+    #[test]
+    fn image_carries_alignment_and_limits() {
+        let html = render("::image src=/tauri.svg align=right width=320 caption=\"桥体\"\n");
+        assert!(html.contains(r#"<figure class="image image--right">"#), "{html}");
+        assert!(html.contains(r#"src="/tauri.svg""#), "{html}");
+        assert!(html.contains("max-width: 320px"), "{html}");
+        assert!(html.contains("<figcaption>桥体</figcaption>"), "{html}");
+    }
+
+    #[test]
+    fn image_refuses_dangerous_sources_and_sneaky_sizes() {
+        // 危险协议：不渲染图片，只给提示
+        // （提示框里会**回显**参数原文，那是文本、不是属性 —— 所以断言针对"有没有 img"）
+        let bad = render("::image src=javascript:alert(1)\n");
+        assert!(!bad.contains("<img"), "危险协议不该渲染成图片：{bad}");
+        assert!(bad.contains("template--problem"), "{bad}");
+
+        // 尺寸只认"数字 + 可选单位"：塞别的声明一律不认，因此拼不出 style 属性
+        let sneaky =
+            render("::image src=/x.svg width=\"1px; background: url(//evil)\"\n");
+        assert!(!sneaky.contains("style="), "尺寸参数不该拼出 style 属性：{sneaky}");
+
+        // 没有 src：说清缺什么
+        let missing = render("::image\n");
+        assert!(missing.contains("template--problem"), "{missing}");
+        assert!(missing.contains("src"), "{missing}");
+    }
+
+    #[test]
     fn unknown_template_renders_a_box() {
         let html = render("::还没有的模板 标题=\"含 空格\" flag\n  内容一行\n");
         assert!(html.contains("template--unknown"), "{html}");
