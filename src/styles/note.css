@@ -489,3 +489,35 @@
   color: var(--text-dim);
   font-size: 0.92em;
 }
+
+/*
+ * `::code` 里被强调的行。
+ *
+ * 画的是**一层绝对定位的色带**，没有把代码拆成一行一个元素：拆行会破坏 highlight.js
+ * 已经生成的分词（它的 span 可能跨行），得不偿失。色带只按行高定位、不参与布局，
+ * 也不挡选中与复制（`pointer-events: none`）。
+ */
+.note-body pre.pre--marked {
+  position: relative;
+}
+
+.note-body pre.pre--marked code {
+  /* 代码压在色带之上：色带在背景，文字在它上面 */
+  position: relative;
+  z-index: 1;
+}
+
+.note-body .code-marks {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+}
+
+.note-body .code-mark {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: var(--accent-tint);
+}

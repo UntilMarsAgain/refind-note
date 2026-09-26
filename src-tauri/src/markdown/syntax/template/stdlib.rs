@@ -11,6 +11,7 @@ use markdown_it::{Node, Renderer};
 /// 全部标准模板。
 pub static TEMPLATES: &[(&str, TemplateRenderer)] = &[
     ("quote", render_quote),
+    ("code", render_code),
     ("css", render_css),
     ("html", render_html),
 ];
@@ -41,6 +42,43 @@ fn render_quote(template: &Template, node: &Node, fmt: &mut dyn Renderer) {
     }
     fmt.cr();
     fmt.close("blockquote");
+    fmt.cr();
+}
+
+/// `::code lang=rust lines=off start=10 highlight=2-3` —— 像 markdown 的代码块，
+/// 但能控制行号与要强调的行。
+///
+/// 这里**只输出代码原文与几个 `data-*` 提示**：行号列与强调色带由前端落地。
+/// 为什么不在这里生成行号或拆行：拆行会破坏 highlight.js 的分词（它的 span 可能跨行），
+/// 而"界面怎么显示"本来就属于前端。
+fn render_code(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
+    let language = template.param("lang").unwrap_or("").trim();
+
+    let mut attrs: Vec<(&str, String)> = vec![("class", "template-code".to_string())];
+    if let Some(lines) = template.param("lines") {
+        let off = matches!(lines.trim(), "off" | "false" | "no");
+        attrs.push(("data-lines", if off { "off" } else { "on" }.to_string()));
+    }
+    if let Some(start) = template.param("start") {
+        attrs.push(("data-line-start", start.trim().to_string()));
+    }
+    if let Some(highlight) = template.param("highlight") {
+        attrs.push(("data-highlight", highlight.trim().to_string()));
+    }
+
+    let code_attrs: Vec<(&str, String)> = if language.is_empty() {
+        Vec::new()
+    } else {
+        vec![("class", format!("language-{language}"))]
+    };
+
+    fmt.cr();
+    fmt.open("pre", &attrs);
+    fmt.open("code", &code_attrs);
+    // 原文照收：代码里的 markdown 记号**不该**被解析
+    fmt.text(&template.body);
+    fmt.close("code");
+    fmt.close("pre");
     fmt.cr();
 }
 

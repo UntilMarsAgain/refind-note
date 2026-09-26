@@ -260,6 +260,27 @@ mod tests {
     }
 
     #[test]
+    fn code_template_carries_the_frontend_hints() {
+        let html = render(
+            "::code lang=rust lines=off start=10 highlight=2-3\n  fn main() {}\n  // 注释\n",
+        );
+        assert!(html.contains(r#"<pre class="template-code""#), "{html}");
+        assert!(html.contains(r#"data-lines="off""#), "{html}");
+        assert!(html.contains(r#"data-line-start="10""#), "{html}");
+        assert!(html.contains(r#"data-highlight="2-3""#), "{html}");
+        assert!(html.contains(r#"<code class="language-rust">"#), "{html}");
+        assert!(html.contains("fn main() {}"), "{html}");
+    }
+
+    #[test]
+    fn code_template_does_not_parse_markdown() {
+        // 代码里的记号不该被当成 markdown（这是"像代码块"的关键）
+        let html = render("::code\n  **不该变粗**\n");
+        assert!(html.contains("**不该变粗**"), "{html}");
+        assert!(!html.contains("<strong>"), "{html}");
+    }
+
+    #[test]
     fn unknown_template_renders_a_box() {
         let html = render("::还没有的模板 标题=\"含 空格\" flag\n  内容一行\n");
         assert!(html.contains("template--unknown"), "{html}");
