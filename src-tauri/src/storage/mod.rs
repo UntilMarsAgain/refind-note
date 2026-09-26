@@ -19,6 +19,7 @@ use crate::title::{LinkResolver, NamespaceTable, ParsedTitle};
 mod atomic;
 mod api;
 mod config;
+mod files;
 // 增量编解码已就绪并有测试；接线进读写路径是下一步，所以先允许「暂未使用」
 #[allow(dead_code)]
 mod delta;
@@ -32,11 +33,12 @@ mod trash;
 mod version;
 
 pub use api::{
-    Address, CommandInfo, DiffResult, Draft, GcReport, LoadOutcome, MaintenanceReport, Note,
-    NoteSummary, PurgeReport, RevisionContent, RevisionSummary, TrashEntry, VaultSettings, Via,
-    DebugReport, RenderReport,
+    Address, CommandInfo, DiffResult, Draft, FileEntry, GcReport, LoadOutcome, MaintenanceReport,
+    Note, NoteSummary, PurgeReport, RevisionContent, RevisionSummary, TrashEntry, VaultSettings,
+    Via, DebugReport, RenderReport,
 };
 pub use config::VaultConfig;
+pub use files::mime_of;
 pub use error::VaultError;
 pub use event::{
     drafts_of, fold, next_rev, revision_id, revision_of, short_revision_id, Event,
@@ -108,6 +110,7 @@ impl Vault {
         fs::create_dir_all(root.join("notes"))?;
         fs::create_dir_all(root.join("blobs"))?;
         fs::create_dir_all(root.join("trash"))?;
+        fs::create_dir_all(root.join("files"))?;
 
         // 名字表：不存在就写一份空的
         let titles_path = root.join("titles.json");
@@ -564,6 +567,7 @@ impl Vault {
         let appearance = self.preferences();
         VaultSettings {
             root: self.root.display().to_string(),
+            files_dir: self.files_dir().display().to_string(),
             model_version: self.config.model_version.clone(),
             capital_links: self.config.capital_links,
             max_title_bytes: self.config.max_title_bytes,

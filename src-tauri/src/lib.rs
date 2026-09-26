@@ -9,11 +9,13 @@ mod storage;
 mod tasks;
 mod title;
 
+use std::fs;
+use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 use storage::{
-    Address, CommandInfo, Namespace, DiffResult, Draft, GcReport, LoadOutcome, MaintenanceReport, Note, NoteSummary,
-    PurgeReport, RevisionContent, RevisionSummary, TrashEntry, Vault, VaultSettings,
-    DebugReport, RenderReport,
+    Address, CommandInfo, Namespace, DiffResult, Draft, FileEntry, GcReport, LoadOutcome,
+    MaintenanceReport, Note, NoteSummary, PurgeReport, RevisionContent, RevisionSummary,
+    TrashEntry, Vault, VaultSettings, DebugReport, RenderReport,
 };
 use tauri::Manager;
 
@@ -43,6 +45,67 @@ fn open() -> Result<Vault, String> {
 }
 
 // ---------------------------------------------------------------- 设置
+
+#[tauri::command]
+fn list_files() -> Result<Vec<FileEntry>, String> {
+    Ok(open()?.list_files().map_err(|error| error.to_string())?)
+}
+
+/// 收进一个附件。`path` 是系统文件选择器给的本机路径 —— **Rust 直接读**，
+/// 不让字节走一遍 IPC：一张几 MB 的图转成 JSON 数组再传，既不必要也慢。
+#[tauri::command]
+fn upload_file(path: String) -> Result<FileEntry, String> {
+    let source = PathBuf::from(&path);
+    let bytes = fs::read(&source).map_err(|error| format!("读不到这个文件：{error}"))?;
+    let name = source
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| "未命名".to_string());
+    open()?
+        .add_file(&name, &bytes)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn delete_file(id: String) -> Result<(), String> {
+    open()?.delete_file(&id).map_err(|error| error.to_string())
+}
+
+/// 取附件：`refind://localhost/files/<id>`。
+///
+/// 用自定义方案而不是 Tauri 的资产协议：这里的映射完全由程序掌握 —— 请求里只有**标识**，
+/// 真正的路径由 `files.json` 决定，所以任何形式的路径穿越都不成立；也不必给资产协议
+/// 配一个能覆盖整个仓库的作用域。
+fn serve_file(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<Vec<u8>> {
+    let not_found = || {
+        tauri::http::Response::builder()
+            .status(404)
+            .body(Vec::new())
+            .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
+    };
+
+    let Some(id) = request.uri().path().strip_prefix("/files/") else {
+        return not_found();
+    };
+    let Ok(vault) = open() else {
+        return not_found();
+    };
+    let Ok(Some(path)) = vault.file_path_by_id(id) else {
+        return not_found();
+    };
+    let Ok(bytes) = fs::read(&path) else {
+        return not_found();
+    };
+    let extension = path
+        .extension()
+        .map(|value| value.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    tauri::http::Response::builder()
+        .status(200)
+        .header("Content-Type", storage::mime_of(&extension))
+        .body(bytes)
+        .unwrap_or_else(|_| not_found())
+}
 
 #[tauri::command]
 fn get_settings() -> Result<VaultSettings, String> {
@@ -490,6 +553,7 @@ fn compare_revisions(title: String, from: u64, to: u64) -> Result<DiffResult, St
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .register_uri_scheme_protocol("refind", |_ctx, request| serve_file(&request))
         // 单实例：同一个登录会话里只允许跑一个重逢笔记。
         // 放在最前面注册，这样第二次启动会在其它插件初始化之前就退出，
         // 只把已有窗口拉到前面（而不是两个进程去抢同一个仓库）。
@@ -524,6 +588,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_settings,
             update_settings,
+            list_files,
+            upload_file,
+            delete_file,
             special_pages,
             render_markdown,
             load_note_no_command,

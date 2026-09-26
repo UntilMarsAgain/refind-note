@@ -2,7 +2,7 @@
 //!
 //! 单独放着，是为了让「对外形状」和「内部实现」分开：改内部不必动前端契约。
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------- 对外结构
 
@@ -308,6 +308,8 @@ pub struct GcReport {
 pub struct VaultSettings {
     /// 仓库根目录（界面上显示出来，方便直接去看文件）
     pub root: String,
+    /// 附件目录（界面拼取文件地址时要它）
+    pub files_dir: String,
     /// 数据库模型版本（`大.中.小`；语义见 `storage::version`）
     pub model_version: String,
     /// 标题首字母是否强制大写（对应 MediaWiki 的 $wgCapitalLinks）
@@ -328,4 +330,20 @@ pub struct VaultSettings {
     pub reading_width: u32,
     /// 界面缩放（1.0 = 100%）
     pub zoom: f64,
+}
+
+/// 一个附件（上传的图片、文档……）。
+///
+/// `name` 是**原始文件名**，笔记里就用它引用（`::image src=图片.png`）——
+/// 磁盘上的名字则是生成的标识，见 `storage::files` 的说明。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileEntry {
+    pub id: String,
+    pub name: String,
+    pub size: u64,
+    pub sha256: String,
+    pub uploaded: String,
+    pub mime: String,
+    /// 取文件的地址（程序自己的 `refind:` 方案）
+    pub url: String,
 }

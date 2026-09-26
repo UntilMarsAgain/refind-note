@@ -9,13 +9,15 @@ use std::sync::atomic::{AtomicU32, Ordering};
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
 /// 测试用的临时仓库
-struct TempVault {
-    vault: Vault,
-    root: PathBuf,
+/// 测试用的临时仓库。`pub(super)` 是给兄弟模块（如 `files`）的测试用的 ——
+/// 附件那套逻辑与笔记互不相干，测试也该各在各家。
+pub(super) struct TempVault {
+    pub(super) vault: Vault,
+    pub(super) root: PathBuf,
 }
 
 impl TempVault {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let root =
             std::env::temp_dir().join(format!("refind-vault-{}-{n}", std::process::id()));
