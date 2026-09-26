@@ -9,6 +9,9 @@
  *
  * 刻意不用 `window.prompt` / `window.confirm`：在系统 WebView 里不可靠。改名用行内输入，
  * 清空与删除用**两步确认**（按钮先变成"确认…"，再点一次才真的执行）。
+ *
+ * 注意：模板里**不要用反引号模板字符串** —— Vue 的模板表达式解析不了它们，整个模板会
+ * 绑定失败（本项目在 NoteEditor 上踩过一次，这次又踩了一次）。要拼接就用 `+`。
  */
 import { onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
@@ -34,7 +37,7 @@ const busy = ref("");
 /** 改名中的那一项，以及它的输入 */
 const editingId = ref("");
 const editingName = ref("");
-/** 已按过一次"确认"的破坏性操作（key = `清空:id` / `删除:id`） */
+/** 已按过一次"确认"的破坏性操作（`清空:<标识>` / `删除:<标识>`） */
 const armed = ref("");
 
 const newName = ref("");
@@ -48,6 +51,21 @@ function labelOf(item: Namespace): string {
 /** 主命名空间与 special：不能改名、不能清空、不能删除 */
 function isReserved(item: Namespace): boolean {
   return item.id === MAIN || item.id === SPECIAL;
+}
+
+/**
+ * 每一项的**可导航 id**：`ns-<名称>`（空白折成 `-`）。
+ *
+ * 设置项各有 id，命名空间也该有 —— 于是 `special:settings#ns-help` 能直接跳到它。
+ */
+function anchorOf(item: Namespace): string {
+  if (item.id === MAIN) {
+    return "ns-main";
+  }
+  if (item.id === SPECIAL) {
+    return "ns-special";
+  }
+  return "ns-" + item.name.trim().replace(/\s+/g, "-");
 }
 
 function kindOf(item: Namespace): string {
@@ -126,7 +144,7 @@ async function submitRename(item: Namespace) {
 }
 
 function empty(item: Namespace) {
-  const key = `清空:${item.id}`;
+  const key = "清空:" + item.id;
   if (armed.value !== key) {
     armed.value = key;
     return;
@@ -137,7 +155,7 @@ function empty(item: Namespace) {
 }
 
 function remove(item: Namespace) {
-  const key = `删除:${item.id}`;
+  const key = "删除:" + item.id;
   if (armed.value !== key) {
     armed.value = key;
     return;
@@ -151,96 +169,123 @@ function remove(item: Namespace) {
 <template>
   <div class="ns">
     <p class="ns__lead">
-      命名空间用名称作为前缀（<code>帮助:入门</code>）。标识与名称分开：**改名不会移动任何文件**。
-      配了站点地址的就是跨站命名空间，<code>[[zhwiki:NASA]]</code> 会渲染成绿链。
+      命名空间就是名称前缀（<code>帮助:入门</code>）。<strong>标识与名称分开</strong>，
+      所以改名不会移动任何文件。配了站点地址的是跨站命名空间，
+      <code>[[zhwiki:NASA]]</code> 会渲染成绿链。
     </p>
 
     <p v-if="error" class="ns__error">{{ error }}</p>
     <p v-else-if="loading" class="ns__hint">正在读取…</p>
 
-    <ul v-else class="ns__list">
-      <li v-for="item in items" :key="item.id" class="ns__item">
-        <div class="ns__head">
-          <span class="ns__name">{{ labelOf(item) }}</span>
-          <span class="ns__kind">{{ kindOf(item) }}</span>
-          <span v-if="item.aliases.length" class="ns__aliases">
-            别名：{{ item.aliases.join("、") }}
-          </span>
-          <span v-if="item.site" class="ns__site">{{ item.site }}</span>
+    <template v-else>
+      <div class="ns__table">
+        <div class="ns__head-row" aria-hidden="true">
+          <span>名称</span>
+          <span>别名</span>
+          <span>类型 / 跨站地址</span>
+          <span class="ns__head-actions">操作</span>
         </div>
 
-        <div class="ns__actions">
-          <template v-if="editingId === item.id">
-            <input
-              v-model="editingName"
-              class="ns__input"
-              type="text"
-              @keydown.enter.prevent="submitRename(item)"
-              @keydown.esc="editingId = ''"
-            />
-            <button class="ns__btn" type="button" @click="submitRename(item)">确定</button>
-            <button class="ns__btn" type="button" @click="editingId = ''">取消</button>
-          </template>
+        <div v-for="item in items" :id="anchorOf(item)" :key="item.id" class="ns__item">
+          <div class="ns__cell ns__cell--name">
+            <span class="ns__name">{{ labelOf(item) }}</span>
+            <code class="ns__id">{{ item.id }}</code>
+          </div>
 
-          <template v-else-if="!isReserved(item)">
-            <button
-              class="ns__btn"
-              type="button"
-              :disabled="busy === item.id"
-              @click="startRename(item)"
-            >
-              改名
-            </button>
-            <button
-              class="ns__btn"
-              type="button"
-              :disabled="busy === item.id"
-              @click="empty(item)"
-            >
-              {{ armed === `清空:${item.id}` ? "确认清空" : "清空" }}
-            </button>
-            <button
-              class="ns__btn ns__btn--danger"
-              type="button"
-              :disabled="busy === item.id"
-              @click="remove(item)"
-            >
-              {{ armed === `删除:${item.id}` ? "确认删除" : "删除" }}
-            </button>
-          </template>
+          <div class="ns__cell">
+            <span v-if="item.aliases.length" class="ns__chips">
+              <span v-for="alias in item.aliases" :key="alias" class="ns__chip">
+                {{ alias }}
+              </span>
+            </span>
+            <span v-else class="ns__dim">—</span>
+          </div>
 
-          <span v-else class="ns__locked">不可改名 / 清空 / 删除</span>
+          <div class="ns__cell">
+            <span class="ns__kind">{{ kindOf(item) }}</span>
+            <code v-if="item.site" class="ns__site">{{ item.site }}</code>
+          </div>
+
+          <div class="ns__cell ns__cell--actions">
+            <template v-if="editingId === item.id">
+              <input
+                v-model="editingName"
+                class="ns__input"
+                type="text"
+                placeholder="新名称"
+                @keydown.enter.prevent="submitRename(item)"
+                @keydown.esc="editingId = ''"
+              />
+              <button class="ns__btn" type="button" @click="submitRename(item)">确定</button>
+              <button class="ns__btn" type="button" @click="editingId = ''">取消</button>
+            </template>
+
+            <template v-else-if="!isReserved(item)">
+              <button
+                class="ns__btn"
+                type="button"
+                :disabled="busy === item.id"
+                @click="startRename(item)"
+              >
+                改名
+              </button>
+              <button
+                class="ns__btn"
+                type="button"
+                :disabled="busy === item.id"
+                @click="empty(item)"
+              >
+                {{ armed === '清空:' + item.id ? '确认清空' : '清空' }}
+              </button>
+              <button
+                class="ns__btn ns__btn--danger"
+                type="button"
+                :disabled="busy === item.id"
+                @click="remove(item)"
+              >
+                {{ armed === '删除:' + item.id ? '确认删除' : '删除' }}
+              </button>
+            </template>
+
+            <span v-else class="ns__locked">不可改名 / 清空 / 删除</span>
+          </div>
         </div>
-      </li>
-    </ul>
+      </div>
 
-    <div class="ns__add">
-      <input v-model="newName" class="ns__input" type="text" placeholder="名称（如 help）" />
-      <input
-        v-model="newAliases"
-        class="ns__input"
-        type="text"
-        placeholder="别名，逗号分隔（可留空）"
-      />
-      <input
-        v-model="newSite"
-        class="ns__input ns__input--wide"
-        type="text"
-        placeholder="跨站地址模板，可留空（如 https://zh.wikipedia.org/wiki/$1）"
-      />
-      <button
-        class="ns__btn ns__btn--primary"
-        type="button"
-        :disabled="busy === 'add' || !newName.trim()"
-        @click="add"
-      >
-        添加命名空间
-      </button>
-    </div>
-    <p class="ns__hint">
-      名称与别名都不许重复（大小写与空白不影响判重），也不许有 <code>/</code> <code>:</code>
-      <code>@</code> <code>#</code> 等符号。清空与删除都会把页面送进回收站。
-    </p>
+      <h3 class="ns__add-title">新增命名空间</h3>
+      <div class="ns__add">
+        <label class="ns__field">
+          <span>名称</span>
+          <input v-model="newName" class="ns__input" type="text" placeholder="如 help" />
+        </label>
+        <label class="ns__field">
+          <span>别名（逗号分隔，可留空）</span>
+          <input v-model="newAliases" class="ns__input" type="text" placeholder="如 帮助, 百科" />
+        </label>
+        <label class="ns__field ns__field--wide">
+          <span>跨站地址模板（可留空；填了就是跨站命名空间）</span>
+          <input
+            v-model="newSite"
+            class="ns__input"
+            type="text"
+            placeholder="https://zh.wikipedia.org/wiki/$1"
+          />
+        </label>
+        <button
+          class="ns__btn ns__btn--primary"
+          type="button"
+          :disabled="busy === 'add' || !newName.trim()"
+          @click="add"
+        >
+          添加
+        </button>
+      </div>
+      <p class="ns__hint">
+        名称与别名都不许重复（大小写与空白不影响判重），也不许含
+        <code>/</code> <code>:</code> <code>@</code> <code>#</code> 等符号。
+        清空与删除都会把里面的页面送进回收站。
+      </p>
+    </template>
   </div>
 </template>
 
@@ -261,64 +306,154 @@ function remove(item: Namespace) {
   font-size: 12px;
 }
 
-.ns__list {
-  margin: 0 0 16px;
-  padding: 0;
-  list-style: none;
+/* ---------- 一张表：表头 + 每行四格 ---------- */
+
+.ns__table {
+  margin-bottom: 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.ns__head-row,
+.ns__item {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) minmax(110px, 1fr) minmax(160px, 1.3fr) auto;
+  gap: 8px 14px;
+  align-items: center;
+  padding: 9px 12px;
+}
+
+.ns__head-row {
+  border-bottom: 1px solid var(--border);
+  background: var(--code-bg);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.ns__head-actions {
+  justify-self: end;
 }
 
 .ns__item {
+  border-bottom: 1px solid var(--border);
+  /* 从 `special:settings#ns-help` 跳过来时，别被粘顶的标题压住 */
+  scroll-margin-top: 80px;
+}
+
+.ns__item:last-child {
+  border-bottom: 0;
+}
+
+.ns__item:hover {
+  background: var(--hover);
+}
+
+.ns__cell {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 10px;
-  padding: 9px 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.ns__head {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 8px;
-  flex: 1 1 auto;
+  gap: 6px;
   min-width: 0;
 }
 
+.ns__cell--actions {
+  justify-content: flex-end;
+}
+
 .ns__name {
-  font-size: 14px;
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.ns__id,
+.ns__site {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--code-bg);
+  color: var(--text-dim);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.ns__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.ns__chip {
+  padding: 1px 7px;
+  border-radius: 9px;
+  background: var(--code-bg);
+  color: var(--text-dim);
+  font-size: 11.5px;
 }
 
 .ns__kind,
-.ns__aliases,
-.ns__site {
+.ns__dim,
+.ns__locked,
+.ns__hint {
   color: var(--text-dim);
   font-size: 12px;
 }
 
-.ns__site {
-  font-family: var(--mono, monospace);
+/* ---------- 新增表单 ---------- */
+
+.ns__add-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-dim);
 }
 
-.ns__actions {
+.ns__add {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
 }
 
-.ns__locked {
-  color: var(--text-dim);
-  font-size: 12px;
+.ns__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
+
+.ns__field > span {
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+
+.ns__field--wide .ns__input {
+  width: 320px;
+  max-width: 100%;
+}
+
+.ns__input {
+  width: 140px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--field-bg);
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.ns__input:focus {
+  outline: 1px solid var(--accent);
+}
+
+/* ---------- 按钮 ---------- */
 
 .ns__btn {
-  padding: 3px 10px;
+  padding: 4px 11px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background-color: transparent;
   color: var(--text);
-  font-size: 12px;
+  font-size: 12.5px;
   cursor: pointer;
 }
 
@@ -339,31 +474,23 @@ function remove(item: Namespace) {
   color: var(--accent-soft);
 }
 
-.ns__input {
-  width: 130px;
-  padding: 3px 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--field-bg);
-  color: var(--text);
-  font-size: 12.5px;
-}
-
-.ns__input--wide {
-  width: 300px;
-  max-width: 100%;
-}
-
-.ns__add {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-
 .ns__error {
   color: var(--link-missing);
   font-size: 13px;
+}
+
+/* 窄窗口改成一列，别把表格挤成碎片 */
+@media (max-width: 720px) {
+  .ns__head-row {
+    display: none;
+  }
+
+  .ns__item {
+    grid-template-columns: 1fr;
+  }
+
+  .ns__cell--actions {
+    justify-content: flex-start;
+  }
 }
 </style>

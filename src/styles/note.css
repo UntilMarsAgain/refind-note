@@ -357,7 +357,9 @@
  * - 页内锚点 href="#…" 不是外链，排除；
  * - 用 mask 而不是背景图：符号跟随文字颜色，浅色/深色主题都不用另配色。
  */
-.note-body a[href]:not([href^="#"])::after {
+/* 跨站链接不带站外小箭头：它是"另一个 wiki 的条目"，不是普通外链，
+   箭头会让人以为点出去是原始网页。 */
+.note-body a[href]:not([href^="#"]):not([data-interwiki="true"])::after {
   content: "";
   display: inline-block;
   width: 0.62em;

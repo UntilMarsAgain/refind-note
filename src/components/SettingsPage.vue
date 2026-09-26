@@ -41,20 +41,9 @@ const props = defineProps<{ settings: Settings; focus?: string }>();
  */
 const bundleName = import.meta.url.split("/").pop() ?? "";
 
-/**
- * 每个设置项的 id 是**地址的一部分**（`special:settings#accent` 能直接跳过去），
- * 因此它们等于对外接口：改名要同步改这里的 id 与文案。
- */
-const SECTION_IDS = [
-  "theme",
-  "accent",
-  "reading-width",
-  "zoom",
-  "delta-chain-limit",
-  "trash-keep-days",
-  "gc-interval-days",
-  "namespaces",
-];
+/* 每个设置项的 id 是**地址的一部分**（`special:settings#accent` 能直接跳过去），
+   因此它们等于对外接口：改名要同步改 id 与文案。滚动不再依赖白名单，
+   凡是页面上存在的 id 都能跳（见下面的 watch）。 */
 
 /** 地址里带了哪个 id，就把哪一项高亮出来 */
 function isFocused(id: string): boolean {
@@ -65,10 +54,12 @@ function isFocused(id: string): boolean {
 watch(
   () => props.focus,
   async (focus) => {
-    if (!focus || !SECTION_IDS.includes(focus)) {
+    if (!focus) {
       return;
     }
     await nextTick();
+    // 任何**存在于页面上**的 id 都能跳：设置项、分区，以及命名空间管理里的每一项
+    // （`#namespaces`、`#ns-help` …）。找不到就什么也不做，不必维护白名单。
     document.getElementById(focus)?.scrollIntoView({ block: "center" });
   },
   { immediate: true },
@@ -306,8 +297,13 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
       上次清理回收站：{{ settings.last_trash_purge || "从未" }}<br />
       上次回收：{{ settings.last_gc || "从未" }}
     </p>
-    <h2 class="settings__section" id="namespaces">命名空间</h2>
-    <div :class="{ 'row--target': isFocused('namespaces') }">
+    <h2 class="settings__section">命名空间</h2>
+    <!-- id 与高亮放在**同一个元素**上：跳过来时滚到的、点亮的才是同一处 -->
+    <div
+      id="namespaces"
+      class="ns-section"
+      :class="{ 'row--target': isFocused('namespaces') }"
+    >
       <NamespaceManager />
     </div>
   </section>
@@ -336,6 +332,12 @@ function submitNumber(key: string, event: Event, min: number, max: number) {
   border-radius: 4px;
   background: var(--code-bg);
   font-size: 12px;
+}
+
+/* 命名空间分区比一行设置项高得多，给它留出被粘顶标题遮住的余量 */
+.ns-section {
+  scroll-margin-top: 80px;
+  padding: 2px 0;
 }
 
 .settings__section {
