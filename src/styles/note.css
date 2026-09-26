@@ -467,3 +467,14 @@
   flex: 1 1 auto;
   padding: 14px 16px 14px 12px;
 }
+
+/*
+ * `::quote` 模板：等同引用块，署名单独一行靠右下角。
+ * 左侧那条竖线与缩进由正文既有的 blockquote 样式负责，这里只补署名。
+ */
+.note-body .quote__origin {
+  margin: 8px 0 0;
+  text-align: right;
+  color: var(--text-dim);
+  font-size: 0.92em;
+}
