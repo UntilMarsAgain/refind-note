@@ -1732,6 +1732,8 @@ fn css_template_renders_as_code_block() {
         "应当当代码块渲染：{}",
         note.html
     );
+    // 前端据此选 CM6 语言：判定与渲染共用同一个结果
+    assert_eq!(note.language.as_deref(), Some("css"));
     assert!(
         !note.html.contains("<h1"),
         "不该按 markdown 解析：{}",
@@ -1749,6 +1751,7 @@ fn css_template_renders_as_code_block() {
         "主命名空间里的同名笔记照常解析：{}",
         main.html
     );
+    assert_eq!(main.language, None, "别处叫 .css 的普通笔记仍按 markdown");
 }
 
 /// 模板命名空间：内置、可存储、保留（删不掉也改不了名），但照常放页面、走完整链路

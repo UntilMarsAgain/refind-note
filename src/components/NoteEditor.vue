@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { Check, Pencil, Save, Trash2, X } from "@lucide/vue";
 import { checkTitle } from "../title";
@@ -106,6 +106,29 @@ const appHighlight = HighlightStyle.define([
   { tag: tags.list, color: "var(--syntax-number)" },
   { tag: tags.contentSeparator, color: "var(--border)" },
   { tag: tags.processingInstruction, color: "var(--syntax-keyword)" },
+
+  // ---- 代码语言（CSS / HTML）的 token ----
+  // 上面那几条只覆盖 markdown 的 token。CM6 编译 CSS / HTML 时会产出完全另一套 tag
+  // （标签名、属性名、属性值、注释…），一条都没配色 —— 于是"语言配上了却没有颜色"，
+  // 看起来就像语言没生效。这里按同一套 `--syntax-*` 变量补齐。
+  { tag: tags.comment, color: "var(--syntax-comment)", fontStyle: "italic" },
+  { tag: tags.string, color: "var(--syntax-string)" },
+  { tag: tags.number, color: "var(--syntax-number)" },
+  { tag: [tags.bool, tags.null], color: "var(--syntax-number)" },
+  { tag: tags.keyword, color: "var(--syntax-keyword)" },
+  { tag: [tags.controlKeyword, tags.operatorKeyword, tags.definitionKeyword, tags.modifier],
+    color: "var(--syntax-keyword)" },
+  // 标签名读起来像关键字；属性名像标题
+  { tag: tags.tagName, color: "var(--syntax-keyword)" },
+  { tag: tags.attributeName, color: "var(--syntax-title)" },
+  { tag: tags.propertyName, color: "var(--syntax-title)" },
+  { tag: tags.attributeValue, color: "var(--syntax-string)" },
+  { tag: [tags.className, tags.typeName], color: "var(--syntax-type)" },
+  { tag: [tags.atom, tags.constant(tags.variableName)], color: "var(--syntax-number)" },
+  // 括号、运算符之类是结构，压低存在感，别和内容抢
+  { tag: [tags.operator, tags.punctuation, tags.bracket, tags.separator, tags.angleBracket],
+    color: "var(--text-dim)" },
+  { tag: tags.invalid, color: "var(--syntax-deleted)" },
 ]);
 
 /**
@@ -223,6 +246,13 @@ const previewProblem = ref("");
 const PANE_MIN_WIDTH = 300;
 const PANES_GAP = 12;
 const STACK_BREAKPOINT = PANE_MIN_WIDTH * 2 + PANES_GAP;
+/**
+ * 切回来的阈值比切过去的**高一点**（迟滞）。
+ *
+ * 两个值贴在一起时，一次布局变化（比如竖滚动条出现，占掉十几像素）就能让宽度在阈值两侧
+ * 来回跳，于是"偶尔莫名其妙变成上下排布"。留出这段差量，来回都需要真正跨过一段距离。
+ */
+const UNSTACK_BREAKPOINT = STACK_BREAKPOINT + 40;
 
 /** 并排时单栏的高度上限（视口减去本页固定开销的权宜值） */
 const PANE_HEIGHT = "calc(100vh - 240px)";
@@ -241,20 +271,28 @@ function measurePanes() {
   // 所以不会出现"一变成上下排布、可用宽度也跟着变小，于是再也切不回来"的自反馈。
   const width = el.clientWidth;
   // 宽度为 0（还没布局 / 不可见）时不下结论，免得一上来就误判
-  stacked.value = width > 0 && width < STACK_BREAKPOINT;
+  if (width <= 0) {
+    return;
+  }
+  stacked.value = stacked.value
+    ? width < UNSTACK_BREAKPOINT
+    : width < STACK_BREAKPOINT;
 }
 
 let panesObserver: ResizeObserver | undefined;
 
 onMounted(() => {
   measurePanes();
+  // 挂载那一刻的宽度未必是最终宽度（滚动条、版心过渡、窗口管理器的初始摆放都可能插一脚），
+  // 所以下一帧再量一次：迟滞判定只在真正跨过阈值时才改变结论，重测是安全的。
+  requestAnimationFrame(measurePanes);
+
   if (typeof ResizeObserver !== "undefined" && panesEl.value) {
     panesObserver = new ResizeObserver(measurePanes);
     panesObserver.observe(panesEl.value);
-  } else {
-    // 兜底：没有 ResizeObserver 也不能让响应式彻底失效
-    window.addEventListener("resize", measurePanes);
   }
+  // 窗口变化一律补测一次，不只在没有 ResizeObserver 时
+  window.addEventListener("resize", measurePanes);
 });
 
 onBeforeUnmount(() => {
@@ -347,6 +385,23 @@ watch(
     newTitle.value = value;
   },
 );
+
+/**
+ * 识别到的语言（markdown 是默认值，不显示）。
+ *
+ * 显示出来是为了**能一眼验证**：判定发生在后端，这里只把结果显示出来；
+ * 打开一个 `template:` 下的 `.css` / `.html` 页面，状态行里应当出现对应的语言。
+ */
+const languageLabel = computed(() => {
+  switch (props.language) {
+    case "css":
+      return "CSS";
+    case "html":
+      return "HTML";
+    default:
+      return "";
+  }
+});
 
 /** 词法问题（空、@、非法字符、过长）即时反馈，不打扰后端 */
 const renameProblem = ref<string | null>(null);
@@ -549,7 +604,11 @@ function submit() {
 
     <p class="editor__status">
       <span class="editor__message">{{ status }}</span>
-      <span>{{ modelValue.length }} 字符</span>
+      <!-- 字符数与语言并成一组：状态行两端对齐，多一个孤立元素会被摊到中间 -->
+      <span class="editor__meta">
+        <span>{{ modelValue.length }} 字符</span>
+        <span v-if="languageLabel" class="editor__language">{{ languageLabel }}</span>
+      </span>
     </p>
   </section>
 </template>
@@ -694,6 +753,21 @@ function submit() {
   margin: 8px 0 0;
   color: var(--text-dim);
   font-size: 12.5px;
+}
+
+/* 字符数与识别到的语言：同一组，靠状态行右侧 */
+.editor__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.editor__language {
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--accent);
+  font-size: 0.92em;
 }
 
 .editor__message:empty::before {
