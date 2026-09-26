@@ -551,11 +551,39 @@ pub fn run() {
 mod tests {
     use super::*;
 
+    /// 示例笔记是用户第一眼看到的东西：写坏一份，等于新仓库开箱就是坏的。
+    ///
+    /// 这里不硬编码小节清单，而是**拿示例自己的目录去对渲染结果** ——
+    /// 目录指向的锚点必须真的存在，否则页内跳转就是坏的，而那种坏法肉眼很难发现。
     #[test]
-    fn sample_note_renders() {
+    fn sample_note_is_consistent() {
         let html = markdown::render(SEED_MARKDOWN);
+
         assert!(html.contains("<table>"), "表格插件应当生效");
-        assert!(html.contains("<h1"), "示例里留了 H1 用于对比字号");
-        assert!(html.contains("wikilink"), "示例里留了内部链接");
+        assert!(html.contains("wikilink"), "示例里应当演示内部链接");
+
+        let mut checked = 0;
+        for line in SEED_MARKDOWN.lines() {
+            let Some(rest) = line.strip_prefix("- [") else {
+                continue;
+            };
+            let Some((_, anchor)) = rest.split_once("](#") else {
+                continue;
+            };
+            let anchor = anchor.trim_end_matches(')');
+            assert!(
+                html.contains(&format!(r#"id="{anchor}""#)),
+                "目录指向的小节不存在：{anchor}"
+            );
+            checked += 1;
+        }
+        assert!(checked >= 5, "示例应当有目录，且每一节都能跳");
+
+        // 示例笔记本身必须是普通页面：指令标记只许出现在代码块里（第一行不许是它）
+        let first_line = SEED_MARKDOWN.lines().next().unwrap_or("").trim_end();
+        assert_ne!(
+            first_line, "$$COMMAND$$",
+            "示例笔记不能是指令页面（第一行被写成了指令标记）"
+        );
     }
 }
