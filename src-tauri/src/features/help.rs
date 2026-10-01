@@ -125,8 +125,9 @@ mod tests {
                 format!("{}:{}", crate::vault::namespace::HELP_NAME, page.slug),
                 "界面上的名字应当就是文件名的原样"
             );
+            // 空文件也是合法的一页（先占位、后填内容），所以只要求**有内容就渲染得出来**
             assert!(
-                page.html.contains('<'),
+                page.markdown.trim().is_empty() || page.html.contains('<'),
                 "{} 的正文应当渲染成 HTML",
                 page.slug
             );
