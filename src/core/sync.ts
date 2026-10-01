@@ -8,6 +8,9 @@
  * - **手动**：`syncNow`，设置页那两颗按钮（「立即同步」，以及不等云端那把锁的「强制同步」）；
  * - **关窗之前**：`syncBeforeClose`，把这一趟的改动送出去再走。
  *
+ * **冷却只压住"提交之后自动跟的那一趟"**：手动叫的、关窗前叫的都立刻排上（已经在跑
+ * 就排在它后面等它），这两条路要的是"这一下按下去，东西真的上去了"。
+ *
  * 草稿**不参与**：它是"写了一半的本机缓冲"，每篇一个槽位、随时会被覆盖 ——
  * 传上去只会让两台机器互相盖。真正的内容以**提交**为准（这一条不是这里决定的，
  * 是工作目录那一层把 `db/drafts/` 点名排除了）。
@@ -61,8 +64,13 @@ let settleTimer: number | undefined;
 let cooldownUntil = 0;
 /** 冷却期间又有人叫过：到点补跑一趟 */
 let pendingAfterCooldown = false;
-/** 正在跑的时候又有人叫：跑完再跑一趟（不是丢掉） */
-let queued = false;
+/**
+ * 排队的链子：同一时刻只跑一趟，后叫的接在它后面（见 [`run`]）。
+ *
+ * 不是"忙就算了"，也不是"忙就返回个空"—— 是排队。手动叫与关窗前叫的那两次
+ * **等得起**：它们要的是"这一下按下去，东西真的上去了"。
+ */
+let tail: Promise<unknown> = Promise.resolve();
 
 /**
  * 问一遍"能不能同步"，并记住 —— 标题栏那颗按钮与启动那一步都看它。
@@ -85,21 +93,29 @@ export function syncReady(): boolean {
 }
 
 /**
- * 跑一次。
+ * 跑一次：**排到队尾**。
  *
- * 同一时刻只有一趟：正在跑的时候再叫，就在跑完之后**再补一趟**（不是丢掉——
- * 那期间可能正好提交了新东西）。
+ * 同一时刻只有一趟在跑，后叫的接在前一趟后面 —— 于是"已经在跑"这件事对调用方是
+ * 透明的：它只是**等**（等到的那一份报告是它自己那一趟的，不是前一趟的）。
+ * 手动、关窗前要的正是这个：叫一声就得真跑完。
  *
- * `force` = 不等云端那把锁（见 [`syncNow`]）。
+ * `force` = 不等云端那把锁（见 [`syncNow`]），一趟一趟各自带自己的。
  *
  * 跑不成会**抛出来**：谁叫的谁负责说给人听 —— 自动那几条路（启动、提交后、关窗前）
  * 自己兜住，设置页写在自己那一栏里，标题栏那颗按钮弹浮条。
  */
-async function run(force: boolean): Promise<SyncReport | null> {
-    if (busy.value) {
-        queued = true;
-        return null;
-    }
+function run(force: boolean): Promise<SyncReport | null> {
+    const turn = tail.then(() => runOnce(force));
+    // 链子上只记"前一趟跑完了"：它失败不该把后面的卡住，错由各自那一次带给调用方
+    tail = turn.then(
+        () => undefined,
+        () => undefined,
+    );
+    return turn;
+}
+
+/** 真的跑一趟（同一时刻只有一趟，由 [`run`] 那条链子保证） */
+async function runOnce(force: boolean): Promise<SyncReport | null> {
     busy.value = true;
     progress.value = null;
 
@@ -113,11 +129,6 @@ async function run(force: boolean): Promise<SyncReport | null> {
         unlisten();
         busy.value = false;
         progress.value = null;
-        if (queued) {
-            queued = false;
-            // 补的那一趟是自动那一路来的（提交后攒下的）：没人守着看，失败就说一句
-            void run(false).catch((error) => flash(`同步没成功：${error}`));
-        }
     }
 }
 
@@ -216,6 +227,10 @@ export async function syncAtStartup(): Promise<void> {
 
 /**
  * 关窗之前把这一趟送出去。
+ *
+ * 不受冷却约束，而且**等得起**：已经在跑的那一趟跑完之后，这里**再补一趟** ——
+ * 只有补的这一趟才带得上最后那点改动（前一趟可能在改动之前就出发了）。
+ * 不想等就按遮罩上那颗"不等了"（那就是直接关，东西留在本机，下次同步接着传）。
  *
  * **不打断关闭**：失败了也照样关（东西在本机，下次同步还在），只是说明白。
  */
