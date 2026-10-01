@@ -44,7 +44,9 @@ export interface ParsedAddress {
 export type Outcome =
     | { kind: "note"; title: string }
     | { kind: "missing"; title: string }
-    | { kind: "special"; page: string };
+    | { kind: "special"; page: string }
+    /** 帮助页（虚拟命名空间 `Help`）：页面随程序发布，不在仓库里 */
+    | { kind: "help"; page: string; title: string };
 
 /** 地址 + 它落到仓库上的结论（`resolve_address` 的产物） */
 export interface ResolvedAddress {

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { BookOpen } from "@lucide/vue";
+import type { HelpPage } from "../../bindings/help.ts";
 import { browsingHistory } from "../../core/browsing.ts";
 import { metaOf } from "../../core/special.ts";
 
@@ -19,6 +21,8 @@ const emit = defineEmits<{
 const typed = ref("");
 /** 后端说了有哪些特殊页 —— 这一页只负责显示 */
 const pages = ref<string[]>([]);
+/** 帮助页：随程序发布，摆在这一页最显眼的地方 */
+const help = ref<HelpPage[]>([]);
 
 onMounted(async () => {
   try {
@@ -26,6 +30,13 @@ onMounted(async () => {
   } catch (error) {
     console.warn("取特殊页面清单失败：", error);
     pages.value = [];
+  }
+
+  try {
+    help.value = await invoke<HelpPage[]>("help_pages");
+  } catch (error) {
+    console.warn("取帮助页清单失败：", error);
+    help.value = [];
   }
 });
 
@@ -77,6 +88,25 @@ function submit() {
           @keydown.enter.prevent="submit"
       />
       <button class="newtab__go" type="button" @click="submit">打开</button>
+    </div>
+
+    <div v-if="help.length > 0" class="newtab__group newtab__group--help">
+      <h2 class="newtab__caption">
+        <BookOpen :size="13" :stroke-width="2"/>
+        使用帮助
+      </h2>
+      <div class="newtab__links">
+        <button
+            v-for="page in help"
+            :key="page.slug"
+            type="button"
+            class="newtab__link newtab__link--help"
+            :title="page.display"
+            @click="emit('open', `Help:${page.slug}`)"
+        >
+          {{ page.title }}
+        </button>
+      </div>
     </div>
 
     <div class="newtab__group">
@@ -210,11 +240,28 @@ function submit() {
 }
 
 .newtab__caption {
+  display: flex;
+  gap: 5px;
+  align-items: center;
   margin: 0 0 8px;
   color: var(--text-dim);
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.03em;
+}
+
+/* 使用帮助摆在最显眼的位置：它是新用户第一眼该看到的东西 */
+.newtab__group--help {
+  margin-top: 22px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.newtab__link--help {
+  border-color: var(--accent-soft);
+  color: var(--accent-soft);
 }
 
 .newtab__links {

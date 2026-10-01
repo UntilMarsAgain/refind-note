@@ -684,17 +684,24 @@ impl Database {
         Ok(crate::markdown::render_with(markdown, Some(&resolver)))
     }
 
-    /// 现有笔记的**规范键**集合（链接解析用它判红 / 蓝链）
+    /// 现有页面的**规范键**集合（链接解析用它判红 / 蓝链）。
+    ///
+    /// 笔记与帮助页放在同一张表里 —— 帮助页不在仓库里，但链接解析要一视同仁
+    /// （`[[Help:入门]]` 该是一条蓝链）。
     fn link_keys(&self) -> Result<Arc<HashSet<String>>, String> {
         let table = self.namespaces();
-        Ok(Arc::new(
-            self.titles()?
-                .notes
-                .values()
-                .filter_map(|display| crate::vault::title::parse(display, &table).ok())
-                .map(|parsed| parsed.key())
-                .collect(),
-        ))
+        let mut keys: HashSet<String> = self
+            .titles()?
+            .notes
+            .values()
+            .filter_map(|display| crate::vault::title::parse(display, &table).ok())
+            .map(|parsed| parsed.key())
+            .collect();
+
+        for slug in crate::features::help::slugs() {
+            keys.insert(format!("{}:{slug}", crate::vault::namespace::HELP_ID));
+        }
+        Ok(Arc::new(keys))
     }
 
     /// 这一篇的全部提交，**新的在前**。

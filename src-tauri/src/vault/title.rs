@@ -5,7 +5,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::vault::namespace::{NamespaceTable, MAIN_ID, SPECIAL_ID};
+use crate::vault::namespace::{NamespaceTable, HELP_ID, MAIN_ID, SPECIAL_ID};
 
 /// 页面名最长 255 字节（按 UTF-8 计）。
 pub const MAX_TITLE_BYTES: usize = 255;
@@ -134,10 +134,10 @@ pub fn parse(title: &str, table: &NamespaceTable) -> Result<ParsedTitle, String>
         return Err(reject_namespace(prefix, table));
     };
     if !found.storable {
-        return Err(if found.id == SPECIAL_ID {
-            format!("「{}」是虚拟命名空间，里面的页面由程序提供", found.name)
-        } else {
-            format!("「{}」是跨站命名空间，里面的页面不在本仓库", found.name)
+        return Err(match found.id.as_str() {
+            SPECIAL_ID => format!("「{}」是虚拟命名空间，里面的页面由程序提供", found.name),
+            HELP_ID => format!("「{}」是帮助内容，不作为笔记保存", found.name),
+            _ => format!("「{}」是跨站命名空间，里面的页面不在本仓库", found.name),
         });
     }
 
@@ -243,7 +243,8 @@ impl LinkResolver {
                     url: Some(url),
                 });
             }
-            if !found.storable {
+            // 帮助页不在仓库里，但**认得出**：`[[Help:入门]]` 该是一条蓝链
+            if !found.storable && found.id != HELP_ID {
                 return None;
             }
             return Some(Resolved {

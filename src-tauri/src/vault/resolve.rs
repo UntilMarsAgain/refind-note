@@ -24,6 +24,8 @@ pub enum Outcome {
     Missing { title: String },
     /// 特殊页面（虚拟命名空间）：前端按 `page` 选视图
     Special { page: String },
+    /// 帮助页（虚拟命名空间 `Help`）：页面随程序发布，不在仓库里
+    Help { page: String, title: String },
 }
 
 /// 地址 + 它落到仓库上的结论
@@ -46,6 +48,34 @@ impl Database {
             return Ok(None);
         };
         let ParsedAddress { address, canonical } = parsed;
+
+        if address.namespace.id == crate::vault::namespace::HELP_ID {
+            let wanted = address.page.trim();
+            let Some(found) = crate::features::help::find(self, wanted) else {
+                return Err(format!("没有这页帮助：{wanted}"));
+            };
+
+            // 帮助页只有"看"与"看源码"两种状态；别的（历史、删除、回退…）在帮助上
+            // 没有意义，静默裁掉 —— 与特殊页面同一条规矩
+            let mode = match address.mode {
+                Mode::Edit => Mode::Edit,
+                _ => Mode::View { reference: None },
+            };
+            let address = Address {
+                page: found.slug.clone(),
+                mode,
+                ..address
+            };
+            let canonical = address::compose(&address);
+            return Ok(Some(ResolvedAddress {
+                address,
+                canonical,
+                outcome: Outcome::Help {
+                    page: found.slug.clone(),
+                    title: found.display.clone(),
+                },
+            }));
+        }
 
         if address.namespace.id == SPECIAL_ID {
             if address.page.eq_ignore_ascii_case("random") {

@@ -57,6 +57,8 @@ function outcomeLabel(resolved: ResolvedAddress | null): string {
       return `「${resolved.outcome.title}」还不存在`;
     case "special":
       return `特殊页面「${labelOf(resolved.outcome.page)}」`;
+    case "help":
+      return `帮助页「${resolved.outcome.title}」`;
   }
 }
 

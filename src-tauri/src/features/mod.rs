@@ -3,5 +3,6 @@
 pub mod browsing;
 pub mod changes;
 pub mod files;
+pub mod help;
 pub mod keys;
 pub mod maintenance;

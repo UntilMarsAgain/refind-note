@@ -51,6 +51,7 @@ time = { version = "0.3", features = ["formatting", "parsing"] }
 # style 写死，跟随不了主题，所以关掉；代码分词交给前端。
 markdown-it = { version = "0.6", default-features = false, features = ["linkify"] }
 tauri-plugin-dialog = "2.8.1"
+include_dir = "0.7.4"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

@@ -9,6 +9,7 @@ import DebugPage from "./pages/DebugPage.vue";
 import FilesPage from "./pages/FilesPage.vue";
 import GcPage from "./pages/GcPage.vue";
 import DeleteView from "./note/DeleteView.vue";
+import HelpView from "./pages/HelpView.vue";
 import HistoryPage from "./pages/HistoryPage.vue";
 import KeysPage from "./pages/KeysPage.vue";
 import HistoryView from "./note/HistoryView.vue";
@@ -72,6 +73,8 @@ const missingTitle = computed(() =>
 const specialPage = computed(() =>
     outcome.value?.kind === "special" ? outcome.value.page : null,
 );
+/** 帮助页（虚拟命名空间 `Help`）：页面随程序发布 */
+const helpPage = computed(() => (outcome.value?.kind === "help" ? outcome.value : null));
 
 /** 「什么状态」：浏览状态在语法层，落到仓库上之后照样有效 */
 const mode = computed(() => route.value?.address.mode ?? null);
@@ -161,6 +164,17 @@ defineExpose({
       <GcPage v-else-if="specialPage === 'gc'" @navigate="emit('navigate', $event)"/>
 
       <AllPages v-else-if="specialPage === 'all'" @navigate="emit('navigate', $event)"/>
+
+      <HelpView
+          v-else-if="helpPage"
+          :key="`${helpPage.page}@${mode?.kind ?? ''}`"
+          :page="helpPage.page"
+          :display="helpPage.title"
+          :source="mode?.kind === 'edit'"
+          :collapsed="collapsed"
+          @navigate="emit('navigate', $event)"
+          @section="emit('section', $event)"
+      />
 
       <NewTabView v-else-if="isNewTab" @open="emit('navigate', $event)"/>
 

@@ -9,7 +9,7 @@
 
 use serde::Serialize;
 
-use crate::vault::namespace::{NamespaceTable, SPECIAL_ID};
+use crate::vault::namespace::{NamespaceTable, HELP_ID, SPECIAL_ID};
 use crate::vault::title;
 
 /// 现有的特殊页面。不在这里面的 `special:` 地址直接报「没有这个特殊页面」。
@@ -117,14 +117,28 @@ pub fn parse(input: &str, table: &NamespaceTable) -> Result<Option<ParsedAddress
             return Ok(Some(ParsedAddress { address, canonical }));
         }
 
-        return if found.id == SPECIAL_ID {
-            special(rest.trim(), section, table).map(Some)
-        } else {
-            Err(format!(
-                "「{}」是跨站命名空间，里面的页面不在本仓库",
-                found.name
-            ))
-        };
+        if found.id == SPECIAL_ID {
+            return special(rest.trim(), section, table).map(Some);
+        }
+        if found.id == HELP_ID {
+            // 帮助页：页面名在**编译进来的那张表**里，这里只做词法检查，
+            // 在不在由 resolve 那一层回答（它才拿得到仓库）
+            let address = Address {
+                namespace: NamespaceRef {
+                    id: HELP_ID.to_string(),
+                    spelling: prefix.to_string(),
+                },
+                page: title::check_page(rest.trim())?,
+                mode: mode_of(state.as_deref().unwrap_or(""))?,
+                section: section.unwrap_or_default(),
+            };
+            let canonical = compose(&address);
+            return Ok(Some(ParsedAddress { address, canonical }));
+        }
+        return Err(format!(
+            "「{}」是跨站命名空间，里面的页面不在本仓库",
+            found.name
+        ));
     }
 
     let address = Address {
@@ -328,6 +342,18 @@ mod tests {
     fn empty_input_is_not_an_address() {
         assert_eq!(parse("", &table()), Ok(None));
         assert_eq!(parse("   ", &table()), Ok(None));
+    }
+
+    /// 帮助页的地址：前缀认规范名，也认中文别名
+    #[test]
+    fn a_help_address_is_parsed() {
+        let it = parsed("Help:入门");
+        assert_eq!(it.address.namespace.id, "help");
+        assert_eq!(it.address.namespace.spelling, "Help");
+        assert_eq!(it.canonical, "Help:入门");
+        assert_eq!(parsed("帮助:入门").address.namespace.id, "help");
+        // `@edit` 在帮助里是"看源码"，所以状态照样收下（由 resolve 决定怎么用）
+        assert_eq!(parsed("Help:入门@edit").address.mode, Mode::Edit);
     }
 
     #[test]

@@ -8,7 +8,8 @@
 //! - **名称 / 别名**是给人写的：地址栏、链接、列表里显示的都是它，大小写与首尾空白
 //!   不影响匹配。
 //!
-//! 三个内建的：主命名空间（没有前缀）、`special`（虚拟，页面由程序提供）、
+//! 四个内建的：主命名空间（没有前缀）、`special`（虚拟，页面由程序提供）、
+//! `help`（虚拟，页面是编进程序的用户帮助）、
 //! `template`（保留，模板与样式放这里）。其余的可以自己建：内容命名空间落在本仓库，
 //! 也可以给一个站点地址模板，那就成了**跨站命名空间**（只用于链接，页面不在本仓库）。
 
@@ -22,6 +23,10 @@ pub const MAIN_ID: &str = "0";
 pub const SPECIAL_ID: &str = "special";
 /// 保留命名空间 `template` 的标识。
 pub const TEMPLATE_ID: &str = "template";
+/// 虚拟命名空间 `help` 的标识：里面的页面是**编进程序里的用户帮助**。
+pub const HELP_ID: &str = "help";
+/// 它的规范名（地址里写 `Help:入门`）
+pub const HELP_NAME: &str = "Help";
 
 /// 一个命名空间。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -67,7 +72,7 @@ impl Default for NamespaceTable {
 }
 
 impl NamespaceTable {
-    /// 三个内建的。
+    /// 内建的那几个。
     pub fn builtin() -> Self {
         Self {
             items: vec![
@@ -82,6 +87,14 @@ impl NamespaceTable {
                     id: SPECIAL_ID.to_string(),
                     name: SPECIAL_ID.to_string(),
                     aliases: Vec::new(),
+                    storable: false,
+                    site: None,
+                },
+                Namespace {
+                    id: HELP_ID.to_string(),
+                    name: HELP_NAME.to_string(),
+                    // 中文里也认「帮助:入门」
+                    aliases: vec!["帮助".to_string()],
                     storable: false,
                     site: None,
                 },
@@ -125,7 +138,7 @@ impl NamespaceTable {
 
     /// 保留的：不能改名、不能删除。`special` 还多一条：不能配站点地址
     pub fn is_reserved(&self, id: &str) -> bool {
-        id == MAIN_ID || id == SPECIAL_ID || id == TEMPLATE_ID
+        id == MAIN_ID || id == SPECIAL_ID || id == HELP_ID || id == TEMPLATE_ID
     }
 
     /// 虚拟的：页面由程序提供，仓库里没有（`special`）
@@ -500,10 +513,15 @@ mod tests {
     }
 
     #[test]
-    fn the_three_builtins_are_there_from_the_start() {
+    fn the_builtins_are_there_from_the_start() {
         let table = NamespaceTable::builtin();
         assert_eq!(table.name_of(MAIN_ID), "");
         assert_eq!(table.name_of(SPECIAL_ID), "special");
+        assert_eq!(table.name_of(HELP_ID), "Help");
+        assert!(
+            table.is_virtual(HELP_ID),
+            "帮助页的正文编在程序里，不在仓库"
+        );
         assert!(table.get(TEMPLATE_ID).is_some());
         assert!(table.is_virtual(SPECIAL_ID));
         assert!(!table.is_virtual(TEMPLATE_ID));
@@ -512,31 +530,35 @@ mod tests {
     #[test]
     fn aliases_are_matched_loosely_but_displayed_canonically() {
         let mut table = NamespaceTable::builtin();
-        table.add("help", vec!["帮助".to_string()], None).unwrap();
+        table.add("manual", vec!["手册".to_string()], None).unwrap();
 
-        let by_alias = table.lookup(" 帮助 ").expect("别名应当认得出");
+        let by_alias = table.lookup(" 手册 ").expect("别名应当认得出");
         assert_eq!(by_alias.id, "ns1");
         assert_eq!(
-            table.lookup("HELP").map(|item| item.id.as_str()),
+            table.lookup("MANUAL").map(|item| item.id.as_str()),
             Some("ns1")
         );
 
         // 回显用规范名：别名只是"也认"，不是它的名字
-        let parsed = crate::vault::title::parse("帮助:入门", &table).unwrap();
+        let parsed = crate::vault::title::parse("手册:入门", &table).unwrap();
         assert_eq!(parsed.key(), "ns1:入门");
-        assert_eq!(parsed.display(&table), "help:入门");
+        assert_eq!(parsed.display(&table), "manual:入门");
     }
 
     #[test]
     fn names_and_aliases_cannot_collide() {
         let mut table = NamespaceTable::builtin();
-        table.add("help", Vec::new(), None).unwrap();
+        table.add("manual", Vec::new(), None).unwrap();
         assert!(table
             .add("Help", Vec::new(), None)
             .unwrap_err()
             .contains("已经存在"));
         assert!(table
-            .add("other", vec!["帮助2".to_string(), "help".to_string()], None)
+            .add(
+                "other",
+                vec!["手册2".to_string(), "manual".to_string()],
+                None
+            )
             .unwrap_err()
             .contains("重名"));
         // 保留名不能占用
@@ -565,27 +587,27 @@ mod tests {
 
         let table = database.namespaces();
         let created = database
-            .add_namespace("help", vec!["帮助".to_string()], None)
+            .add_namespace("manual", vec!["手册".to_string()], None)
             .unwrap();
-        assert_eq!(created.len(), 4);
+        assert_eq!(created.len(), 5);
 
-        let title = database.create("help:入门").unwrap();
-        assert_eq!(title, "help:入门");
+        let title = database.create("manual:入门").unwrap();
+        assert_eq!(title, "manual:入门");
 
         // 用别名访问：回显保留别名，落到仓库上仍然是同一篇
         let resolved = database
-            .resolve_address("帮助:入门")
+            .resolve_address("手册:入门")
             .unwrap()
             .expect("不是空输入");
-        assert_eq!(resolved.canonical, "帮助:入门");
+        assert_eq!(resolved.canonical, "手册:入门");
         assert_eq!(
             resolved.outcome,
             crate::vault::resolve::Outcome::Note {
-                title: "help:入门".to_string()
+                title: "manual:入门".to_string()
             }
         );
 
-        // 不带前缀的名字落在主命名空间，不会撞上 help:入门
+        // 不带前缀的名字落在主命名空间，不会撞上 manual:入门
         let plain = database
             .resolve_address("入门")
             .unwrap()
@@ -603,10 +625,10 @@ mod tests {
     #[test]
     fn rename_moves_no_files_but_rewrites_the_titles() {
         let database = scratch("rename");
-        database.add_namespace("help", Vec::new(), None).unwrap();
-        database.create("help:入门").unwrap();
+        database.add_namespace("manual", Vec::new(), None).unwrap();
+        database.create("manual:入门").unwrap();
 
-        let id = database.id_of("help:入门").expect("刚建的就该找得到");
+        let id = database.id_of("manual:入门").expect("刚建的就该找得到");
         let before = database.log_path(&id);
 
         database.rename_namespace("ns1", "手册").unwrap();
@@ -617,7 +639,7 @@ mod tests {
         assert!(database.exists("手册:入门"));
         assert_eq!(database.id_of("手册:入门").as_deref(), Some(id.as_str()));
         // 旧名字不认了
-        assert!(!database.exists("help:入门"));
+        assert!(!database.exists("manual:入门"));
         assert_eq!(database.display_of("手册:入门").unwrap(), "手册:入门");
 
         cleanup(&database);
@@ -626,17 +648,17 @@ mod tests {
     #[test]
     fn emptying_a_namespace_moves_its_notes_to_the_trash() {
         let database = scratch("empty");
-        database.add_namespace("help", Vec::new(), None).unwrap();
-        database.create("help:一").unwrap();
-        database.create("help:二").unwrap();
+        database.add_namespace("manual", Vec::new(), None).unwrap();
+        database.create("manual:一").unwrap();
+        database.create("manual:二").unwrap();
         database.create("留下来的").unwrap();
 
-        let moved = database.empty_namespace("help").unwrap();
+        let moved = database.empty_namespace("manual").unwrap();
         assert_eq!(moved, 2);
 
         // 命名空间还在，里面的页面进了回收站
         assert!(database.namespaces().get("ns1").is_some());
-        assert!(!database.exists("help:一"));
+        assert!(!database.exists("manual:一"));
         assert!(database.exists("留下来的"));
 
         // 删除本身会把名字挪进 trashed
@@ -645,7 +667,7 @@ mod tests {
             titles
                 .trashed
                 .values()
-                .filter(|name| name.starts_with("help:"))
+                .filter(|name| name.starts_with("manual:"))
                 .count(),
             2
         );
@@ -656,13 +678,13 @@ mod tests {
     #[test]
     fn deleting_a_namespace_empties_it_first() {
         let database = scratch("delete-ns");
-        database.add_namespace("help", Vec::new(), None).unwrap();
-        database.create("help:入门").unwrap();
+        database.add_namespace("manual", Vec::new(), None).unwrap();
+        database.create("manual:入门").unwrap();
 
-        let moved = database.delete_namespace("help").unwrap();
+        let moved = database.delete_namespace("manual").unwrap();
         assert_eq!(moved, 1);
         assert!(database.namespaces().get("ns1").is_none());
-        assert!(!database.exists("help:入门"));
+        assert!(!database.exists("manual:入门"));
 
         cleanup(&database);
     }

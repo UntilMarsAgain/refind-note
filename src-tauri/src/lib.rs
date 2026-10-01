@@ -168,6 +168,20 @@ fn clear_history() -> Result<(), String> {
     database.clear_browsing()
 }
 
+/// 帮助页清单（页面名与标题；正文也一并给出，页数不多）
+#[tauri::command]
+fn help_pages() -> Result<Vec<features::help::HelpPage>, String> {
+    let (_, database) = open_database()?;
+    Ok(features::help::pages(&database))
+}
+
+/// 读一页帮助（含渲染好的 HTML）
+#[tauri::command]
+fn read_help(page: String) -> Result<features::help::HelpPage, String> {
+    let (_, database) = open_database()?;
+    features::help::find(&database, &page).ok_or_else(|| format!("没有这页帮助：{page}"))
+}
+
 /// 附件清单（新的在前）
 #[tauri::command]
 fn list_files() -> Result<Vec<files::FileEntry>, String> {
@@ -508,6 +522,8 @@ pub fn run() {
             gpg_keys,
             import_gpg_key,
             delete_gpg_key,
+            help_pages,
+            read_help,
             recent_changes,
             browsing_history,
             record_visit,

@@ -39,6 +39,7 @@ export function titleOf(route: ResolvedAddress): string {
     switch (route.outcome.kind) {
         case "note":
         case "missing":
+        case "help":
             return route.outcome.title;
         case "special":
             return labelOf(route.outcome.page);

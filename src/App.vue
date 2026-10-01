@@ -212,20 +212,40 @@ async function createNote(title: string) {
 }
 
 /**
- * 某一页解开了锁：**退回上一条地址**。
+ * 某一页解开了锁：把脚下这条 `@unlock` **换成那一页本身**。
  *
- * 人是从"某一页（或某一版）读不出来"走到 `@unlock` 的，解开之后回到原地最省事 ——
- * 那条地址现在读得出来了。
+ * 为什么不"退一步"：进来时那条记录已经被替换成 `@unlock` 了（见 `redirectNote`），
+ * 后退一步到的是**再往前**那一页 —— 从新标签页点进来的人会发现自己又回到了新标签页，
+ * 而刚解开的那一篇就在眼前却看不成。所以这里原地替换成那一页：
+ * 后退依旧回得来处，而眼前正是要读的东西。
+ *
+ * 一个例外：从**编辑器**点「去解锁」过来的（那条是压进去的，不是替换的），
+ * 解完退回编辑器才对 —— 那里本来就是要接着写的地方。
  */
 function afterUnlock() {
-  if (canGoBack.value) {
+  const tab = active.value;
+  const route = tab?.route;
+  const outcome = route?.outcome;
+
+  if (!tab || !route || outcome?.kind !== "note") {
+    // 认不出来是哪一篇（理论上到不了）：退回上一条就是最合理的
+    if (canGoBack.value) {
+      void goBack();
+    }
+    return;
+  }
+
+  const title = outcome.title;
+  const before = tab.cursor > 0 ? tab.history[tab.cursor - 1] : undefined;
+  if (before === `${title}@edit`) {
     void goBack();
     return;
   }
-  const title = currentNoteTitle();
-  if (title) {
-    void navigate(title, "push");
-  }
+
+  // 看的是旧版本就回到那一版（`@unlock-3` 解的是第 3 版）
+  const mode = route.address.mode;
+  const reference = mode.kind === "unlock" ? mode.ref : null;
+  void navigate(reference ? `${title}@view-${reference}` : title, "replace");
 }
 
 /**
