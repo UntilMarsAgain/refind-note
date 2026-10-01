@@ -66,7 +66,9 @@ pub fn sanitize_html(html: &str) -> String {
         match close {
             Some(position) => {
                 let tail = &after_open[position..];
-                let end = find_ci(tail, ">", 0).map(|i| position + i + 1).unwrap_or(position);
+                let end = find_ci(tail, ">", 0)
+                    .map(|i| position + i + 1)
+                    .unwrap_or(position);
                 rest = &after_open[end..];
             }
             None => {
@@ -114,7 +116,8 @@ pub fn sanitize_html(html: &str) -> String {
                 }
                 cursor += 1;
             } else {
-                while cursor < bytes.len() && !bytes[cursor].is_whitespace() && bytes[cursor] != '>' {
+                while cursor < bytes.len() && !bytes[cursor].is_whitespace() && bytes[cursor] != '>'
+                {
                     cursor += 1;
                 }
             }
@@ -408,7 +411,8 @@ mod tests {
 
     #[test]
     fn event_handlers_and_javascript_urls_are_filtered() {
-        let html = sanitize_html(r#"<img src="x" onerror="alert(1)"><a href="javascript:alert(1)">x</a>"#);
+        let html =
+            sanitize_html(r#"<img src="x" onerror="alert(1)"><a href="javascript:alert(1)">x</a>"#);
         assert!(!html.contains("onerror"), "{html}");
         assert!(!html.contains("javascript:"), "{html}");
         // 无辜的属性与内容不受影响
@@ -425,7 +429,10 @@ mod tests {
 
     #[test]
     fn css_is_scoped_to_the_note_body() {
-        assert_eq!(scope_css(".a { color: red }"), ".pane__column .a { color: red }");
+        assert_eq!(
+            scope_css(".a { color: red }"),
+            ".pane__column .a { color: red }"
+        );
         assert_eq!(
             scope_css(".a, .b { }"),
             ".pane__column .a, .pane__column .b { }"
@@ -455,7 +462,10 @@ mod tests {
     #[test]
     fn imports_are_dropped() {
         // 让笔记去外部拉样式：既慢又不受控
-        assert_eq!(scope_css("@import url(x.css); .a { }"), ".pane__column .a { }");
+        assert_eq!(
+            scope_css("@import url(x.css); .a { }"),
+            ".pane__column .a { }"
+        );
     }
 
     #[test]

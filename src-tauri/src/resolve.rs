@@ -7,6 +7,7 @@
 use serde::Serialize;
 
 use crate::address::{self, Address, Mode, ParsedAddress};
+use crate::codec::{self, Policy, Secrets, SignatureReport};
 use crate::database::Database;
 use crate::notes::Reading;
 use crate::session;
@@ -96,6 +97,10 @@ impl Database {
     }
 
     /// 回滚到某一版（`reference` 是地址里的版本 token；`copy` 见 [`Self::rollback_copy`]）。
+    ///
+    /// `protection` 与 `passphrase` 只对"重写"这一支有意义：显式给出保护就是**换保护**
+    /// （从新这一版起粘住），不给就照这篇当前的保护；口令只在这一版要套对称层时用得上。
+    /// 复制那一支整个封装都跟着旧版，两者都不受影响。
     /// 返回新版本号。
     pub fn rollback_note(
         &self,
@@ -103,17 +108,59 @@ impl Database {
         reference: &str,
         summary: Option<String>,
         copy: bool,
+        protection: Option<Policy>,
+        passphrase: Option<String>,
     ) -> Result<u64, String> {
         let rev = token_to_rev(reference)?;
         if copy {
-            self.rollback_copy(title, rev, summary)
-        } else {
-            Ok(self.rollback(title, rev, summary)?.rev)
+            return self.rollback_copy(title, rev, summary);
         }
+
+        let old = self.read_revision(title, rev)?;
+        let committed = self.commit_with(title, &old.markdown, summary, protection, passphrase)?;
+        Ok(committed.rev)
+    }
+
+    /// 某一版的**签名校验报告**：签名者、验没验过、为什么。
+    ///
+    /// 没有签名层就是 `None`。外层要是口令层，得先在这次会话里解锁才走得到签名层。
+    pub fn signature_report(
+        &self,
+        title: &str,
+        reference: Option<&str>,
+    ) -> Result<Option<SignatureReport>, String> {
+        let id = self.locate(title)?;
+        let state = self.state_of(&id)?;
+        let (rev, blob) = match reference {
+            None => (state.rev, state.blob.clone()),
+            Some(token) => {
+                let rev = token_to_rev(token)?;
+                let (_at, blob, _bytes, _summary) = self.event_at(&id, title, rev)?;
+                (rev, blob)
+            }
+        };
+        if blob.is_empty() {
+            return Ok(None);
+        }
+
+        let passphrase = session::passphrase_for(&id, rev);
+        let file = self.blobs().read_stored(&blob)?;
+        codec::signature_report(
+            &file,
+            &Secrets {
+                passphrase: passphrase.as_deref(),
+            },
+        )
+        .map_err(|error| error.to_string())
     }
 
     /// 给某一版解锁：`reference` 是 token，`None` = 最新版
-    pub fn unlock(&self, title: &str, reference: Option<&str>, passphrase: &str) -> Result<(), String> {
+    pub fn unlock(
+        &self,
+        title: &str,
+        reference: Option<&str>,
+        passphrase: &str,
+    ) -> Result<(), String> {
         let rev = match reference {
             Some(token) => Some(token_to_rev(token)?),
             None => None,
@@ -153,11 +200,15 @@ mod tests {
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
-        Database::open(dir).unwrap()
+        let workspace = crate::workspace::Workspace::open(dir).unwrap();
+        Database::open(&workspace).unwrap()
     }
 
     fn cleanup(database: &Database) {
-        let _ = std::fs::remove_dir_all(database.root());
+        // 库在 `<暂存目录>/db` 下，settings 是它的兄弟目录 —— 从暂存根整棵删掉
+        if let Some(root) = database.root().parent() {
+            let _ = std::fs::remove_dir_all(root);
+        }
     }
 
     #[test]
@@ -189,7 +240,10 @@ mod tests {
     fn special_pages_resolve_to_their_view() {
         let database = scratch("special");
 
-        let resolved = database.resolve_address("special:settings#外观").unwrap().unwrap();
+        let resolved = database
+            .resolve_address("special:settings#外观")
+            .unwrap()
+            .unwrap();
         assert!(matches!(resolved.outcome, Outcome::Special { ref page } if page == "settings"));
         assert_eq!(resolved.canonical, "Special:Settings#外观");
 
@@ -207,7 +261,10 @@ mod tests {
         database.create("甲").unwrap();
         database.create("乙").unwrap();
         let resolved = database.resolve_address("special:random").unwrap().unwrap();
-        assert!(matches!(resolved.outcome, Outcome::Note { .. }), "{resolved:?}");
+        assert!(
+            matches!(resolved.outcome, Outcome::Note { .. }),
+            "{resolved:?}"
+        );
         assert!(
             resolved.canonical == "甲" || resolved.canonical == "乙",
             "落点该是现有两篇之一：{}",

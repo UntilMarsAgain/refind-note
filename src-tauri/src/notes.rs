@@ -55,7 +55,11 @@ pub struct Titles {
 #[serde(tag = "t", rename_all = "lowercase")]
 pub enum Event {
     /// 笔记建立
-    Meta { at: String, ns: String, title: String },
+    Meta {
+        at: String,
+        ns: String,
+        title: String,
+    },
     /// 一次提交
     Rev {
         at: String,
@@ -236,7 +240,7 @@ impl Database {
     }
 
     /// 标题 → id。找不到就是"没有这篇"。
-    fn locate(&self, title: &str) -> Result<String, String> {
+    pub(crate) fn locate(&self, title: &str) -> Result<String, String> {
         self.id_of(title)
             .ok_or_else(|| format!("没有这篇笔记：{title}"))
     }
@@ -268,7 +272,7 @@ impl Database {
         append_line(&self.note_path(ns, id), &line)
     }
 
-    fn state_of(&self, id: &str) -> Result<NoteState, String> {
+    pub(crate) fn state_of(&self, id: &str) -> Result<NoteState, String> {
         Ok(fold(&self.read_events(id)?))
     }
 
@@ -302,11 +306,7 @@ impl Database {
     /// 标题 + 可选版本号 → (标识, 版本号)。
     ///
     /// 不给版本就是最新一版 —— `@unlock` 与 `@unlock-3` 都归它收口。
-    pub fn resolve_revision(
-        &self,
-        title: &str,
-        rev: Option<u64>,
-    ) -> Result<(String, u64), String> {
+    pub fn resolve_revision(&self, title: &str, rev: Option<u64>) -> Result<(String, u64), String> {
         let id = self.locate(title)?;
         let state = self.state_of(&id)?;
         Ok((id, rev.unwrap_or(state.rev)))
@@ -366,9 +366,12 @@ impl Database {
         };
         let passphrase = passphrase.or_else(|| session::passphrase_for(&id, state.rev));
 
-        let blob = self
-            .blobs()
-            .put(markdown.as_bytes(), &body_meta(), &policy, passphrase.as_deref())?;
+        let blob = self.blobs().put(
+            markdown.as_bytes(),
+            &body_meta(),
+            &policy,
+            passphrase.as_deref(),
+        )?;
 
         // 写成了才把口令顺延给新版本：解锁一次，读写全通
         if let Some(passphrase) = passphrase {
@@ -528,7 +531,7 @@ impl Database {
     }
 
     /// 某一版在日志里的那一行：`(提交时间, blob, 字节数, 说明)`
-    fn event_at(
+    pub(crate) fn event_at(
         &self,
         id: &str,
         title: &str,
@@ -856,11 +859,15 @@ mod tests {
             std::process::id()
         ));
         let _ = fs::remove_dir_all(&dir);
-        Database::open(dir).unwrap()
+        let workspace = crate::workspace::Workspace::open(dir).unwrap();
+        Database::open(&workspace).unwrap()
     }
 
     fn cleanup(database: &Database) {
-        let _ = fs::remove_dir_all(database.root());
+        // 库在 `<暂存目录>/db` 下，settings 是它的兄弟目录 —— 从暂存根整棵删掉
+        if let Some(root) = database.root().parent() {
+            let _ = fs::remove_dir_all(root);
+        }
     }
 
     /// 口令是**进程内共享**的（`session`），几个用例同时跑会互相踩。
@@ -1224,7 +1231,13 @@ mod tests {
         session::unlock(&id, 1, "wrong".to_string());
         let reading = database.read_for_display("甲").unwrap();
         assert!(
-            matches!(reading, Reading::Locked { wrong_passphrase: true, .. }),
+            matches!(
+                reading,
+                Reading::Locked {
+                    wrong_passphrase: true,
+                    ..
+                }
+            ),
             "{reading:?}"
         );
 
@@ -1411,7 +1424,10 @@ mod tests {
         assert_eq!(database.read_revision("甲", 2).unwrap().markdown, "第二版");
 
         // 回退到不存在的版本要报出来
-        assert!(database.rollback("甲", 9, None).unwrap_err().contains("没有第 9 版"));
+        assert!(database
+            .rollback("甲", 9, None)
+            .unwrap_err()
+            .contains("没有第 9 版"));
 
         cleanup(&database);
     }
@@ -1467,12 +1483,12 @@ mod tests {
             .unwrap();
 
         // 各认各的：状态读的是**那一版自己的** blob 头
-        assert!(database.read_revision("甲", 1).unwrap().protection.is_plain());
         assert!(database
-            .read_revision("甲", 2)
+            .read_revision("甲", 1)
             .unwrap()
             .protection
-            .compress);
+            .is_plain());
+        assert!(database.read_revision("甲", 2).unwrap().protection.compress);
 
         cleanup(&database);
     }

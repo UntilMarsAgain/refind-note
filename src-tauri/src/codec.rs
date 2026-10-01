@@ -127,6 +127,20 @@ pub struct Inspection {
     pub meta: Meta,
 }
 
+/// 一份签名层的校验报告（`signature_report` 的产物）
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SignatureReport {
+    /// 签名者密钥标识（**写这一版时指定的**那一把，记在头里）
+    pub key: String,
+    /// 签名验过了没有
+    pub verified: bool,
+    /// 本地钥匙串对签名者公钥的信任程度（人话）。
+    /// 验签这步没能跑起来时说不出来，所以是可选的
+    pub trust: Option<String>,
+    /// 人话说明：通过时说指纹；不通过说原因
+    pub detail: String,
+}
+
 /// 一个 blob 声明用了哪些层 —— **明文头里就有，不需要口令**
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Protection {
@@ -308,6 +322,67 @@ pub fn inspect(file: &[u8]) -> Result<Inspection> {
     })
 }
 
+/// 验一遍 blob 里的签名层，不改变内容。没有签名层时返回 `None`。
+///
+/// 与 `decode` 一样要逐层往里走 —— 签名盖的是**它里面那一层**的输出，
+/// 所以外层要是有口令层，同样得给出才能走得到签名层。
+pub fn signature_report(file: &[u8], secrets: &Secrets<'_>) -> Result<Option<SignatureReport>> {
+    let header = read_header(file)?;
+    let mut payload = payload_of(file)?.to_vec();
+
+    for layer in header.layers.iter().rev() {
+        match layer {
+            Layer::Symmetric {
+                salt,
+                nonce,
+                m_cost,
+                t_cost,
+                p_cost,
+            } => {
+                let passphrase = secrets.passphrase.ok_or(CodecError::PassphraseNeeded)?;
+                payload =
+                    symmetric_open(&payload, passphrase, salt, nonce, *m_cost, *t_cost, *p_cost)?;
+            }
+            Layer::Gpg {
+                mode: GpgMode::Encrypt,
+                ..
+            } => payload = gpg_decrypt(&payload)?,
+            Layer::Gpg {
+                mode: GpgMode::Sign,
+                key,
+                signature: Some(signature),
+            } => {
+                let raw = BASE64
+                    .decode(signature)
+                    .map_err(|error| CodecError::Corrupt(format!("签名不是 base64：{error}")))?;
+                return Ok(Some(match gpg_verify(&payload, &raw) {
+                    Ok(outcome) => SignatureReport {
+                        key: key.clone(),
+                        verified: outcome.verified,
+                        trust: Some(outcome.trust),
+                        detail: outcome.detail,
+                    },
+                    // 验签这步自己就没跑起来（没有 gpg、钥匙串读不动）：如实说，不当成"签名不对"
+                    Err(error) => SignatureReport {
+                        key: key.clone(),
+                        verified: false,
+                        trust: None,
+                        detail: error.to_string(),
+                    },
+                }));
+            }
+            Layer::Gpg {
+                mode: GpgMode::Sign,
+                signature: None,
+                ..
+            } => return Err(CodecError::Corrupt("签名层没带签名".to_string())),
+            Layer::Deflate { .. } => payload = inflate(&payload)?,
+        }
+    }
+
+    Ok(None)
+}
+
 /// 照头逐层解开。顺序是**从外往内**。
 pub fn decode(file: &[u8], secrets: &Secrets<'_>) -> Result<Vec<u8>> {
     let header = read_header(file)?;
@@ -323,15 +398,8 @@ pub fn decode(file: &[u8], secrets: &Secrets<'_>) -> Result<Vec<u8>> {
                 p_cost,
             } => {
                 let passphrase = secrets.passphrase.ok_or(CodecError::PassphraseNeeded)?;
-                payload = symmetric_open(
-                    &payload,
-                    passphrase,
-                    salt,
-                    nonce,
-                    *m_cost,
-                    *t_cost,
-                    *p_cost,
-                )?;
+                payload =
+                    symmetric_open(&payload, passphrase, salt, nonce, *m_cost, *t_cost, *p_cost)?;
             }
             Layer::Gpg {
                 mode: GpgMode::Encrypt,
@@ -346,7 +414,10 @@ pub fn decode(file: &[u8], secrets: &Secrets<'_>) -> Result<Vec<u8>> {
                 let raw = BASE64
                     .decode(signature)
                     .map_err(|error| CodecError::Corrupt(format!("签名不是 base64：{error}")))?;
-                gpg_verify(&payload, &raw)?;
+                let outcome = gpg_verify(&payload, &raw)?;
+                if !outcome.verified {
+                    return Err(CodecError::Gpg(outcome.detail));
+                }
             }
             Layer::Gpg {
                 mode: GpgMode::Sign,
@@ -442,7 +513,13 @@ fn symmetric_seal(content: &[u8], passphrase: &str) -> Result<(Vec<u8>, Layer)> 
     random_into(&mut salt)?;
     random_into(&mut nonce_bytes)?;
 
-    let key = derive_key(passphrase, &salt, DEFAULT_M_COST, DEFAULT_T_COST, DEFAULT_P_COST)?;
+    let key = derive_key(
+        passphrase,
+        &salt,
+        DEFAULT_M_COST,
+        DEFAULT_T_COST,
+        DEFAULT_P_COST,
+    )?;
     let cipher = ChaCha20Poly1305::new_from_slice(&key)
         .map_err(|error| CodecError::Corrupt(format!("密钥长度不对：{error}")))?;
     let sealed = cipher
@@ -509,7 +586,8 @@ fn derive_key(
 }
 
 fn random_into(buffer: &mut [u8]) -> Result<()> {
-    getrandom::getrandom(buffer).map_err(|error| CodecError::Corrupt(format!("取随机数失败：{error}")))
+    getrandom::getrandom(buffer)
+        .map_err(|error| CodecError::Corrupt(format!("取随机数失败：{error}")))
 }
 
 // ---------------------------------------------------------------- 系统 gpg
@@ -587,25 +665,69 @@ fn gpg_sign(content: &[u8], key_id: &str) -> Result<String> {
     Ok(BASE64.encode(signature))
 }
 
-fn gpg_verify(content: &[u8], signature: &[u8]) -> Result<()> {
+/// 验签的结果。
+///
+/// 验签有两种"没通过"：签名确实对不上，和这步根本没跑起来（没有 gpg、读不动钥匙串）。
+/// 前者是结论，后者是故障 —— 调用方要分得开，所以故障走 `Err`，结论走这里。
+pub struct VerifyOutcome {
+    /// 签名验过了没有
+    pub verified: bool,
+    /// 本地钥匙串对签名者公钥的信任程度（人话）
+    pub trust: String,
+    /// 人话说明：通过时报指纹，没通过时报原因
+    pub detail: String,
+}
+
+fn gpg_verify(content: &[u8], signature: &[u8]) -> Result<VerifyOutcome> {
     let mut context = gpg_context()?;
     // 注意参数顺序：第一个是**签名**，第二个才是被签的字节
     let result = context
         .verify_detached(signature, content)
         .map_err(|error| CodecError::Gpg(format!("验签失败：{error}")))?;
 
-    let mut checked = false;
-    for found in result.signatures() {
-        checked = true;
-        if let Err(reason) = found.status() {
-            return Err(CodecError::Gpg(format!("签名对不上：{reason}")));
-        }
-    }
-
-    if !checked {
+    let Some(found) = result.signatures().next() else {
         return Err(CodecError::Gpg("这份没有可验的签名".to_string()));
+    };
+
+    // 指纹取自签名本身，而不是头里记的那个名字 —— 名字是写的时候写上的，指纹是验出来的
+    let fingerprint = found.fingerprint().ok().map(str::to_string);
+    let trust = trust_label(found.validity());
+    // 信任不够或公钥不在本地时，gpg 会另给一个原因；它比笼统的"验签失败"有用得多
+    let reason = found.nonvalidity_reason().map(|error| error.to_string());
+
+    Ok(match found.status() {
+        Ok(()) => VerifyOutcome {
+            verified: true,
+            trust,
+            detail: match (&fingerprint, &reason) {
+                (Some(fingerprint), Some(reason)) => {
+                    format!("签名通过（指纹 {fingerprint}；{reason}）")
+                }
+                (Some(fingerprint), None) => format!("签名通过（指纹 {fingerprint}）"),
+                (None, _) => "签名通过".to_string(),
+            },
+        },
+        Err(status) => VerifyOutcome {
+            verified: false,
+            trust,
+            detail: match &reason {
+                Some(reason) => format!("签名对不上：{status}（{reason}）"),
+                None => format!("签名对不上：{status}"),
+            },
+        },
+    })
+}
+
+/// 本地对签名者公钥的信任程度 → 人话
+fn trust_label(validity: gpgme::Validity) -> String {
+    match validity {
+        gpgme::Validity::Unknown => "本机没有这把公钥".to_string(),
+        gpgme::Validity::Undefined => "这把公钥还没打信任分".to_string(),
+        gpgme::Validity::Never => "这把公钥标着不受信任".to_string(),
+        gpgme::Validity::Marginal => "勉强信任".to_string(),
+        gpgme::Validity::Full => "完全信任".to_string(),
+        gpgme::Validity::Ultimate => "绝对信任".to_string(),
     }
-    Ok(())
 }
 
 fn gpg_encrypt(content: &[u8], key_id: &str) -> Result<Vec<u8>> {
@@ -667,7 +789,10 @@ mod tests {
         let file = encode(content.as_bytes(), &Meta::default(), &policy, None).unwrap();
         assert!(file.len() < content.len(), "压缩该让体积变小");
         assert!(inspect(&file).unwrap().protection.compress);
-        assert_eq!(decode(&file, &Secrets::default()).unwrap(), content.as_bytes());
+        assert_eq!(
+            decode(&file, &Secrets::default()).unwrap(),
+            content.as_bytes()
+        );
     }
 
     #[test]
@@ -733,7 +858,13 @@ mod tests {
         assert!(matches!(header.layers[1], Layer::Symmetric { .. }));
 
         assert_eq!(
-            decode(&file, &Secrets { passphrase: Some("pw") }).unwrap(),
+            decode(
+                &file,
+                &Secrets {
+                    passphrase: Some("pw")
+                }
+            )
+            .unwrap(),
             content.as_bytes()
         );
     }
@@ -748,10 +879,7 @@ mod tests {
         // 版本不认得也算"不是我们的"
         let mut file = encode(b"x", &Meta::default(), &Policy::default(), None).unwrap();
         file[4] = 99;
-        assert!(matches!(
-            inspect(&file),
-            Err(CodecError::NotEnvelope(_))
-        ));
+        assert!(matches!(inspect(&file), Err(CodecError::NotEnvelope(_))));
 
         // 头被截断才算损坏
         let file = encode(b"x", &Meta::default(), &Policy::default(), None).unwrap();
@@ -841,8 +969,35 @@ mod tests {
         .unwrap();
 
         let protection = inspect(&signed).unwrap().protection;
-        assert!(protection.sign.is_some(), "头是明文，签名状态不该需要钥匙才看得出来");
+        assert!(
+            protection.sign.is_some(),
+            "头是明文，签名状态不该需要钥匙才看得出来"
+        );
         assert_eq!(decode(&signed, &Secrets::default()).unwrap(), content);
+
+        // 验签报告：过没过、指纹、以及本地对这枚公钥的信任程度
+        let report = signature_report(&signed, &Secrets::default())
+            .unwrap()
+            .expect("签过的 blob 应当有报告");
+        assert!(report.verified, "{report:?}");
+        assert!(report.detail.contains("指纹"), "{report:?}");
+        assert!(report.trust.is_some(), "{report:?}");
+
+        // 内容被动过一个字节：报告说"没通过"，而不是抛错 —— 验签的结论与验签跑不起来要分开
+        let mut broken = signed.clone();
+        let last = broken.len() - 1;
+        broken[last] ^= 0x01;
+        let report = signature_report(&broken, &Secrets::default())
+            .unwrap()
+            .expect("层链没变，报告照样出得来");
+        assert!(!report.verified, "{report:?}");
+        assert!(!report.detail.is_empty(), "{report:?}");
+
+        // 没签名层就没有报告
+        let plain = encode(&content, &Meta::default(), &Policy::default(), None).unwrap();
+        assert!(signature_report(&plain, &Secrets::default())
+            .unwrap()
+            .is_none());
 
         // 加密：载荷变了，解出来要一模一样
         let sealed = encode(
@@ -855,7 +1010,9 @@ mod tests {
             None,
         )
         .unwrap();
-        assert!(!sealed.windows(content.len()).any(|window| window == content));
+        assert!(!sealed
+            .windows(content.len())
+            .any(|window| window == content));
         assert!(inspect(&sealed).unwrap().protection.encrypt.is_some());
         assert_eq!(decode(&sealed, &Secrets::default()).unwrap(), content);
 
@@ -875,6 +1032,14 @@ mod tests {
         assert_eq!(decode(&whole, &Secrets::default()).unwrap(), content);
 
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// 信任程度的人话映射。它不碰钥匙串，所以不必等 gpg
+    #[test]
+    fn trust_labels_say_what_they_mean() {
+        assert_eq!(trust_label(gpgme::Validity::Unknown), "本机没有这把公钥");
+        assert_eq!(trust_label(gpgme::Validity::Full), "完全信任");
+        assert_eq!(trust_label(gpgme::Validity::Ultimate), "绝对信任");
     }
 
     /// 没有 gpg 时：这些功能**不可用**，给一句说得清的错，而不是底层报错。
@@ -955,12 +1120,23 @@ mod tests {
                 signature: Some(signature.to_string()),
             }]
         };
-        let first = assemble(&layers("c2lnbmF0dXJlLTE="), &Meta::default(), b"same payload".to_vec())
-            .unwrap();
-        let second = assemble(&layers("c2lnbmF0dXJlLTI="), &Meta::default(), b"same payload".to_vec())
-            .unwrap();
+        let first = assemble(
+            &layers("c2lnbmF0dXJlLTE="),
+            &Meta::default(),
+            b"same payload".to_vec(),
+        )
+        .unwrap();
+        let second = assemble(
+            &layers("c2lnbmF0dXJlLTI="),
+            &Meta::default(),
+            b"same payload".to_vec(),
+        )
+        .unwrap();
 
         assert_ne!(first, second);
-        assert_ne!(crate::store::hash_hex(&first), crate::store::hash_hex(&second));
+        assert_ne!(
+            crate::store::hash_hex(&first),
+            crate::store::hash_hex(&second)
+        );
     }
 }

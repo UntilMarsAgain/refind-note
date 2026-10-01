@@ -112,7 +112,11 @@ fn render_banner(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
         None => template.body.replace('\n', " ").trim().to_string(),
     };
     if text.is_empty() {
-        render_problem(template, fmt, "内容是空的：标题带要写一行字，或用 text=… 给");
+        render_problem(
+            template,
+            fmt,
+            "内容是空的：标题带要写一行字，或用 text=… 给",
+        );
         return;
     }
 
@@ -161,11 +165,7 @@ fn text_on(background: &str) -> &'static str {
     let Ok(value) = u32::from_str_radix(body, 16) else {
         return "var(--text)";
     };
-    let (r, g, b) = (
-        (value >> 16) & 0xff,
-        (value >> 8) & 0xff,
-        value & 0xff,
-    );
+    let (r, g, b) = ((value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff);
     let luminance = (0.299 * r as f64 + 0.587 * g as f64 + 0.114 * b as f64) / 255.0;
     if luminance > 0.6 {
         "#101010"
@@ -207,7 +207,10 @@ fn render_image(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
     };
 
     let mut style = String::new();
-    if let Some(rule) = template.param("width").and_then(|value| size_rule("max-width", value)) {
+    if let Some(rule) = template
+        .param("width")
+        .and_then(|value| size_rule("max-width", value))
+    {
         style.push_str(&rule);
     }
     if let Some(rule) = template

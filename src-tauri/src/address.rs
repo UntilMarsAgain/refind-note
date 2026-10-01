@@ -76,7 +76,11 @@ pub fn parse(input: &str) -> Result<Option<ParsedAddress>, String> {
         return Ok(None);
     }
 
-    let AddressParts { name, state, section } = split_address(raw);
+    let AddressParts {
+        name,
+        state,
+        section,
+    } = split_address(raw);
     let name = title::normalize(&name);
 
     // 冒号只可能属于命名空间前缀：命中 special 是虚拟命名空间，其余前缀
@@ -378,7 +382,10 @@ mod tests {
     fn unknown_special_pages_and_namespaces_are_rejected() {
         let message = reason("special:nope");
         assert!(message.contains("没有这个特殊页面"), "{message}");
-        assert!(message.contains("newtab"), "报错要列出现有的页面：{message}");
+        assert!(
+            message.contains("newtab"),
+            "报错要列出现有的页面：{message}"
+        );
         assert!(reason("special:").contains("要写页面名"));
         assert!(reason("foo:bar").contains("没有这个命名空间"));
     }

@@ -90,8 +90,9 @@ impl BlockRule for TemplateScanner {
             let blank = state.is_empty(line) || state.line_indent(line) < 0;
             if blank {
                 // 空行：只有后面还有更深的内容时才算块内，否则它属于块外
-                let next = (line + 1..state.line_max)
-                    .find(|candidate| !state.is_empty(*candidate) && state.line_indent(*candidate) >= 0);
+                let next = (line + 1..state.line_max).find(|candidate| {
+                    !state.is_empty(*candidate) && state.line_indent(*candidate) >= 0
+                });
                 match next {
                     Some(next) if state.line_indent(next) > marker_indent => {
                         body_lines.push((0, ""));
@@ -177,8 +178,7 @@ mod tests {
         // 两段都应当在同一个引用块里
         assert_eq!(html.matches("<blockquote").count(), 1, "{html}");
         let before = &html[..html.find("第二段").unwrap()];
-        let depth =
-            before.matches("<blockquote").count() - before.matches("</blockquote>").count();
+        let depth = before.matches("<blockquote").count() - before.matches("</blockquote>").count();
         assert_eq!(depth, 1, "第二段应当仍在块内：{html}");
         // 不再是更深的那一行才结束
         assert!(html.contains("<p>块外</p>"), "{html}");
@@ -218,8 +218,7 @@ mod tests {
         // 内容必须落在**内层**里：数一数"文字"之前有几个未闭合的 blockquote
         // （1 = 只在外层，2 = 正确地嵌在内层）。用字符串顺序猜结构是不可靠的。
         let before = &html[..html.find("文字").expect("应当渲染出内容")];
-        let depth =
-            before.matches("<blockquote").count() - before.matches("</blockquote>").count();
+        let depth = before.matches("<blockquote").count() - before.matches("</blockquote>").count();
         assert_eq!(depth, 2, "内容应当嵌在内层 blockquote 里：{html}");
     }
 
@@ -235,7 +234,10 @@ mod tests {
     fn css_cannot_close_the_style_block_early() {
         let html = render("::css\n  a { } </style><p>顶出来了</p>\n");
         assert_eq!(html.matches("</style>").count(), 1, "{html}");
-        assert!(html.contains("<p>顶出来了</p>"), "它仍然只是普通正文：{html}");
+        assert!(
+            html.contains("<p>顶出来了</p>"),
+            "它仍然只是普通正文：{html}"
+        );
     }
 
     #[test]
@@ -339,7 +341,10 @@ mod tests {
     #[test]
     fn image_carries_alignment_and_limits() {
         let html = render("::image src=/logo.svg align=right width=320 caption=\"桥体\"\n");
-        assert!(html.contains(r#"<figure class="image image--right">"#), "{html}");
+        assert!(
+            html.contains(r#"<figure class="image image--right">"#),
+            "{html}"
+        );
         assert!(html.contains(r#"src="/logo.svg""#), "{html}");
         assert!(html.contains("max-width: 320px"), "{html}");
         assert!(html.contains("<figcaption>桥体</figcaption>"), "{html}");
@@ -349,19 +354,31 @@ mod tests {
     fn image_takes_its_caption_from_the_body() {
         // 图片下面写一行 —— 最自然的写法
         let html = render("::image src=/logo.svg\n  桥体（一〇七九年）\n");
-        assert!(html.contains("<figcaption>桥体（一〇七九年）</figcaption>"), "{html}");
+        assert!(
+            html.contains("<figcaption>桥体（一〇七九年）</figcaption>"),
+            "{html}"
+        );
 
         // 块内容在块里是被缩进的，注释不该带着那些空格
         let indented = render("::image src=/logo.svg\n    两边都有空格\n");
-        assert!(indented.contains("<figcaption>两边都有空格</figcaption>"), "{indented}");
+        assert!(
+            indented.contains("<figcaption>两边都有空格</figcaption>"),
+            "{indented}"
+        );
 
         // 多行拼成一句
         let multiline = render("::image src=/logo.svg\n  第一行\n  第二行\n");
-        assert!(multiline.contains("<figcaption>第一行 第二行</figcaption>"), "{multiline}");
+        assert!(
+            multiline.contains("<figcaption>第一行 第二行</figcaption>"),
+            "{multiline}"
+        );
 
         // `caption=` 优先于块内容
         let explicit = render("::image src=/logo.svg caption=显式\n  块里那句\n");
-        assert!(explicit.contains("<figcaption>显式</figcaption>"), "{explicit}");
+        assert!(
+            explicit.contains("<figcaption>显式</figcaption>"),
+            "{explicit}"
+        );
         assert!(!explicit.contains("块里那句"), "{explicit}");
 
         // 都没有：不出现空的图注
@@ -378,9 +395,11 @@ mod tests {
         assert!(bad.contains("template--problem"), "{bad}");
 
         // 尺寸只认"数字 + 可选单位"：塞别的声明一律不认，因此拼不出 style 属性
-        let sneaky =
-            render("::image src=/x.svg width=\"1px; background: url(//evil)\"\n");
-        assert!(!sneaky.contains("style="), "尺寸参数不该拼出 style 属性：{sneaky}");
+        let sneaky = render("::image src=/x.svg width=\"1px; background: url(//evil)\"\n");
+        assert!(
+            !sneaky.contains("style="),
+            "尺寸参数不该拼出 style 属性：{sneaky}"
+        );
 
         // 没有 src：说清缺什么
         let missing = render("::image\n");
@@ -400,5 +419,4 @@ mod tests {
         assert!(html.contains("标题=含 空格"), "{html}");
         assert!(html.contains("<pre><code>内容一行</code></pre>"), "{html}");
     }
-
 }

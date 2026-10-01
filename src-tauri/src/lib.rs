@@ -38,7 +38,7 @@ struct WorkspaceInfo {
 /// 每个命令各自打开一次工作目录与数据库 —— 不跨命令共享状态
 fn open_database() -> Result<(Workspace, Database), String> {
     let workspace = Workspace::open_default()?;
-    let database = Database::open(workspace.database_dir())?;
+    let database = Database::open(&workspace)?;
     Ok((workspace, database))
 }
 
@@ -134,16 +134,30 @@ fn list_revisions(title: String) -> Result<Vec<RevisionSummary>, String> {
 
 /// 回滚到某一版（永远是**新增一个提交**）。
 /// `reference` 是地址里的版本 token；`copy` 为真时复制那一版的封装（不解锁），
-/// 为假时解锁那一版、照当前保护重写。返回新版本号。
+/// 为假时解锁那一版重写 —— 重写可以顺带指定**新的保护**（`protection`，
+/// 不给就照这篇当前的保护）与它的口令（`passphrase`，只在要套对称层时用得上）。
+/// 返回新版本号。
 #[tauri::command]
 fn rollback_note(
     title: String,
     reference: String,
     summary: Option<String>,
     copy: bool,
+    protection: Option<Policy>,
+    passphrase: Option<String>,
 ) -> Result<u64, String> {
     let (_, database) = open_database()?;
-    database.rollback_note(&title, &reference, summary, copy)
+    database.rollback_note(&title, &reference, summary, copy, protection, passphrase)
+}
+
+/// 某一版的签名校验报告（签名者、验没验过、为什么）；没有签名层返回 null
+#[tauri::command]
+fn signature_report(
+    title: String,
+    reference: Option<String>,
+) -> Result<Option<codec::SignatureReport>, String> {
+    let (_, database) = open_database()?;
+    database.signature_report(&title, reference.as_deref())
 }
 
 #[tauri::command]
@@ -161,7 +175,10 @@ fn list_notes() -> Result<Vec<NoteSummary>, String> {
 /// 现有的特殊页面（菜单据此生成）
 #[tauri::command]
 fn special_pages() -> Vec<String> {
-    address::SPECIAL_PAGES.iter().map(|page| page.to_string()).collect()
+    address::SPECIAL_PAGES
+        .iter()
+        .map(|page| page.to_string())
+        .collect()
 }
 
 /// 编辑器预览：把 markdown 渲染成 HTML，与阅读页**同一个渲染器**
@@ -203,6 +220,7 @@ pub fn run() {
             discard_draft,
             list_revisions,
             rollback_note,
+            signature_report,
             delete_note,
             list_notes,
             special_pages,

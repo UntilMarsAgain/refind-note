@@ -212,8 +212,12 @@ mod tests {
 
     #[test]
     fn colon_prefixes_are_rejected_with_a_reason() {
-        assert!(parse_main("special:all").unwrap_err().contains("虚拟命名空间"));
-        assert!(parse_main("foo:bar").unwrap_err().contains("没有这个命名空间"));
+        assert!(parse_main("special:all")
+            .unwrap_err()
+            .contains("虚拟命名空间"));
+        assert!(parse_main("foo:bar")
+            .unwrap_err()
+            .contains("没有这个命名空间"));
         assert!(parse_main(":x").unwrap_err().contains("要写命名空间名"));
     }
 }

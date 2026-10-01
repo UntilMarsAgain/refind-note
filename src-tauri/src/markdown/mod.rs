@@ -6,7 +6,6 @@
 //! [`crate::title::LinkResolver`] 传进来，再经 [`render_with`] 注入当次渲染。
 #![allow(dead_code)]
 
-
 pub mod syntax;
 
 use crate::title::LinkResolver;
@@ -89,9 +88,12 @@ static MARKDOWN: LazyLock<MarkdownIt> = LazyLock::new(|| {
     // 正文里弯引号、长破折号是锦上添花，在代码里却是**改坏内容**。crate 这两条规则不区分
     // 代码片段，所以在技术笔记里只能整个摘掉。（对应测试：code_spans_keep_their_literals）
     md.remove_rule::<markdown_it::plugins::extra::typographer::TypographerRule>();
-    md.remove_rule::<
-        markdown_it::plugins::extra::smartquotes::SmartQuotesRule<'\u{2018}', '\u{2019}', '\u{201c}', '\u{201d}'>,
-    >();
+    md.remove_rule::<markdown_it::plugins::extra::smartquotes::SmartQuotesRule<
+        '\u{2018}',
+        '\u{2019}',
+        '\u{201c}',
+        '\u{201d}',
+    >>();
     markdown_it::plugins::extra::heading_anchors::add(&mut md, slugify_heading);
 
     // 自定义语法统一在 syntax/ 里注册
@@ -189,7 +191,10 @@ mod tests {
         assert!(html.contains("a -- b"), "破折号被改写了：{html}");
         // 直引号在 HTML 里会转义成 &quot;，那是应有的转义；要拦的是被换成弯引号
         assert!(!html.contains('\u{201c}'), "引号被换成弯引号了：{html}");
-        assert!(html.contains("&quot;引号&quot;"), "直引号应当原样保留：{html}");
+        assert!(
+            html.contains("&quot;引号&quot;"),
+            "直引号应当原样保留：{html}"
+        );
     }
 
     /// 缩进代码块语法已关闭：四空格开头不再是代码块。

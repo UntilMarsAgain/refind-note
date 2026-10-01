@@ -3,12 +3,14 @@
 //! ```text
 //! db/
 //!   meta.json      认领标记、版本、建库时间
-//!   config.json    数据语义设置（目前是封装策略）
 //!   titles.json    id → 标题
 //!   blobs/ab/<address>
 //!   objects/0/<id>.log
 //!   drafts/<id>
 //!   trash/
+//!
+//! settings/
+//!   config.json    数据语义设置（目前是封装策略）—— 跟着仓库走
 //! ```
 //!
 //! 目录与那些 JSON 在打开时按需建出来：第一次启动就该是完整的，不必等写了一次才出现。
@@ -23,7 +25,7 @@ use time::OffsetDateTime;
 use crate::codec::Policy;
 use crate::notes::Titles;
 use crate::store::BlobStore;
-use crate::workspace::write_json;
+use crate::workspace::{write_json, Workspace};
 
 /// 认领标记：`meta.json` 里是它，才认这是重逢笔记的数据库
 pub const KIND: &str = "refind-note";
@@ -75,12 +77,20 @@ impl Default for Config {
 #[derive(Debug)]
 pub struct Database {
     root: PathBuf,
+    /// 数据语义设置（`config.json`）所在的那一层
+    settings: PathBuf,
     meta: Meta,
 }
 
 impl Database {
     /// 打开（必要时建立）数据库，并认一遍它是谁的、什么版本。
-    pub fn open(root: PathBuf) -> Result<Self, String> {
+    ///
+    /// 数据库自己的文件都在 `db/` 下；**数据语义设置**（`config.json`）放到
+    /// 工作目录的 `settings/` 下 —— 它跟着仓库走，但和别的配置文件放在一处。
+    pub fn open(workspace: &Workspace) -> Result<Self, String> {
+        let root = workspace.database_dir();
+        let settings = workspace.settings_dir();
+
         for dir in [root.clone(), root.join(BLOBS_DIR), root.join(DRAFTS_DIR)] {
             fs::create_dir_all(&dir)
                 .map_err(|error| format!("建不出目录 {}：{error}", dir.display()))?;
@@ -88,9 +98,13 @@ impl Database {
 
         let meta = open_meta(&root)?;
         ensure_json(&root.join(TITLES_FILE), &Titles::default())?;
-        ensure_json(&root.join(CONFIG_FILE), &Config::default())?;
+        ensure_json(&settings.join(CONFIG_FILE), &Config::default())?;
 
-        let database = Self { root, meta };
+        let database = Self {
+            root,
+            settings,
+            meta,
+        };
         database.ensure_namespace_dirs()?;
         Ok(database)
     }
@@ -128,10 +142,7 @@ impl Database {
 
     /// 某个命名空间下已删除笔记的日志
     pub fn trash_note_path(&self, ns: &str, id: &str) -> PathBuf {
-        self.root
-            .join(TRASH_DIR)
-            .join(ns)
-            .join(format!("{id}.log"))
+        self.root.join(TRASH_DIR).join(ns).join(format!("{id}.log"))
     }
 
     pub fn blobs(&self) -> BlobStore {
@@ -151,11 +162,11 @@ impl Database {
     }
 
     pub fn config(&self) -> Config {
-        crate::workspace::read_json(&self.root.join(CONFIG_FILE))
+        crate::workspace::read_json(&self.settings.join(CONFIG_FILE))
     }
 
     pub fn save_config(&self, config: &Config) -> Result<(), String> {
-        write_json(&self.root.join(CONFIG_FILE), config)
+        write_json(&self.settings.join(CONFIG_FILE), config)
     }
 
     /// 仓库默认的保护策略：新笔记从它出发，之后照每篇自己的最新一版
@@ -242,17 +253,30 @@ mod tests {
         dir
     }
 
+    /// 从暂存目录开一个库（工作目录的骨架先建出来）
+    fn open(dir: &Path) -> Result<Database, String> {
+        let workspace = Workspace::open(dir.to_path_buf())?;
+        Database::open(&workspace)
+    }
+
     #[test]
     fn a_fresh_directory_becomes_a_database() {
         let root = scratch("fresh");
-        let database = Database::open(root.clone()).unwrap();
+        let database = open(&root).unwrap();
 
         assert_eq!(database.meta().kind, KIND);
         assert_eq!(database.meta().version, MODEL_VERSION);
         OffsetDateTime::parse(&database.meta().created_at, &Rfc3339).expect("该是 RFC3339");
 
         // 目录骨架与那几张表第一次打开就该在
-        assert!(database.blobs().path_of("x").parent().unwrap().parent().unwrap().is_dir());
+        assert!(database
+            .blobs()
+            .path_of("x")
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .is_dir());
         assert!(database.drafts_dir().is_dir());
         assert!(database.titles_path().is_file());
         // 压缩默认开着：正文多半是文本，压一下几乎总是划算，而且无感
@@ -263,7 +287,7 @@ mod tests {
         assert!(!default_protection.symmetric);
 
         // 重新打开认得出来，且不新建
-        let again = Database::open(root.clone()).unwrap();
+        let again = open(&root).unwrap();
         assert_eq!(again.meta().created_at, database.meta().created_at);
 
         let _ = fs::remove_dir_all(&root);
@@ -272,14 +296,15 @@ mod tests {
     #[test]
     fn a_foreign_directory_is_refused() {
         let root = scratch("foreign");
-        fs::create_dir_all(&root).unwrap();
+        let database_dir = root.join("db");
+        fs::create_dir_all(&database_dir).unwrap();
         fs::write(
-            root.join(META_FILE),
+            database_dir.join(META_FILE),
             r#"{"kind":"别的东西","version":"1.0.0","created_at":"2026-01-01T00:00:00Z"}"#,
         )
         .unwrap();
 
-        let error = Database::open(root.clone()).unwrap_err();
+        let error = open(&root).unwrap_err();
         assert!(error.contains("不是重逢笔记的数据库"), "{error}");
 
         let _ = fs::remove_dir_all(&root);
@@ -288,15 +313,19 @@ mod tests {
     #[test]
     fn a_version_mismatch_is_refused() {
         let root = scratch("version");
-        fs::create_dir_all(&root).unwrap();
+        let database_dir = root.join("db");
+        fs::create_dir_all(&database_dir).unwrap();
         fs::write(
-            root.join(META_FILE),
+            database_dir.join(META_FILE),
             r#"{"kind":"refind-note","version":"9.9.9","created_at":"2026-01-01T00:00:00Z"}"#,
         )
         .unwrap();
 
-        let error = Database::open(root.clone()).unwrap_err();
-        assert!(error.contains("9.9.9") && error.contains(MODEL_VERSION), "{error}");
+        let error = open(&root).unwrap_err();
+        assert!(
+            error.contains("9.9.9") && error.contains(MODEL_VERSION),
+            "{error}"
+        );
 
         let _ = fs::remove_dir_all(&root);
     }
@@ -304,12 +333,13 @@ mod tests {
     #[test]
     fn broken_metadata_is_refused_instead_of_being_overwritten() {
         let root = scratch("broken");
-        fs::create_dir_all(&root).unwrap();
-        fs::write(root.join(META_FILE), "{ 这不是 JSON").unwrap();
+        let database_dir = root.join("db");
+        fs::create_dir_all(&database_dir).unwrap();
+        fs::write(database_dir.join(META_FILE), "{ 这不是 JSON").unwrap();
 
-        assert!(Database::open(root.clone()).is_err());
+        assert!(open(&root).is_err());
         // 没有被当成"新建"而覆盖掉 —— 内容还在，人还能去看
-        assert!(fs::read_to_string(root.join(META_FILE))
+        assert!(fs::read_to_string(database_dir.join(META_FILE))
             .unwrap()
             .contains("这不是 JSON"));
 

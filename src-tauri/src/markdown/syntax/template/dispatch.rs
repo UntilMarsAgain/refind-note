@@ -24,7 +24,10 @@ pub fn render(template: &Template, node: &Node, fmt: &mut dyn Renderer) {
 /// 所以从输出上就能看出解析成了什么 —— 引号去了哪儿、空格是否保住。
 pub(super) fn render_unknown(template: &Template, fmt: &mut dyn Renderer) {
     fmt.cr();
-    fmt.open("div", &[("class", "template template--unknown".to_string())]);
+    fmt.open(
+        "div",
+        &[("class", "template template--unknown".to_string())],
+    );
     fmt.cr();
     head(fmt, "未知模板", template);
     fmt.cr();
@@ -40,7 +43,10 @@ pub(super) fn render_unknown(template: &Template, fmt: &mut dyn Renderer) {
 /// 提示词要跟着这个区别走，否则作者会往错的方向查。
 pub(super) fn render_problem(template: &Template, fmt: &mut dyn Renderer, why: &str) {
     fmt.cr();
-    fmt.open("div", &[("class", "template template--problem".to_string())]);
+    fmt.open(
+        "div",
+        &[("class", "template template--problem".to_string())],
+    );
     fmt.cr();
     head(fmt, "模板用法有问题", template);
     fmt.cr();
