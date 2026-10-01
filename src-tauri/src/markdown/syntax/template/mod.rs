@@ -111,16 +111,19 @@ impl BlockRule for TemplateScanner {
         }
 
         let body = rebuild_body(&body_lines);
-        let mut node = Node::new(Template {
-            name,
-            params,
-            body: body.clone(),
-        });
-        // 块内容交给**整个解析器**再解析一遍：模板里因此可以写 markdown、内部链接，
+        // `text=…` 给了就以它为准（`::banner` 那种一条横条，正文与参数二选一）。
+        // 它也要能写 markdown，所以和块内容走同一条路。
+        let source = match params.iter().find(|(key, _)| key == "text") {
+            Some((_, text)) => text.clone(),
+            None => body.clone(),
+        };
+
+        let mut node = Node::new(Template { name, params, body });
+        // 内容交给**整个解析器**再解析一遍：模板里因此可以写 markdown、内部链接，
         // 也可以再嵌模板（嵌套的 `::quote` 就是靠这一步成立的）。
         //
         // `Node` 带 Drop，字段不能直接搬出来，所以用 `mem::take` 换走它的 children。
-        let mut parsed = state.md.parse(&body);
+        let mut parsed = state.md.parse(&source);
         node.children = std::mem::take(&mut parsed.children);
         Some((node, line - start))
     }
@@ -129,6 +132,24 @@ impl BlockRule for TemplateScanner {
 #[cfg(test)]
 mod tests {
     use crate::markdown::render;
+
+    /// 标题带里的内容按 markdown 渲染：加粗、内部链接都算数
+    #[test]
+    fn banner_renders_markdown_in_its_body() {
+        let html = render("::banner\n  这是**加粗**与[[目标]]\n");
+        assert!(html.contains("<strong>加粗</strong>"), "{html}");
+        assert!(html.contains("wikilink"), "{html}");
+        // 一条横条：不该在横条里再套一个段落
+        assert!(!html.contains("<p><p>"), "{html}");
+        assert_eq!(html.matches("class=\"banner\"").count(), 1, "{html}");
+    }
+
+    /// `text=` 同样按 markdown 渲染
+    #[test]
+    fn banner_renders_markdown_in_its_text_parameter() {
+        let html = render("::banner text=\"**加粗**的标题\"\n");
+        assert!(html.contains("<strong>加粗</strong>"), "{html}");
+    }
 
     #[test]
     fn indentation_separates_inside_from_outside() {

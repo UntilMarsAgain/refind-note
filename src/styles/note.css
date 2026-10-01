@@ -586,6 +586,29 @@
   font-weight: 600;
 }
 
+/* 横条里的链接：底色是主题色，链接不能再是主题色（会糊在一起），
+   所以这里一律用当前文字色加下划线 */
+.note-body .banner a,
+.note-body .banner a.wikilink,
+.note-body .banner a.wikilink[data-missing="true"] {
+  color: inherit;
+  border-bottom: 1px solid currentColor;
+}
+
+/* 横条里写了多段（少见）：左对齐读起来才不别扭 */
+.note-body div.banner {
+  text-align: left;
+  font-weight: 400;
+}
+
+.note-body div.banner > :first-child {
+  margin-top: 0;
+}
+
+.note-body div.banner > :last-child {
+  margin-bottom: 0;
+}
+
 /* `::image` 图片：尺寸是上限，位置由 align 决定 */
 .note-body .image {
   margin: 1.2em 0;

@@ -465,6 +465,13 @@ fn lock() {
     session::forget_all();
 }
 
+/// 这一版的口令在不在本次会话里（界面上的"口令已暂存"）
+#[tauri::command]
+fn passphrase_stored(title: String, reference: Option<String>) -> Result<bool, String> {
+    let (_, database) = open_database()?;
+    database.passphrase_stored(&title, reference.as_deref())
+}
+
 /// 忘掉这一篇在这次会话里存过的口令（它的每一版）
 #[tauri::command]
 fn forget_passphrase(title: String) -> Result<(), String> {
@@ -528,6 +535,7 @@ pub fn run() {
             render_markdown,
             unlock,
             lock,
+            passphrase_stored,
             forget_passphrase,
         ])
         .run(tauri::generate_context!())

@@ -184,6 +184,19 @@ impl Database {
         })
     }
 
+    /// 这一版的口令在不在**本次会话**里。
+    ///
+    /// 只看内存，不读 blob、不碰 gpg —— 界面上那枚"口令已暂存"的标记要常用，
+    /// 不能顺手把验签那种花时间的活也带上。
+    pub fn passphrase_stored(&self, title: &str, reference: Option<&str>) -> Result<bool, String> {
+        let id = self.locate(title)?;
+        let rev = match reference {
+            None => self.state_of(&id)?.rev,
+            Some(token) => token_to_rev(token)?,
+        };
+        Ok(session::passphrase_for(&id, rev).is_some())
+    }
+
     /// 给某一版解锁：`reference` 是 token，`None` = 最新版
     pub fn unlock(
         &self,

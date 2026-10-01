@@ -26,8 +26,6 @@ const props = defineProps<{
 interface Layer {
   key: "compress" | "sign" | "encrypt" | "symmetric";
   label: string;
-  /** 这一层让字节不再是明文 */
-  sealed: boolean;
   /** 点开有细节可看（压缩没有） */
   reportable: boolean;
 }
@@ -37,16 +35,21 @@ const layers = computed<Layer[]>(() => {
   const found: Layer[] = [];
 
   if (protection.compress) {
-    found.push({ key: "compress", label: "已压缩", sealed: false, reportable: false });
+    found.push({ key: "compress", label: "已压缩", reportable: false });
   }
   if (protection.sign) {
-    found.push({ key: "sign", label: "已签名", sealed: false, reportable: true });
+    found.push({ key: "sign", label: "已签名", reportable: true });
   }
   if (protection.encrypt) {
-    found.push({ key: "encrypt", label: "已加密", sealed: true, reportable: true });
+    found.push({ key: "encrypt", label: "已加密", reportable: true });
   }
   if (protection.symmetric) {
-    found.push({ key: "symmetric", label: "口令加密", sealed: true, reportable: true });
+    // 口令在本次会话里就直接说出来：这一枚回答的是"现在读得动吗"
+    found.push({
+      key: "symmetric",
+      label: stored.value ? "口令已暂存" : "口令加密",
+      reportable: true,
+    });
   }
 
   return found;
@@ -108,11 +111,40 @@ async function forget() {
     await forgetPassphrase(props.title);
     openedKey.value = null;
     report.value = null;
+    stored.value = false;
     flash(`已忘掉「${props.title}」的口令，再次阅读时需要重新输入`);
   } catch (error) {
     problem.value = String(error);
   }
 }
+
+/**
+ * 这一版的口令暂存在本次会话里没有。
+ *
+ * 单独问、进页面就问：它只查内存，不像验签那样要跑 gpg，所以不心疼。
+ */
+const stored = ref(false);
+
+async function checkStored() {
+  if (!props.protection.symmetric || !props.title) {
+    stored.value = false;
+    return;
+  }
+  try {
+    stored.value = await invoke<boolean>("passphrase_stored", {
+      title: props.title,
+      reference: props.reference ?? null,
+    });
+  } catch {
+    stored.value = false;
+  }
+}
+
+watch(
+  () => `${props.title ?? ""}|${props.reference ?? ""}|${props.protection.symmetric}`,
+  () => void checkStored(),
+  { immediate: true },
+);
 
 /** 换了一篇或换了一版：结论作废，重新问 */
 watch(
@@ -213,6 +245,7 @@ onBeforeUnmount(() => {
       <span
           v-if="layer.reportable && title"
           class="storage__badge storage__badge--ask"
+          :class="`storage__badge--${layer.key}`"
           role="button"
           tabindex="0"
           :aria-expanded="openedKey === layer.key"
@@ -227,7 +260,7 @@ onBeforeUnmount(() => {
       <span
           v-else
           class="storage__badge"
-          :class="{ 'storage__badge--sealed': layer.sealed }"
+          :class="`storage__badge--${layer.key}`"
       >
         {{ layer.label }}
       </span>
@@ -280,8 +313,21 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-/* 加过密的用主题色描边：不是错误状态，只是"这一份不是明文" */
-.storage__badge--sealed {
+/*
+ * 每一层一个调子：扫一眼就知道这一版是怎么存的。
+ * 颜色都取自主题变量，深浅两套主题下都成立。
+ */
+.storage__badge--sign {
+  border-color: var(--link-green);
+  color: var(--link-green);
+}
+
+.storage__badge--encrypt {
+  border-color: var(--link-blue);
+  color: var(--link-blue);
+}
+
+.storage__badge--symmetric {
   border-color: var(--accent-soft);
   color: var(--accent-soft);
 }

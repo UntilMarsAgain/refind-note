@@ -6,6 +6,7 @@ use super::dispatch::render_problem;
 use super::dispatch::TemplateRenderer;
 use super::fill;
 use super::parse::Template;
+use markdown_it::plugins::cmark::block::paragraph::Paragraph;
 use markdown_it::{Node, Renderer};
 
 /// 全部标准模板。
@@ -103,15 +104,13 @@ fn render_fields(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
 
 /// `::banner color=#0055a4` —— 一条方框标题带（信息栏里那种居中的标题条）。
 ///
-/// 文案取自块内容（一行），也可以用 `text=` 给；`color=` 给底色（只认 `#rgb` / `#rrggbb`），
-/// 字色由 [`text_on`] 按亮度定，免得深底配深字。
+/// 文案来自块内容（一行），或由 `text=` 给出；两者**都按 markdown 渲染**，
+/// 所以加粗、链接、内部链接在这里同样有效。
+/// `color=` 给底色（只认 `#rgb` / `#rrggbb`），字色由 [`text_on`] 按亮度定，
+/// 免得深底配深字。
 /// 名字取 `banner` 而不是"方框标题"之类：它是一个**横条**，越短越不容易与别的模板混淆。
-fn render_banner(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
-    let text = match template.param("text") {
-        Some(text) => text.to_string(),
-        None => template.body.replace('\n', " ").trim().to_string(),
-    };
-    if text.is_empty() {
+fn render_banner(template: &Template, node: &Node, fmt: &mut dyn Renderer) {
+    if node.children.is_empty() {
         render_problem(
             template,
             fmt,
@@ -134,10 +133,40 @@ fn render_banner(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
     }
 
     fmt.cr();
-    fmt.open("p", &attrs);
-    fmt.text(&text);
-    fmt.close("p");
+    match banner_content(node) {
+        // 常见情形：一行文字（解析出来就是一个段落）。横条里不能再套一个块，
+        // 所以把段落的**行内内容**摊平放进来。
+        BannerContent::Inline(inline) => {
+            fmt.open("p", &attrs);
+            fmt.contents(inline);
+            fmt.close("p");
+        }
+        // 写成了好几段、或者塞了别的块：那不是一条横条了，照块的规矩渲染，
+        // 内容不能丢，但换成 <div>，免得把一个块塞进 <p> 里。
+        BannerContent::Blocks => {
+            fmt.open("div", &attrs);
+            fmt.cr();
+            fmt.contents(&node.children);
+            fmt.close("div");
+        }
+    }
     fmt.cr();
+}
+
+/// 标题带里的东西该按行内还是按块渲染
+enum BannerContent<'a> {
+    /// 一个段落：渲染它里面的行内内容
+    Inline(&'a [Node]),
+    /// 别的：按块渲染
+    Blocks,
+}
+
+/// 只有一个段落时按行内渲染 —— 这是"一条横条"该有的样子
+fn banner_content<'a>(node: &'a Node) -> BannerContent<'a> {
+    match node.children.as_slice() {
+        [only] if only.is::<Paragraph>() => BannerContent::Inline(&only.children),
+        _ => BannerContent::Blocks,
+    }
 }
 
 /// `#abc` / `#aabbcc` → 规范的 `#aabbcc`；别的写法一律不认
