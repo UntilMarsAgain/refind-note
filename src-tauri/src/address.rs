@@ -12,7 +12,7 @@ use serde::Serialize;
 use crate::title::{self, SPECIAL_NAMESPACE};
 
 /// 现有的特殊页面。不在这里面的 `special:` 地址直接报「没有这个特殊页面」。
-const SPECIAL_PAGES: [&str; 10] = [
+pub const SPECIAL_PAGES: [&str; 10] = [
     "newtab", "settings", "all", "random", "gc", "trash", "debug", "files", "history", "changes",
 ];
 
@@ -175,7 +175,7 @@ fn mode_of(state: &str) -> Result<Mode, String> {
 /// 拼规范串：`[命名空间:]页面名称[@状态][#段落]`，状态排在段落前面。
 ///
 /// 阅读最新版（`Mode::View` 不带 token）缩写掉 `@view` —— 裸名称就是它的规范形状。
-fn compose(address: &Address) -> String {
+pub(crate) fn compose(address: &Address) -> String {
     let mut out = String::new();
     if !address.namespace.spelling.is_empty() {
         out.push_str(&address.namespace.spelling);

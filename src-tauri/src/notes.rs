@@ -17,9 +17,10 @@
 //! （见 `commit_with`）。回滚有两种做法：照当前保护重写（`rollback`），
 //! 或直接复制那一版的封装（`rollback_copy`）。
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -27,6 +28,7 @@ use crate::codec::{Meta, Policy, Protection, Secrets};
 use crate::database::{now, Database, MAIN_NS};
 use crate::session;
 use crate::store::hash_hex;
+use crate::title::LinkResolver;
 use crate::workspace::{append_line, read_json, write_bytes, write_json};
 
 const DEFAULT_MIME: &str = "text/markdown";
@@ -92,6 +94,8 @@ pub struct Note {
     pub title: String,
     /// 原样源码
     pub markdown: String,
+    /// 阅读用的 HTML。内部链接已经标好红/蓝
+    pub html: String,
     pub rev: u64,
     pub created: String,
     pub modified: String,
@@ -604,16 +608,36 @@ impl Database {
             (markdown, self.blobs().protection(&blob)?)
         };
 
+        let html = self.render_html(&markdown, &display)?;
+
         Ok(Note {
             key: format!("{}:{}", state.ns, state.title),
             title: display,
             markdown,
+            html,
             rev,
             created: state.created.clone(),
             modified,
             summary,
             protection,
         })
+    }
+
+    /// 把正文渲染成 HTML。
+    ///
+    /// 内部链接要判红蓝，所以得先把「现有的全部页面名」交给解析器 ——
+    /// 渲染发生在 markdown-it 的回调里，那时没有仓库可查。
+    ///
+    /// 阅读页与编辑器预览都走这里：**渲染只有一处**，所以"预览里是什么样"
+    /// 与"存下来再读是什么样"不会分家。
+    pub fn render_html(&self, markdown: &str, title: &str) -> Result<String, String> {
+        let resolver = LinkResolver::new(self.link_keys()?, Some(title.to_string()));
+        Ok(crate::markdown::render_with(markdown, Some(&resolver)))
+    }
+
+    /// 现有笔记的页面名集合（链接解析用它判红 / 蓝链）
+    fn link_keys(&self) -> Result<Arc<HashSet<String>>, String> {
+        Ok(Arc::new(self.titles()?.notes.values().cloned().collect()))
     }
 
     /// 这一篇的全部提交，**新的在前**。

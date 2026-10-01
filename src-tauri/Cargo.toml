@@ -42,6 +42,12 @@ gpgme = "0.11"
 # 时间戳用 RFC3339：建库时间、日志里的时间、草稿的修改时间。
 time = { version = "0.3", features = ["formatting", "parsing"] }
 
+# ---- 渲染 ----
+
+# 笔记正文的 markdown → HTML。默认 features 里含 syntect：它把代码高亮配色以内联
+# style 写死，跟随不了主题，所以关掉；代码分词交给前端。
+markdown-it = { version = "0.6", default-features = false, features = ["linkify"] }
+
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
