@@ -11,7 +11,7 @@
 
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { type MenuItem, openMenu } from "./context-menu.ts";
-import { fileTargetOf, fileUrl } from "./file-links.ts";
+import { fileTargetOf, fileUrl, vaultKeyOf } from "./file-links.ts";
 import { saveNameOf, saveVaultFile, savableTitle } from "./file-save.ts";
 import { fileInfo, freshUrl, readable, unlockFile } from "./file-unlock.ts";
 import { viewImage } from "./image-viewer.ts";
@@ -216,7 +216,10 @@ export function decorateNoteHtml(root: HTMLElement): void {
         // 本仓库里的文件：可能**加密存的**（那就不该直接去拉），
         // 也可能压根不是图（`![](片子.mp4)` —— markdown 一律渲染成 <img>，这里换成播放器）。
         // 先挂上"待判"的牌子：问明白之前，取不到字节不算"图片不存在"
-        const name = fileTargetOf(image.getAttribute("src") ?? "");
+        //
+        // 名字要从**已经换过的**地址里反查（上面 `resolveFileTargets` 刚把它换成
+        // `refind://…`，那个形式带协议，`fileTargetOf` 是不认的）
+        const name = vaultKeyOf((image.getAttribute("src") ?? "").split("?")[0]);
         if (name) {
             image.dataset.vault = "pending";
         }
