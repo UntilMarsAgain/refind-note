@@ -749,17 +749,25 @@ watch(
     <div id="sync-keys" class="row" :class="{ 'row--target': isFocused('sync-keys') }">
       <span class="row__label">密钥</span>
       <code class="row__id">#sync-keys</code>
+      <!--
+        两把都按密码框显示：Access Key 也是能在服务商控制台之外**不该露在屏幕上**的东西
+        （直播、共享屏幕、截图）。它要照着控制台核对，所以值留着，只是打成点；
+        点进去全选，直接敲新的就换掉了。
+      -->
       <input
           v-model="sync.access_key"
           class="row__text"
-          type="text"
+          type="password"
+          autocomplete="off"
           placeholder="Access Key"
+          @focus="($event.target as HTMLInputElement).select()"
           @change="saveSync()"
       />
       <input
           v-model="secretDraft"
           class="row__text"
           type="password"
+          autocomplete="new-password"
           :placeholder="sync.has_secret ? 'Secret Key 已设置（留空表示不改）' : 'Secret Key'"
           @change="saveSync()"
       />
@@ -792,6 +800,7 @@ watch(
     </div>
 
     <p class="settings__hint">
+      两把钥匙都按密码框显示（打成点），不摆在屏幕上。
       密钥由本程序生成（32 字节随机），<strong>只存在这台机器上，界面上不显示</strong> ——
       显示出来就不只是"碰到电脑才能偷"了：直播、共享屏幕、随手截个图都可能把它带出去。
       要带到别的机器上，用「导出到文件」，那份文件就是钥匙本身（别放进会被同步的目录）。
