@@ -1,5 +1,6 @@
 /**
- * 地址：语法层的解析结果 —— 与 Rust 侧 `src-tauri/src/address.rs` 一一对应。
+ * 地址：语法层的解析结果，以及它落到仓库上的结论 ——
+ * 与 Rust 侧 `src-tauri/src/address.rs`、`resolve.rs` 一一对应。
  *
  * 字段按 snake_case 原样进 JSON；改了 Rust 那边就要改这里
  * （那边有一条线格式测试钉住形状，改错会先炸）。
@@ -34,4 +35,17 @@ export interface ParsedAddress {
     address: Address;
     /** 规范串：地址栏回显、历史都用它 —— 前端不自己拼地址 */
     canonical: string;
+}
+
+/** 地址落到仓库上的结论："这是什么地方" */
+export type Outcome =
+    | { kind: "note"; title: string }
+    | { kind: "missing"; title: string }
+    | { kind: "special"; page: string };
+
+/** 地址 + 它落到仓库上的结论（`resolve_address` 的产物） */
+export interface ResolvedAddress {
+    address: Address;
+    canonical: string;
+    outcome: Outcome;
 }

@@ -34,6 +34,37 @@
     --rail-width: 168px;
     --rail-collapsed-width: 46px;
 
+    /* 阅读栏最大宽度（页头与正文共用同一条，按它限宽居中） */
+    --reading-width: 1080px;
+
+    /* 标题栏右侧按钮区总宽（3 个窗口按钮 × 44px）：顶部缩放热区要避开这片区域 */
+    --titlebar-actions-width: 132px;
+
+    /* 行内代码、锚点标签这类小色块的底 */
+    --code-bg: rgba(255, 255, 255, 0.07);
+
+    /* 选中文本的底色。系统默认那抹蓝在深色下过于刺眼，所以自己给一个 */
+    --selection-bg: rgba(91, 141, 214, 0.5);
+
+    /*
+     * 链接颜色**钉死**，不跟主题色走。
+     *
+     * 蓝 = 有对应页面的内部链接与外链；红 = 红链（页面不存在）；绿 = 跨站链接。
+     * 含义不该因为用户换了主题色而变，所以它们不从 `--accent` 派生，深浅两套各给一组。
+     */
+    --link-blue: #8ab4f8;
+    --link-green: #8ac48f;
+    --link-missing: #e2645c;
+
+    /* 代码高亮配色：highlight.js 只负责分词，颜色由 CSS 给，这样才能跟着深浅色走 */
+    --syntax-comment: #7f8c8d;
+    --syntax-keyword: #c678dd;
+    --syntax-string: #98c379;
+    --syntax-number: #d19a66;
+    --syntax-title: #61afef;
+    --syntax-type: #e5c07b;
+    --syntax-deleted: #e06c75;
+
     /* 覆盖浏览器模式 */
     color-scheme: dark;
 
@@ -64,5 +95,17 @@
     --border: rgba(0, 0, 0, 0.14);
     --divider: rgba(0, 0, 0, 0.22);
     --field-bg: rgba(0, 0, 0, 0.05);
+    --code-bg: rgba(0, 0, 0, 0.06);
+    --selection-bg: rgba(47, 111, 196, 0.22);
+    --link-blue: #2f6fc4;
+    --link-green: #2f7a4a;
+    --link-missing: #b02a2a;
+    --syntax-comment: #6a737d;
+    --syntax-keyword: #a626a4;
+    --syntax-string: #50a14f;
+    --syntax-number: #986801;
+    --syntax-title: #4078f2;
+    --syntax-type: #c18401;
+    --syntax-deleted: #e45649;
     color-scheme: light;
 }

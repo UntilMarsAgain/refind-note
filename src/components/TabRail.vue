@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from "vue";
-import { PanelLeftClose, PanelLeftOpen, Plus, Settings, Trash, X } from "@lucide/vue";
+import { PanelLeftClose, PanelLeftOpen, Plus, Settings, X } from "@lucide/vue";
 import { openMenu } from "../context-menu.ts";
+import { railCollapsed, toggleRail } from "../preferences.ts";
 import type { TabState } from "../tabs.ts";
 import { initialOf } from "../title.ts";
 
@@ -32,15 +33,7 @@ const emit = defineEmits<{
   /** 拖放调整顺序 */
   (e: "move", from: number, to: number): void;
   (e: "settings"): void;
-  (e: "trash"): void;
 }>();
-
-/** 标签栏**此刻**展不展开；只有标签栏自己用得到，所以放在组件本地 */
-const railCollapsed = ref(false);
-
-function toggleRail(): void {
-  railCollapsed.value = !railCollapsed.value;
-}
 
 /** 正在抖的是哪一格（连索引一起记下来：之后切标签不该把动画挪走） */
 const shakeIndex = ref<number | null>(null);
@@ -177,12 +170,6 @@ function onTabMenu(event: MouseEvent, index: number) {
         </div>
       </li>
     </TransitionGroup>
-
-    <!-- 回收站入口：与设置一样放在标签列表底下（它不是一个标签） -->
-    <button class="rail__entry" type="button" aria-label="回收站" @click="emit('trash')">
-      <Trash :size="16" :stroke-width="1.75" />
-      <span class="rail__text">回收站</span>
-    </button>
 
     <!-- 设置入口：放在标签列表底下，与标签区分开（它不是一个标签） -->
     <button class="rail__entry" type="button" aria-label="设置" @click="emit('settings')">

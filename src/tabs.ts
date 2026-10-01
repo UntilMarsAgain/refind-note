@@ -1,6 +1,6 @@
 import { computed, ref } from "vue";
-import { parseAddress, titleOf } from "./address.ts";
-import type { ParsedAddress } from "./bindings/address.ts";
+import { resolveAddress, titleOf } from "./address.ts";
+import type { ResolvedAddress } from "./bindings/address.ts";
 
 /** 切换标签页的原因 */
 export type Movement =
@@ -14,14 +14,16 @@ export interface TabState {
   id: string;
   /** 地址栏里的字。标题栏与它双向绑定；**可能不是规范地址**（编辑中、或刚写错） */
   address: string;
-  /** 这个标签页当前在哪：一次地址解析的结果（`canonical` 就是规范地址）。新标签页是 null */
-  route: ParsedAddress | null;
+  /** 这个标签页当前在哪：地址**解析并落到仓库上**的结果（`canonical` 就是规范地址）。新标签页是 null */
+  route: ResolvedAddress | null;
   /** 标签栏上显示的名字。由 `route` 派生并缓存在这里，便于列表渲染 */
   title: string;
   /** 这个标签页自己的浏览历史。存的是**规范地址**；新标签页是空的 */
   history: string[];
   /** 历史里的位置：后退 / 前进就是挪它。`-1` = 还没去过任何地方 */
   cursor: number;
+  /** 上一次停下的滚动位置：切回来时还原 */
+  scroll: number;
   /** 上一次地址解析失败的原因（一句给人看的话）。空串表示没有错误 */
   error: string;
 }
@@ -53,6 +55,7 @@ export function createTab(): TabState {
     title: NEW_TAB_TITLE,
     history: [],
     cursor: -1,
+    scroll: 0,
     error: "",
   };
 }
@@ -214,9 +217,9 @@ export function useTabs() {
     }
 
     tab.error = "";
-    let route: ParsedAddress | null;
+    let route: ResolvedAddress | null;
     try {
-      route = await parseAddress(input);
+      route = await resolveAddress(input);
     } catch (error) {
       tab.error = String(error);
       return false;

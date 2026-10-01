@@ -12,9 +12,7 @@ use serde::Serialize;
 use crate::title::{self, SPECIAL_NAMESPACE};
 
 /// 现有的特殊页面。不在这里面的 `special:` 地址直接报「没有这个特殊页面」。
-pub const SPECIAL_PAGES: [&str; 10] = [
-    "newtab", "settings", "all", "random", "gc", "trash", "debug", "files", "history", "changes",
-];
+pub const SPECIAL_PAGES: [&str; 5] = ["newtab", "settings", "all", "random", "debug"];
 
 /// 命名空间部分：`id` 是它的身份，`spelling` 是回显时用的拼写。
 ///

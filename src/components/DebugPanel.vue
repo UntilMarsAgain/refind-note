@@ -1,0 +1,217 @@
+<script setup lang="ts">
+import { computed } from "vue";
+import { Copy, X } from "@lucide/vue";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { canonicalOf, sectionOf } from "../address.ts";
+import type { Mode, ResolvedAddress } from "../bindings/address.ts";
+import { policyLabel } from "../bindings/note.ts";
+import { flash } from "../notice.ts";
+import { gpgAvailable, preferences, protection, railCollapsed } from "../preferences.ts";
+import { labelOf } from "../special.ts";
+import type { TabState } from "../tabs.ts";
+
+/**
+ * 调试信息框：**前端**的状态与**当前这一页**的状态。
+ *
+ * 右下角那组按钮里的「虫子」调它出来。它只读，不改任何东西 ——
+ * 排查"看着不对"的时候，先看这里比到处打日志快。
+ *
+ * 仓库那一层的事实（工作目录、数据库）不在这里，在 `special:debug` 那张诊断页上。
+ */
+const props = defineProps<{
+  tab: TabState | null;
+}>();
+
+defineEmits<{
+  (e: "close"): void;
+}>();
+
+const route = computed<ResolvedAddress | null>(() => props.tab?.route ?? null);
+
+/** 地址里的浏览状态，按它自己的写法显示（与规范串里的后缀一致） */
+function modeLabel(mode: Mode | null): string {
+  if (!mode) {
+    return "（无）";
+  }
+  switch (mode.kind) {
+    case "view":
+      return mode.ref ? `view-${mode.ref}` : "view";
+    case "rollback":
+      return `rollback-${mode.ref}`;
+    case "unlock":
+      return mode.ref ? `unlock-${mode.ref}` : "unlock";
+    default:
+      return mode.kind;
+  }
+}
+
+/** 地址落到仓库上的结论说成一句话 */
+function outcomeLabel(resolved: ResolvedAddress | null): string {
+  if (!resolved) {
+    return "新标签页：还没有地址";
+  }
+  switch (resolved.outcome.kind) {
+    case "note":
+      return `笔记「${resolved.outcome.title}」`;
+    case "missing":
+      return `「${resolved.outcome.title}」还不存在`;
+    case "special":
+      return `特殊页面「${labelOf(resolved.outcome.page)}」`;
+  }
+}
+
+/**
+ * 一行行的事实。
+ *
+ * **渲染与复制用的是同一份** —— 否则"看到的"和"抄走的"迟早对不上。
+ */
+const facts = computed(() => {
+  const tab = props.tab;
+  return [
+    { label: "解析结果", value: outcomeLabel(route.value) },
+    { label: "地址模式", value: modeLabel(route.value?.address.mode ?? null) },
+    { label: "规范地址", value: canonicalOf(route.value) || "（无）" },
+    { label: "前端地址栏内容", value: tab?.address || "（空）" },
+    { label: "地址章节", value: sectionOf(route.value) || "（无）" },
+    {
+      label: "本页历史",
+      value: tab?.history.length
+        ? `${tab.cursor + 1} / ${tab.history.length}`
+        : "（还没去过任何地方）",
+    },
+    { label: "界面缩放", value: `${Math.round(preferences.value.zoom * 100)}%` },
+    {
+      label: "深浅色 / 主题色",
+      value: `${preferences.value.theme} · ${preferences.value.accent}`,
+    },
+    { label: "宽度限制器", value: preferences.value.limit_width ? "开" : "关" },
+    { label: "标签栏（此刻）", value: railCollapsed.value ? "收起" : "展开" },
+    { label: "标签栏（默认）", value: preferences.value.rail_collapsed ? "收起" : "展开" },
+    { label: "仓库默认保护", value: policyLabel(protection.value) },
+    {
+      label: "gpg",
+      value: gpgAvailable.value ? "可用" : "没有 gpg（签名 / 加密不可用）",
+    },
+  ];
+});
+
+/** 抄成「标签：值」一行一条 —— 贴进别处时不用再整理 */
+async function copyFacts() {
+  const text = facts.value.map((fact) => `${fact.label}：${fact.value}`).join("\n");
+
+  try {
+    await writeText(text);
+    flash("调试信息已复制");
+  } catch (error) {
+    console.warn("复制调试信息失败：", error);
+    flash(`复制失败：${error}`);
+  }
+}
+</script>
+
+<template>
+  <section class="debug" role="region" aria-label="调试信息">
+    <header class="debug__head">
+      <span class="debug__title">调试信息</span>
+      <span class="debug__actions">
+        <button class="debug__icon" type="button" title="复制" aria-label="复制" @click="copyFacts">
+          <Copy :size="13" :stroke-width="2" />
+        </button>
+        <button class="debug__icon" type="button" title="关闭" aria-label="关闭" @click="$emit('close')">
+          <X :size="13" :stroke-width="2" />
+        </button>
+      </span>
+    </header>
+
+    <dl class="debug__facts">
+      <div v-for="fact in facts" :key="fact.label" class="debug__fact">
+        <dt>{{ fact.label }}</dt>
+        <dd>{{ fact.value }}</dd>
+      </div>
+    </dl>
+  </section>
+</template>
+
+<style scoped>
+.debug {
+  display: flex;
+  flex-direction: column;
+  max-width: min(420px, 72vw);
+  max-height: min(60vh, 460px);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  /* 不透明：它压在渲染区上，半透明会让底下的字透上来 */
+  background: var(--surface);
+  box-shadow: 0 12px 34px rgb(0 0 0 / 28%);
+}
+
+.debug__head {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 8px 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.debug__title {
+  color: var(--text-dim);
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+}
+
+.debug__actions {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.debug__icon {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.debug__icon:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.debug__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px 18px;
+  margin: 0;
+  padding: 12px;
+  overflow-y: auto;
+}
+
+.debug__fact {
+  min-width: 0;
+}
+
+.debug__fact dt {
+  color: var(--text-dim);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+}
+
+.debug__fact dd {
+  margin: 2px 0 0;
+  color: var(--text);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+  /* 这些值是要抄下来贴进别处的 */
+  -webkit-user-select: text;
+  user-select: text;
+}
+</style>

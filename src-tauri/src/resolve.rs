@@ -95,6 +95,23 @@ impl Database {
         }
     }
 
+    /// 回滚到某一版（`reference` 是地址里的版本 token；`copy` 见 [`Self::rollback_copy`]）。
+    /// 返回新版本号。
+    pub fn rollback_note(
+        &self,
+        title: &str,
+        reference: &str,
+        summary: Option<String>,
+        copy: bool,
+    ) -> Result<u64, String> {
+        let rev = token_to_rev(reference)?;
+        if copy {
+            self.rollback_copy(title, rev, summary)
+        } else {
+            Ok(self.rollback(title, rev, summary)?.rev)
+        }
+    }
+
     /// 给某一版解锁：`reference` 是 token，`None` = 最新版
     pub fn unlock(&self, title: &str, reference: Option<&str>, passphrase: &str) -> Result<(), String> {
         let rev = match reference {

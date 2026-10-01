@@ -133,16 +133,17 @@ fn list_revisions(title: String) -> Result<Vec<RevisionSummary>, String> {
 }
 
 /// 回滚到某一版（永远是**新增一个提交**）。
-/// `copy` 为真时复制那一版的封装（不解锁）；为假时解锁那一版、照当前保护重写。
-/// 返回新版本号。
+/// `reference` 是地址里的版本 token；`copy` 为真时复制那一版的封装（不解锁），
+/// 为假时解锁那一版、照当前保护重写。返回新版本号。
 #[tauri::command]
-fn rollback_note(title: String, rev: u64, summary: Option<String>, copy: bool) -> Result<u64, String> {
+fn rollback_note(
+    title: String,
+    reference: String,
+    summary: Option<String>,
+    copy: bool,
+) -> Result<u64, String> {
     let (_, database) = open_database()?;
-    if copy {
-        database.rollback_copy(&title, rev, summary)
-    } else {
-        Ok(database.rollback(&title, rev, summary)?.rev)
-    }
+    database.rollback_note(&title, &reference, summary, copy)
 }
 
 #[tauri::command]
@@ -187,6 +188,7 @@ fn lock() {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
             open_workspace,
             save_preferences,

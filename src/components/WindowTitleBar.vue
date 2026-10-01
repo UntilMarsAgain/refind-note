@@ -7,6 +7,8 @@ import {onMounted, onUnmounted, ref} from "vue";
 const props = defineProps<{
   /** 规范地址（当前标签页解析结果里那一份）。失焦 / Esc 以它回显 */
   committed: string;
+  /** 启动跑完了没有：没跑完之前不显示地址栏与菜单键（那时界面还不是真东西） */
+  ready?: boolean;
   canBack?: boolean;
   canForward?: boolean;
 }>();
@@ -85,11 +87,17 @@ function onBlur() {
       >
         <ArrowRight :size="16" :stroke-width="1.75"/>
       </button>
-      <button class="tbtn" type="button" aria-label="菜单" @click="emit('menu')">
+      <button
+          v-if="ready !== false"
+          class="tbtn"
+          type="button"
+          aria-label="菜单"
+          @click="emit('menu')"
+      >
         <Menu :size="16" :stroke-width="1.75"/>
       </button>
     </div>
-    <div class="titlebar-middle">
+    <div v-if="ready !== false" class="titlebar-middle">
       <input
           ref="fieldEl"
           v-model="address"
