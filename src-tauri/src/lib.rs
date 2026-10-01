@@ -33,20 +33,27 @@ pub(crate) fn open_database() -> Result<(Workspace, Database), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        // 单实例：同一个登录会话里只跑一个重逢笔记。
-        //
-        // 必须**第一个**注册：第二次启动要在别的插件初始化之前就退出，
-        // 只把已有窗口拉到前面 —— 两个进程去抢同一个仓库可不是闹着玩的。
-        // 顺带承接 `refind://…`：系统是"再拉起一个实例、把 URL 当参数给它"，
-        // 那个参数只有这里收得到。
-        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.unminimize();
-                let _ = window.set_focus();
-            }
-            platform::deep_link::deliver_from_arguments(app, args);
-        }))
+    let builder = tauri::Builder::default();
+
+    // 单实例：同一个登录会话里只跑一个重逢笔记。
+    //
+    // 必须**第一个**注册：第二次启动要在别的插件初始化之前就退出，
+    // 只把已有窗口拉到前面 —— 两个进程去抢同一个仓库可不是闹着玩的。
+    // 顺带承接 `refind://…`：系统是"再拉起一个实例、把 URL 当参数给它"，
+    // 那个参数只有这里收得到。
+    //
+    // **手机上没这回事**：那边一个程序本来就只有前台这一个实例，也没有"第二次启动"
+    // 这码事（那个插件也只做桌面）—— 所以这里分平台拼。
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+        }
+        platform::deep_link::deliver_from_arguments(app, args);
+    }));
+
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -126,6 +133,19 @@ pub fn run() {
             platform::deep_link::take_pending_address,
         ])
         .setup(|app| {
+            // 手机上不存在"用户主目录"这回事：仓库与临时文件都放进**程序自己的目录**
+            // （Android 上是 `/data/user/0/<包名>/`，卸载才没）。这件事得在窗口起来之前
+            // 定下来 —— 第一条命令进来就要用（见 `storage::workspace::install_root`）。
+            #[cfg(mobile)]
+            {
+                if let Ok(root) = app.path().app_data_dir() {
+                    storage::workspace::install_root(root.join("refind-note"));
+                }
+                if let Ok(cache) = app.path().app_cache_dir() {
+                    platform::staging::install_scratch(cache.join("refind-note-open"));
+                }
+            }
+
             // 把 `refind://` 交给系统认下来（Linux 上由我们自己写 .desktop 与 mimeapps.list，
             // 见 `platform::deep_link` 里那段说明）。失败只记一笔：注册不上不该让程序起不来
             if let Err(error) = platform::deep_link::register(app.handle()) {

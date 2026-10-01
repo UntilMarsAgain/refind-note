@@ -26,6 +26,7 @@
 
 use std::fmt;
 use std::io::Write;
+#[cfg(any(desktop, test))]
 use std::process::Command;
 
 use aes_gcm::aead::{Aead, KeyInit};
@@ -499,6 +500,7 @@ pub fn signature_report(file: &[u8], secrets: &Secrets<'_>) -> Result<Option<Sig
 }
 
 /// 本机认不认得这把钥匙。只看钥匙串里有没有，不去解任何东西。
+#[cfg(desktop)]
 pub fn encryption_report(key: &str) -> Result<EncryptionReport> {
     let mut context = gpg_context()?;
 
@@ -517,6 +519,17 @@ pub fn encryption_report(key: &str) -> Result<EncryptionReport> {
         uid: key_uid(key),
         secret,
         detail,
+    })
+}
+
+/// 移动端：没有 gpg —— 这一份解不开，如实说（文案与桌面端"本机没有这把钥匙"一致）
+#[cfg(mobile)]
+pub fn encryption_report(key: &str) -> Result<EncryptionReport> {
+    Ok(EncryptionReport {
+        key: key.to_string(),
+        uid: None,
+        secret: false,
+        detail: "这台设备上没有 gpg：这一份解不开（GPG 是桌面上的功能）".to_string(),
     })
 }
 
@@ -794,6 +807,31 @@ fn random_into(buffer: &mut [u8]) -> Result<()> {
 }
 
 // ---------------------------------------------------------------- 系统 gpg
+//
+// **手机上这一层不存在**：gpg 是桌面上的系统组件（还要 libgpgme 这个系统库），
+// Android / iOS 上装不了。所以下面那一整块在 mobile 上编译不进来，换成紧跟其后的
+// 几个同名的桩 —— 调用它们的地方照旧拿到一句"没有 gpg"，功能降级，编译照过。
+
+/// 移动端：没有 gpg —— 签名、验签、加解密都用不了，其余功能一切照常
+#[cfg(mobile)]
+fn gpg_sign(_content: &[u8], _key_id: &str) -> Result<String> {
+    Err(CodecError::GpgUnavailable)
+}
+
+#[cfg(mobile)]
+fn gpg_verify(_content: &[u8], _signature: &[u8]) -> Result<VerifyOutcome> {
+    Err(CodecError::GpgUnavailable)
+}
+
+#[cfg(mobile)]
+fn gpg_encrypt(_content: &[u8], _key_id: &str) -> Result<Vec<u8>> {
+    Err(CodecError::GpgUnavailable)
+}
+
+#[cfg(mobile)]
+fn gpg_decrypt(_content: &[u8]) -> Result<Vec<u8>> {
+    Err(CodecError::GpgUnavailable)
+}
 
 /// 这台计算机上有没有可用的 gpg。
 ///
@@ -803,18 +841,26 @@ fn random_into(buffer: &mut [u8]) -> Result<()> {
 /// 每次调用都真去探一遍 —— gpg 的操作本来就要起进程，多这一次无妨；
 /// 好处是用户中途装上 gpg，不用重启程序。
 pub fn gpg_available() -> bool {
-    #[cfg(test)]
-    if FORCE_NO_GPG.load(std::sync::atomic::Ordering::Relaxed) {
-        return false;
+    // 手机上不可能有 gpg（那一层桌面才有，还要 libgpgme）：不必去探
+    #[cfg(mobile)]
+    {
+        false
     }
+    #[cfg(desktop)]
+    {
+        #[cfg(test)]
+        if FORCE_NO_GPG.load(std::sync::atomic::Ordering::Relaxed) {
+            return false;
+        }
 
-    ["gpg", "gpg2"].into_iter().any(|program| {
-        Command::new(program)
-            .arg("--version")
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
-    })
+        ["gpg", "gpg2"].into_iter().any(|program| {
+            Command::new(program)
+                .arg("--version")
+                .output()
+                .map(|output| output.status.success())
+                .unwrap_or(false)
+        })
+    }
 }
 
 /// 测试用：假装这台机器上没有 gpg（不假装就真去探）。
@@ -835,6 +881,7 @@ pub fn set_gpg_home(dir: std::path::PathBuf) {
 ///
 /// 最要紧的是**取消**：口令输入框被关掉时 gpg 报的东西（`操作已取消 (gpg error 99)`）
 /// 对用户毫无意义 —— 那不是故障，是"没输口令"。
+#[cfg(desktop)]
 fn gpg_error(action: &str, error: gpgme::Error) -> CodecError {
     // 取消是 gpg 自己的一种"错"（99）：拿它自己那个常量比，别写死数字
     if error.code() == gpgme::error::Error::CANCELED.code() {
@@ -843,6 +890,7 @@ fn gpg_error(action: &str, error: gpgme::Error) -> CodecError {
     CodecError::Gpg(format!("{action}失败：{error}"))
 }
 
+#[cfg(desktop)]
 pub(crate) fn gpg_context() -> Result<gpgme::Context> {
     if !gpg_available() {
         return Err(CodecError::GpgUnavailable);
@@ -863,6 +911,7 @@ pub(crate) fn gpg_context() -> Result<gpgme::Context> {
     Ok(context)
 }
 
+#[cfg(desktop)]
 fn gpg_sign(content: &[u8], key_id: &str) -> Result<String> {
     let mut context = gpg_context()?;
     let key = context
@@ -893,6 +942,7 @@ pub struct VerifyOutcome {
     pub detail: String,
 }
 
+#[cfg(desktop)]
 fn gpg_verify(content: &[u8], signature: &[u8]) -> Result<VerifyOutcome> {
     let mut context = gpg_context()?;
     // 注意参数顺序：第一个是**签名**，第二个才是被签的字节
@@ -938,6 +988,7 @@ fn gpg_verify(content: &[u8], signature: &[u8]) -> Result<VerifyOutcome> {
 ///
 /// 放在这里是因为两个地方都要用：密钥列表（`features::keys`）与"这一版是谁签的"
 /// （签名 / 加密报告）—— 同一条标识在两处必须长得一样。
+#[cfg(desktop)]
 pub fn uid_text(uid: gpgme::UserId<'_>) -> Option<String> {
     let name = uid.name().ok().unwrap_or_default();
     let email = uid.email().ok().unwrap_or_default();
@@ -952,12 +1003,20 @@ pub fn uid_text(uid: gpgme::UserId<'_>) -> Option<String> {
 /// 钥匙串里这一把的**主**用户标识；查不到（没装 gpg、钥匙串里没有它）就是 `None`。
 ///
 /// 只读公开信息，不解锁、不动私钥。
+#[cfg(desktop)]
 pub fn key_uid(key_id: &str) -> Option<String> {
     let mut context = gpg_context().ok()?;
     let key = context.get_key(key_id).ok()?;
     key.user_ids().find_map(uid_text)
 }
 
+/// 移动端：读不到钥匙串（没有 gpg）—— 与"钥匙串里没有它"是同一个答案
+#[cfg(mobile)]
+pub fn key_uid(_key_id: &str) -> Option<String> {
+    None
+}
+
+#[cfg(desktop)]
 pub(crate) fn trust_label(validity: gpgme::Validity) -> String {
     match validity {
         gpgme::Validity::Unknown => "本机没有这把公钥".to_string(),
@@ -969,6 +1028,7 @@ pub(crate) fn trust_label(validity: gpgme::Validity) -> String {
     }
 }
 
+#[cfg(desktop)]
 fn gpg_encrypt(content: &[u8], key_id: &str) -> Result<Vec<u8>> {
     let mut context = gpg_context()?;
     let key = context
@@ -988,6 +1048,7 @@ fn gpg_encrypt(content: &[u8], key_id: &str) -> Result<Vec<u8>> {
     Ok(cipher)
 }
 
+#[cfg(desktop)]
 fn gpg_decrypt(content: &[u8]) -> Result<Vec<u8>> {
     let mut context = gpg_context()?;
     let mut plain = Vec::new();

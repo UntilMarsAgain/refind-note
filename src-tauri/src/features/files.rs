@@ -245,7 +245,11 @@ impl Database {
 /// 给了 `rev` 就带上版本号 —— 看历史里的某一版时，取的是那一版的字节，
 /// 与"最新一版"分得开（不然旧版的页面会显示成新版的样子）。
 pub fn url_of(name: &str, rev: Option<u64>) -> String {
-    let base = format!("refind://localhost/file/{}", encode_key(name));
+    let base = format!(
+        "{}/file/{}",
+        crate::platform::protocol::file_origin(),
+        encode_key(name)
+    );
     match rev {
         Some(rev) => format!("{base}?rev={rev}"),
         None => base,

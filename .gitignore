@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Arch 打包（packaging/arch）：源码包与 makepkg 的产物都是本机生出来的
+packaging/arch/*.tar.gz
+packaging/arch/src/
+packaging/arch/pkg/
+packaging/arch/*.pkg.tar.*
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

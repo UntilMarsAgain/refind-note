@@ -9,12 +9,26 @@
 import type { FileEntry } from "../ipc/files.ts";
 
 /**
+ * 自定义协议在各平台**长得不一样**（跟着 Tauri 自己那条规则走）：
+ *
+ * - Windows 与 Android：`http://<协议>.localhost/…`（那两个 webview 不认自定义协议头）
+ * - Linux / macOS / iOS：`<协议>://localhost/…`
+ *
+ * 写错这一处，那两个平台上所有图片、音视频都取不到字节，而别的地方看着一切正常。
+ * 后端同样的那条在 `platform::protocol::file_origin`。
+ */
+const FILE_ORIGIN =
+    typeof navigator !== "undefined" && /Windows|Android/i.test(navigator.userAgent)
+        ? "http://refind.localhost"
+        : "refind://localhost";
+
+/**
  * 文件字节的地址前缀（Rust 侧注册的协议）。
  *
- * 路径里写的是**页面名**（`桥.png`）；后端接上 `File:` 前缀去取那一页的最新一版 ——
+ * 路径里写的是**页面名**（`桥.png`）；后端接上 `file/` 那一段去取那一页的最新一版 ——
  * 于是"笔记里写的名字"与"文件存在哪"仍然是分开的两件事。
  */
-export const FILE_SCHEME = "refind://localhost/file/";
+export const FILE_SCHEME = `${FILE_ORIGIN}/file/`;
 
 /** 一段引用：图片用 `![]()`，其余用 `[]()` */
 export function fileReferenceOf(file: { name: string; mime: string }): string {

@@ -9,6 +9,25 @@ use crate::open_database;
 use crate::platform::decode_percent;
 use crate::vault::namespace;
 
+/// 取字节的地址头 —— 手拼这个地址的地方都得用它。
+///
+/// 自定义协议在各平台的写法**不一样**：
+///
+/// - **Windows 与 Android**：`http://refind.localhost/…`
+///   （这两个 webview 不认自定义协议头，Tauri 把它们挂在 `.localhost` 上）
+/// - Linux / macOS / iOS：`refind://localhost/…`
+///
+/// 这一条跟着 Tauri 自己的规则走（它内部那段 `convertFileSrc`）。拼错了，
+/// 那两个平台上所有图片、音视频都取不到字节，而别的地方看着一切正常 ——
+/// 前端同样的那条在 `dom/file-links.ts` 的 `FILE_ORIGIN`。
+pub fn file_origin() -> &'static str {
+    if cfg!(any(windows, target_os = "android")) {
+        "http://refind.localhost"
+    } else {
+        "refind://localhost"
+    }
+}
+
 /// `refind://localhost/file/<名字>` → 文件页面的字节。
 ///
 /// 只给 webview 里的 `<img src>` 用：笔记正文里写的是相对名字，渲染之后由前端

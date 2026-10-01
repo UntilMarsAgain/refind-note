@@ -26,6 +26,9 @@ tauri-plugin-opener = "2"
 tauri-plugin-clipboard-manager = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# 用户主目录：三个系统三套说法（HOME / USERPROFILE / 实际配置目录），
+# 自己挑环境变量不如走这个（它连"环境变量没有"的场面都兜得住）。
+dirs = "7"
 
 # ---- 存储仓库 ----
 
@@ -40,10 +43,16 @@ argon2 = "0.5"
 getrandom = "0.2"
 # 封装头里的 salt / nonce 以文本存放（base64）。
 base64 = "0.22"
-# 封装格式的 gpg 层：OpenPGP 自己实现是灾难，交给系统配置（走 gpgme）。
-gpgme = "0.11"
 # 时间戳用 RFC3339：建库时间、日志里的时间、草稿的修改时间。
 time = { version = "0.3", features = ["formatting", "parsing"] }
+
+# ---- 平台专有 ----
+
+# 封装格式的 gpg 层：OpenPGP 自己实现是灾难，交给系统配置（走 gpgme）。
+# 它要系统里有 libgpgme —— **桌面才有这个库**；手机上装不了，所以移动端根本不把
+# 它编进来（代码那边有同名的桩，见 `storage/codec.rs` 里"系统 gpg"那一段）。
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+gpgme = "0.11"
 
 # ---- 渲染 ----
 

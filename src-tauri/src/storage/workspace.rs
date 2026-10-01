@@ -16,12 +16,25 @@
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 /// 工作目录名（放在用户主目录下）
 pub const DIR_NAME: &str = ".refind-note";
+
+/// 装配层指定的仓库位置（移动端用）。
+///
+/// 桌面上有"用户主目录"这回事，`~/.refind-note` 在哪儿不用问别人；手机上不存在这个
+/// 概念 —— 能写的地方是**程序自己的目录**（`/data/user/0/<包名>/files`，卸载才没），
+/// 那个路径只有拿到 `AppHandle` 才知道，所以由启动时的那一层告诉这里。
+static INSTALLED_ROOT: OnceLock<PathBuf> = OnceLock::new();
+
+/// 把仓库的位置定下来（只认第一次；移动端在启动时叫一次）
+pub fn install_root(root: PathBuf) {
+    let _ = INSTALLED_ROOT.set(root);
+}
 
 /// 数据库文件夹
 const DB_DIR: &str = "db";
@@ -70,8 +83,12 @@ impl Workspace {
         Ok(workspace)
     }
 
-    /// 打开默认工作目录：`~/.refind-note`
+    /// 打开默认工作目录：桌面上是 `~/.refind-note`，移动端是程序自己的目录
+    /// （见 [`install_root`]）
     pub fn open_default() -> Result<Self, String> {
+        if let Some(installed) = INSTALLED_ROOT.get() {
+            return Self::open(installed.clone());
+        }
         Self::open(home_dir()?.join(DIR_NAME))
     }
 
@@ -103,12 +120,13 @@ impl Workspace {
     }
 }
 
-/// 用户主目录
+/// 用户主目录。
+///
+/// 三个系统三套说法：Linux/macOS 是 `HOME`，Windows 是 `USERPROFILE`（还有一套
+/// 注册表里的"实际配置目录"，`dirs` 帮我们走那条最准的路）。环境变量都靠不住时
+/// 它会去查系统，比我们自己挑环境变量可靠。
 fn home_dir() -> Result<PathBuf, String> {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
-        .ok_or_else(|| "找不到用户主目录（HOME / USERPROFILE 都没有）".to_string())
+    dirs::home_dir().ok_or_else(|| "找不到用户主目录".to_string())
 }
 
 /// 读一个 JSON 文件；不在、读不动、或内容不成形，一律给默认值。
@@ -141,10 +159,27 @@ pub fn write_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
 
     fs::write(&temporary, bytes)
         .map_err(|error| format!("写入 {} 失败：{error}", temporary.display()))?;
-    fs::rename(&temporary, path)
+    replace_file(&temporary, path)
         .map_err(|error| format!("落盘 {} 失败：{error}", path.display()))?;
 
     Ok(())
+}
+
+/// 把临时文件改名顶到目标上。
+///
+/// **Windows 上 rename 盖不住已经存在的文件**（Unix 可以）：那里得先把旧的删掉。
+/// 于是那一小段不是原子的 —— 但只在 Windows 上、只在"目标已存在"时走到，而且断在
+/// 中间最坏是这份文件没了（内容还在别处：同步过的在云端，没同步的本来也只有这一份）。
+/// 比"从第二次写入起每个文件都写不进去"要好得多。
+fn replace_file(temporary: &Path, target: &Path) -> std::io::Result<()> {
+    match fs::rename(temporary, target) {
+        Ok(()) => Ok(()),
+        Err(_) if cfg!(windows) => {
+            fs::remove_file(target)?;
+            fs::rename(temporary, target)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 /// 追加一行（日志用）。只追加、不重写，崩溃最多丢最后一行。

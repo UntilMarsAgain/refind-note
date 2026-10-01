@@ -1,0 +1,75 @@
+# 重逢笔记 —— Arch Linux 包（从源码构建）
+#
+# 为什么不用 `tauri build` 产出的 deb / AppImage：
+#   * deb 是 Debian 那一套，Arch 上装了不认；
+#   * AppImage 打包要下载 linuxdeploy（在 GitHub 上，网不好时拿不到），而且要自带
+#     GStreamer 才能播视频 —— 这里没有。
+# 所以走"从源码构建"这一条：依赖交给 pacman，媒体解码交给 gst-*，都是系统里现成的。
+#
+# 本地打包（源码就在手边，不必先推到网上）：
+#
+#     cd packaging/arch && ./make-source.sh && makepkg -si
+#
+# `make-source.sh` 会把仓库根目录打成一个 tar.gz（避开 target/ 与 node_modules/），
+# makepkg 从它构建。要发到 AUR 的话，把 `source` 换成发布用的 tarball 地址、
+# `sha256sums` 钉上真实哈希即可。
+
+pkgname=refind-note
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="本地优先的笔记与文件仓库（重逢笔记）"
+arch=('x86_64' 'aarch64')
+url="https://example.invalid/refind-note"
+license=('AGPL-3.0-only')
+depends=(
+  'webkit2gtk-4.1'   # webview 本体
+  'gtk3'
+  'gpgme'            # GPG 那一层（签名 / 加密 / 验签）
+  'gst-plugins-base'
+  'gst-plugins-good' # 音视频的基本解码
+  'gst-libav'        # H.264 这类：没有它，网页里嵌的视频放不出来
+  'hicolor-icon-theme'
+)
+makedepends=('rust' 'cargo' 'nodejs' 'pnpm' 'git')
+# 上游 release profile 已经开了 lto 与 codegen-units=1，别再叠一层
+options=('!lto' '!strip')
+
+source=("$pkgname-$pkgver.tar.gz")
+# 本地打出来的源码包，哈希每次都不一样；要发 AUR 时钉成真实值
+sha256sums=('SKIP')
+
+build() {
+  cd "$pkgname-$pkgver"
+
+  # 前端先产出 dist/ —— Tauri 的 frontendDist 指向它（见 src-tauri/tauri.conf.json）。
+  # `--prefer-offline`：本地 store 里有就不去网上问，网不好时这点很要紧。
+  pnpm install --frozen-lockfile --prefer-offline
+  pnpm build
+
+  # 后端（Tauri 已经把前端打进二进制里，所以只装这一个可执行文件）
+  cd src-tauri
+  cargo build --release --locked
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+
+  install -Dm755 src-tauri/target/release/refind-note "$pkgdir/usr/bin/refind-note"
+
+  # 桌面项里那条 MimeType 就是 `refind://` 的注册：装完系统就认得这个协议
+  install -Dm644 packaging/refind-note.desktop \
+    "$pkgdir/usr/share/applications/refind-note.desktop"
+
+  for size in 32 128 256 512; do
+    case $size in
+      32) icon=src-tauri/icons/32x32.png ;;
+      128) icon=src-tauri/icons/128x128.png ;;
+      256) icon=src-tauri/icons/128x128@2x.png ;;
+      512) icon=src-tauri/icons/icon.png ;;
+    esac
+    install -Dm644 "$icon" \
+      "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/refind-note.png"
+  done
+
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

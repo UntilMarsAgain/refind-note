@@ -1038,7 +1038,11 @@ fn acquire(s3: &S3, force: bool) -> Result<Lock, String> {
 }
 
 fn hostname() -> String {
+    // 三个系统三套说法：Linux 认 `HOSTNAME`、Windows 认 `COMPUTERNAME`，
+    // 再不行（比如 Android）读 `/etc/hostname`，都不行就报"某台机器" —— 锁上那个
+    // 名字只是给另一台机器看的，没有它也一样排队。
     std::env::var("HOSTNAME")
+        .or_else(|_| std::env::var("COMPUTERNAME"))
         .or_else(|_| std::fs::read_to_string("/etc/hostname").map(|text| text.trim().to_string()))
         .ok()
         .filter(|name| !name.is_empty())

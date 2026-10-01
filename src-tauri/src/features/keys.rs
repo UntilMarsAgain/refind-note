@@ -3,9 +3,14 @@
 //! 只做"看得见、选得中"这两件事：**私钥永远不会离开钥匙串**，这里也不生成密钥
 //! （那要用 `gpg --quick-generate-key` 那套交互流程，不归这个程序管）。
 //! 读到的都是钥匙串里本来就有的公开信息：指纹、用户标识、信任程度、能不能签/加密。
+//!
+//! **手机上这一页是空的**：gpg 是桌面上的系统组件（还要 libgpgme），Android / iOS
+//! 上装不了。那几个函数在移动端换成桩（列表空着、导入删除说一句"没有"），
+//! 其余功能一切照常 —— 与 [`crate::storage::codec`] 里"系统 gpg"那一段是同一个道理。
 
 use serde::Serialize;
 
+#[cfg(desktop)]
 use crate::storage::codec::{gpg_available, gpg_context};
 
 /// 一把钥匙的公开信息
@@ -45,6 +50,7 @@ pub struct ImportSummary {
 /// 列出钥匙串里的全部钥匙（新的在前）。
 ///
 /// 没有 gpg 的机器上返回空列表 —— 这不是错误：那一页本来就该显示"这台机器上没有 gpg"。
+#[cfg(desktop)]
 pub fn list() -> Result<Vec<GpgKey>, String> {
     if !gpg_available() {
         return Ok(Vec::new());
@@ -91,6 +97,7 @@ pub fn list() -> Result<Vec<GpgKey>, String> {
 ///
 /// 文件里带不带私钥都收：gpg 自己分得清，这里照它的结果如实报出来
 /// （见 [`ImportSummary::secret_imported`]）—— 带私钥的导入要让人知道。
+#[cfg(desktop)]
 pub fn import(bytes: &[u8]) -> Result<ImportSummary, String> {
     let mut context = gpg_context().map_err(|error| error.to_string())?;
     let result = context
@@ -111,6 +118,7 @@ pub fn import(bytes: &[u8]) -> Result<ImportSummary, String> {
 ///
 /// 有私钥的钥匙串一律不动：那多半是这个人自己的钥匙（或者是别人给他的私钥），
 /// 误删的代价太大。要删私钥请自己用 gpg 去删。
+#[cfg(desktop)]
 pub fn delete(fingerprint: &str) -> Result<(), String> {
     let mut context = gpg_context().map_err(|error| error.to_string())?;
     let key = context
@@ -125,7 +133,31 @@ pub fn delete(fingerprint: &str) -> Result<(), String> {
         .map_err(|error| format!("删不掉：{error}"))
 }
 
+// ---------------------------------------------------------------- 移动端
+
+/// 移动端：没有 gpg，钥匙串就是空的（那一页本来也就该这么显示）
+#[cfg(mobile)]
+pub fn list() -> Result<Vec<GpgKey>, String> {
+    Ok(Vec::new())
+}
+
+/// 移动端：这台设备上没有 gpg 可用
+#[cfg(mobile)]
+pub fn import(_bytes: &[u8]) -> Result<ImportSummary, String> {
+    Err(MOBILE_MESSAGE.to_string())
+}
+
+/// 移动端：这台设备上没有 gpg 可用
+#[cfg(mobile)]
+pub fn delete(_fingerprint: &str) -> Result<(), String> {
+    Err(MOBILE_MESSAGE.to_string())
+}
+
+#[cfg(mobile)]
+const MOBILE_MESSAGE: &str = "这台设备上没有 gpg（GPG 那一层是桌面上的功能）";
+
 /// 时间戳 → RFC3339；没有就是空串
+#[cfg(desktop)]
 fn stamp(at: Option<std::time::SystemTime>) -> String {
     let Some(at) = at else {
         return String::new();
@@ -143,7 +175,7 @@ mod tests {
     #[test]
     fn without_gpg_the_list_is_simply_empty() {
         // 有 gpg 的机器上这条不算数：它测的是"没有的那条路"
-        if gpg_available() {
+        if crate::storage::codec::gpg_available() {
             return;
         }
         assert_eq!(list().unwrap(), Vec::new());

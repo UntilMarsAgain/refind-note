@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=重逢笔记
+Name[en]=refind-note
+GenericName=Note & file repository
+Comment=本地优先的笔记与文件仓库
+Comment[en]=Local-first notes and file repository
+Exec=refind-note %u
+Icon=refind-note
+Terminal=false
+Categories=Office;
+Keywords=notes;markdown;note;wiki;
+# `refind://Help:首页` 这类地址交给它：系统按这条把 URL 当参数递进来
+MimeType=x-scheme-handler/refind;
+StartupNotify=true
+StartupWMClass=refind-note

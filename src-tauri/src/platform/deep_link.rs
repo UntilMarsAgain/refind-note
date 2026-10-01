@@ -78,12 +78,20 @@ pub fn register(app: &AppHandle) -> Result<(), String> {
     register_on_linux(app)
 }
 
-/// 其余平台交给插件（macOS 靠 Info.plist 里的声明，Windows 靠注册表）。
-#[cfg(not(target_os = "linux"))]
+/// 桌面上其余两家交给插件（macOS 靠 Info.plist 里的声明，Windows 靠注册表）。
+#[cfg(all(desktop, not(target_os = "linux")))]
 pub fn register(app: &AppHandle) -> Result<(), String> {
     app.deep_link()
         .register_all()
         .map_err(|error| error.to_string())
+}
+
+/// 手机上**没有"注册协议"这回事**：Android 认的是打包时写进清单的 intent-filter，
+/// iOS 认 Info.plist —— 都在打包那一步定下来，运行时不必（也没法）改动。
+/// 插件在这两个平台上会直接回一句"不支持"，所以这里什么都不做，也别记日志。
+#[cfg(mobile)]
+pub fn register(_app: &AppHandle) -> Result<(), String> {
+    Ok(())
 }
 
 /// Linux 上的注册：写一份 `.desktop`，再把它写成这个协议的默认处理者。
