@@ -391,9 +391,11 @@ impl Database {
         let protection = self.blobs().protection(&state.blob)?;
         Ok(Policy {
             compress: protection.compress,
+            compression: protection.compression,
             gpg_sign: protection.sign,
             gpg_encrypt: protection.encrypt,
             symmetric: protection.symmetric,
+            cipher: protection.cipher,
         })
     }
 
@@ -750,9 +752,11 @@ impl Database {
                 String::new(),
                 Protection {
                     compress: false,
+                    compression: crate::storage::codec::Compression::default(),
                     sign: None,
                     encrypt: None,
                     symmetric: false,
+                    cipher: crate::storage::codec::Cipher::default(),
                 },
             )
         } else {

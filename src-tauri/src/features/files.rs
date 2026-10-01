@@ -170,9 +170,11 @@ impl Database {
             return Ok(Inspection {
                 protection: Protection {
                     compress: false,
+                    compression: crate::storage::codec::Compression::default(),
                     sign: None,
                     encrypt: None,
                     symmetric: false,
+                    cipher: crate::storage::codec::Cipher::default(),
                 },
                 meta: Meta::default(),
             });

@@ -35,7 +35,6 @@ sha2 = "0.11"
 # 封装格式的压缩层。默认后端是纯 Rust 的 miniz_oxide，不引 C 依赖。
 flate2 = "1"
 # 封装格式的对称加密层（AEAD）与口令派生。
-chacha20poly1305 = "0.10"
 argon2 = "0.5"
 # 生成 salt / nonce。
 getrandom = "0.2"
@@ -55,6 +54,9 @@ tauri-plugin-dialog = "2.8.1"
 include_dir = "0.7.4"
 tauri-plugin-single-instance = "2.5.2"
 tauri-plugin-deep-link = "2.6.1"
+brotli = "9.0.0"
+aes-gcm = "0.11.1"
+sm4 = "0.6.0"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

@@ -423,6 +423,8 @@ impl Database {
             signature,
             signature_problem,
             encryption,
+            compression: protection.compress.then_some(protection.compression),
+            cipher: protection.symmetric.then_some(protection.cipher),
             // 口令层问的是"这次会话里有没有它的口令"，也就是"现在还读不读得动"
             passphrase_ready: protection.symmetric.then(|| passphrase.is_some()),
         })
@@ -507,6 +509,10 @@ pub struct ProtectionReport {
     pub encryption: Option<EncryptionReport>,
     /// 口令层：这次会话里有没有这一版的口令（没套口令层就是 `None`）
     pub passphrase_ready: Option<bool>,
+    /// 压过的话用的哪一档算法（没压过就是 `None`）—— 逐份说，因为同一仓库里可以并存
+    pub compression: Option<codec::Compression>,
+    /// 套了口令层的话用的哪一档算法（没套就是 `None`）
+    pub cipher: Option<codec::Cipher>,
 }
 
 /// 把仓库的随机能力交给指令表：指令只知道"要随机挑一篇"，怎么挑是这里的事。

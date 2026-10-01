@@ -6,6 +6,9 @@
 //! 头 = { layers: [ …层链，内 → 外… ], meta: { mime } }
 //!
 //! 层序（内 → 外）：压缩 → GPG → 对称加密
+//!
+//! **算法写在头里**（压缩用哪种、口令层用哪种），所以同一份格式能容下好几档算法；
+//! 读的时候照头上那一档解，与当前设置无关 —— 换算法只影响此后写的那些。
 //! ```
 //!
 //! 四条规矩：
@@ -25,13 +28,12 @@ use std::fmt;
 use std::io::Write;
 use std::process::Command;
 
+use aes_gcm::aead::{Aead, KeyInit};
 use argon2::{Algorithm, Argon2, Params, Version};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
-use chacha20poly1305::aead::{Aead, KeyInit};
-use chacha20poly1305::{ChaCha20Poly1305, Nonce};
 use flate2::write::{DeflateDecoder, DeflateEncoder};
-use flate2::Compression;
+use flate2::Compression as DeflateLevel;
 use serde::{Deserialize, Serialize};
 
 /// 认得这个文件是本程序的封装格式
@@ -49,20 +51,92 @@ const SALT_BYTES: usize = 16;
 const NONCE_BYTES: usize = 12;
 const KEY_BYTES: usize = 32;
 
-/// 压缩的默认档位
-const DEFAULT_LEVEL: u32 = 6;
 /// 口令派生的默认代价（OWASP 对 Argon2id 的推荐量级）
 const DEFAULT_M_COST: u32 = 19_456;
 const DEFAULT_T_COST: u32 = 2;
 const DEFAULT_P_COST: u32 = 1;
+
+// ---------------------------------------------------------------- 算法
+//
+// 算法名是**写进头里的**，所以它们是**格式的一部分**：改名字就是改格式，
+// 会让已经落盘的那些读不出来。加算法就往后面加，别动已有的。
+
+/// 压缩算法
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Compression {
+    /// zlib/deflate：快，通用
+    #[default]
+    Deflate,
+    /// brotli：更小、更慢（静态内容划算）
+    Brotli,
+}
+
+impl Compression {
+    /// 界面上写给人看的名字
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Deflate => "deflate",
+            Self::Brotli => "brotli",
+        }
+    }
+
+    /// 这一档的默认参数（deflate 是 0–9 的档，brotli 是 0–11）
+    fn default_level(self) -> u32 {
+        match self {
+            Self::Deflate => 6,
+            Self::Brotli => 5,
+        }
+    }
+}
+
+/// 口令层的对称加密算法（口令派生都是 Argon2id，参数记在头里）。
+///
+/// 两档都是 AEAD：自带完整性校验，改一个字节都解不开。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Cipher {
+    /// AES-256-GCM：国际通用的那一档，有硬件指令的机器上很快
+    #[default]
+    Aes256Gcm,
+    /// SM4-GCM：国密（GB/T 32907 的 SM4 配上 GCM 那套认证）
+    Sm4Gcm,
+}
+
+impl Cipher {
+    /// 界面上写给人看的名字
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Aes256Gcm => "aes-256-gcm",
+            Self::Sm4Gcm => "sm4-gcm",
+        }
+    }
+
+    /// 这一档的密钥长度（SM4 的密钥是 128 位，与 AES-256 的 256 位不同）
+    fn key_bytes(self) -> usize {
+        match self {
+            Self::Aes256Gcm => 32,
+            Self::Sm4Gcm => 16,
+        }
+    }
+}
+
+/// AES-256-GCM
+type Aes256Gcm = aes_gcm::Aes256Gcm;
+/// SM4-GCM：同一个 GCM 实现，只是把分组密码换成 SM4（国密）
+type Sm4Gcm = aes_gcm::AesGcm<sm4::Sm4, aes_gcm::aead::consts::U12>;
 
 // ---------------------------------------------------------------- 层
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "layer", rename_all = "kebab-case")]
 pub enum Layer {
-    /// 压缩
-    Deflate { level: u32 },
+    /// 压缩：算法与档位都写在头里（**读的时候照它**，不看当前设置）
+    Compress {
+        algorithm: Compression,
+        /// 档位：deflate 是 0–9，brotli 是 0–11
+        level: u32,
+    },
     /// 系统 gpg。
     ///
     /// 签名是**分离签名**：它不改载荷，只把签名放在头里 —— 于是未加密的 blob
@@ -77,6 +151,8 @@ pub enum Layer {
     },
     /// 口令对称加密。口令由用户输入，参数存这里 —— 少了任何一个都解不开。
     Symmetric {
+        /// 用哪种算法
+        cipher: Cipher,
         salt: String,
         nonce: String,
         m_cost: u32,
@@ -164,12 +240,16 @@ pub struct EncryptionReport {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Protection {
     pub compress: bool,
+    /// 压缩用的算法（这一版头上记着的；没压过时没有意义）
+    pub compression: Compression,
     /// 签名者密钥指纹
     pub sign: Option<String>,
     /// 加密到的密钥指纹
     pub encrypt: Option<String>,
     /// 是否套了口令对称层
     pub symmetric: bool,
+    /// 口令层用的算法（没套口令层时没有意义）
+    pub cipher: Cipher,
 }
 
 impl Protection {
@@ -185,12 +265,16 @@ impl Protection {
 #[serde(default)]
 pub struct Policy {
     pub compress: bool,
+    /// 压缩用哪种算法（`compress` 为假时这一栏没意义）
+    pub compression: Compression,
     /// 用哪把密钥签名；`None` = 不签
     pub gpg_sign: Option<String>,
     /// 用哪把密钥加密；`None` = 不加密
     pub gpg_encrypt: Option<String>,
     /// 要不要再套一层口令对称加密
     pub symmetric: bool,
+    /// 口令层用哪种算法（`symmetric` 为假时这一栏没意义）
+    pub cipher: Cipher,
 }
 
 /// 解开某些层需要的秘密
@@ -254,10 +338,10 @@ pub fn encode(
 
     // 最内：压缩
     if policy.compress {
-        payload = deflate(&payload, DEFAULT_LEVEL)?;
-        layers.push(Layer::Deflate {
-            level: DEFAULT_LEVEL,
-        });
+        let algorithm = policy.compression;
+        let level = algorithm.default_level();
+        payload = compress_with(algorithm, &payload, level)?;
+        layers.push(Layer::Compress { algorithm, level });
     }
 
     // 中间：gpg（先签名，再加密 —— 签名盖的是压缩后的内容）
@@ -281,7 +365,7 @@ pub fn encode(
     // 最外：口令对称
     if policy.symmetric {
         let passphrase = passphrase.ok_or(CodecError::PassphraseNeeded)?;
-        let (sealed, layer) = symmetric_seal(&payload, passphrase)?;
+        let (sealed, layer) = symmetric_seal(&payload, passphrase, policy.cipher)?;
         payload = sealed;
         layers.push(layer);
     }
@@ -313,14 +397,19 @@ pub fn inspect(file: &[u8]) -> Result<Inspection> {
     let header = read_header(file)?;
     let mut protection = Protection {
         compress: false,
+        compression: Compression::default(),
         sign: None,
         encrypt: None,
         symmetric: false,
+        cipher: Cipher::default(),
     };
 
     for layer in &header.layers {
         match layer {
-            Layer::Deflate { .. } => protection.compress = true,
+            Layer::Compress { algorithm, .. } => {
+                protection.compress = true;
+                protection.compression = *algorithm;
+            }
             Layer::Gpg {
                 mode: GpgMode::Sign,
                 key,
@@ -331,7 +420,10 @@ pub fn inspect(file: &[u8]) -> Result<Inspection> {
                 key,
                 ..
             } => protection.encrypt = Some(key.clone()),
-            Layer::Symmetric { .. } => protection.symmetric = true,
+            Layer::Symmetric { cipher, .. } => {
+                protection.symmetric = true;
+                protection.cipher = *cipher;
+            }
         }
     }
 
@@ -352,6 +444,7 @@ pub fn signature_report(file: &[u8], secrets: &Secrets<'_>) -> Result<Option<Sig
     for layer in header.layers.iter().rev() {
         match layer {
             Layer::Symmetric {
+                cipher,
                 salt,
                 nonce,
                 m_cost,
@@ -359,8 +452,9 @@ pub fn signature_report(file: &[u8], secrets: &Secrets<'_>) -> Result<Option<Sig
                 p_cost,
             } => {
                 let passphrase = secrets.passphrase.ok_or(CodecError::PassphraseNeeded)?;
-                payload =
-                    symmetric_open(&payload, passphrase, salt, nonce, *m_cost, *t_cost, *p_cost)?;
+                payload = symmetric_open(
+                    &payload, passphrase, *cipher, salt, nonce, *m_cost, *t_cost, *p_cost,
+                )?;
             }
             Layer::Gpg {
                 mode: GpgMode::Encrypt,
@@ -397,7 +491,7 @@ pub fn signature_report(file: &[u8], secrets: &Secrets<'_>) -> Result<Option<Sig
                 signature: None,
                 ..
             } => return Err(CodecError::Corrupt("签名层没带签名".to_string())),
-            Layer::Deflate { .. } => payload = inflate(&payload)?,
+            Layer::Compress { algorithm, .. } => payload = decompress_with(*algorithm, &payload)?,
         }
     }
 
@@ -434,6 +528,7 @@ pub fn decode(file: &[u8], secrets: &Secrets<'_>) -> Result<Vec<u8>> {
     for layer in header.layers.iter().rev() {
         match layer {
             Layer::Symmetric {
+                cipher,
                 salt,
                 nonce,
                 m_cost,
@@ -441,8 +536,9 @@ pub fn decode(file: &[u8], secrets: &Secrets<'_>) -> Result<Vec<u8>> {
                 p_cost,
             } => {
                 let passphrase = secrets.passphrase.ok_or(CodecError::PassphraseNeeded)?;
-                payload =
-                    symmetric_open(&payload, passphrase, salt, nonce, *m_cost, *t_cost, *p_cost)?;
+                payload = symmetric_open(
+                    &payload, passphrase, *cipher, salt, nonce, *m_cost, *t_cost, *p_cost,
+                )?;
             }
             Layer::Gpg {
                 mode: GpgMode::Encrypt,
@@ -467,7 +563,7 @@ pub fn decode(file: &[u8], secrets: &Secrets<'_>) -> Result<Vec<u8>> {
                 signature: None,
                 ..
             } => return Err(CodecError::Corrupt("签名层没带签名".to_string())),
-            Layer::Deflate { .. } => payload = inflate(&payload)?,
+            Layer::Compress { algorithm, .. } => payload = decompress_with(*algorithm, &payload)?,
         }
     }
 
@@ -513,8 +609,9 @@ pub fn read_header(file: &[u8]) -> Result<Header> {
     serde_json::from_value(raw).map_err(|error| CodecError::Corrupt(format!("头读不出来：{error}")))
 }
 
-/// 本程序认得的三层。加新层时这里要一起加。
-const KNOWN_LAYERS: [&str; 3] = ["deflate", "gpg", "symmetric"];
+/// 本程序认得的层名。加新层时这里要一起加 —— 认不出的名字要**点名**报出来，
+/// 那是前向兼容的出口（比含糊地报"文件坏了"有用）。
+const KNOWN_LAYERS: [&str; 3] = ["compress", "gpg", "symmetric"];
 
 fn payload_of(file: &[u8]) -> Result<&[u8]> {
     if file.len() < PREFIX_BYTES {
@@ -530,27 +627,59 @@ fn payload_of(file: &[u8]) -> Result<&[u8]> {
 
 // ---------------------------------------------------------------- 各层的实现
 
-fn deflate(content: &[u8], level: u32) -> Result<Vec<u8>> {
-    let mut encoder = DeflateEncoder::new(Vec::new(), Compression::new(level));
-    encoder
-        .write_all(content)
-        .map_err(|error| CodecError::Corrupt(format!("压缩失败：{error}")))?;
-    encoder
-        .finish()
-        .map_err(|error| CodecError::Corrupt(format!("压缩失败：{error}")))
+/// 压：两档算法的档位范围不同（deflate 0–9，brotli 0–11），由层里记着的 `level` 说话
+fn compress_with(algorithm: Compression, content: &[u8], level: u32) -> Result<Vec<u8>> {
+    match algorithm {
+        Compression::Deflate => {
+            let mut encoder = DeflateEncoder::new(Vec::new(), DeflateLevel::new(level));
+            encoder
+                .write_all(content)
+                .map_err(|error| CodecError::Corrupt(format!("压缩失败：{error}")))?;
+            encoder
+                .finish()
+                .map_err(|error| CodecError::Corrupt(format!("压缩失败：{error}")))
+        }
+        Compression::Brotli => {
+            let mut out = Vec::new();
+            {
+                // 窗口 22 位（4 MiB）：对笔记这种体量足够，也不必再调
+                let mut writer = brotli::CompressorWriter::new(&mut out, 4096, level, 22);
+                writer
+                    .write_all(content)
+                    .map_err(|error| CodecError::Corrupt(format!("压缩失败：{error}")))?;
+            }
+            Ok(out)
+        }
+    }
 }
 
-fn inflate(payload: &[u8]) -> Result<Vec<u8>> {
-    let mut decoder = DeflateDecoder::new(Vec::new());
-    decoder
-        .write_all(payload)
-        .map_err(|error| CodecError::Corrupt(format!("解压失败：{error}")))?;
-    decoder
-        .finish()
-        .map_err(|error| CodecError::Corrupt(format!("解压失败：{error}")))
+/// 解：**照头上写的那一档**，不看当前设置
+fn decompress_with(algorithm: Compression, payload: &[u8]) -> Result<Vec<u8>> {
+    match algorithm {
+        Compression::Deflate => {
+            let mut decoder = DeflateDecoder::new(Vec::new());
+            decoder
+                .write_all(payload)
+                .map_err(|error| CodecError::Corrupt(format!("解压失败：{error}")))?;
+            decoder
+                .finish()
+                .map_err(|error| CodecError::Corrupt(format!("解压失败：{error}")))
+        }
+        Compression::Brotli => {
+            let mut out = Vec::new();
+            let mut reader = brotli::Decompressor::new(payload, 4096);
+            std::io::copy(&mut reader, &mut out)
+                .map_err(|error| CodecError::Corrupt(format!("解压失败：{error}")))?;
+            Ok(out)
+        }
+    }
 }
 
-fn symmetric_seal(content: &[u8], passphrase: &str) -> Result<(Vec<u8>, Layer)> {
+fn symmetric_seal(
+    content: &[u8],
+    passphrase: &str,
+    cipher_kind: Cipher,
+) -> Result<(Vec<u8>, Layer)> {
     let mut salt = [0u8; SALT_BYTES];
     let mut nonce_bytes = [0u8; NONCE_BYTES];
     random_into(&mut salt)?;
@@ -563,15 +692,12 @@ fn symmetric_seal(content: &[u8], passphrase: &str) -> Result<(Vec<u8>, Layer)> 
         DEFAULT_T_COST,
         DEFAULT_P_COST,
     )?;
-    let cipher = ChaCha20Poly1305::new_from_slice(&key)
-        .map_err(|error| CodecError::Corrupt(format!("密钥长度不对：{error}")))?;
-    let sealed = cipher
-        .encrypt(Nonce::from_slice(&nonce_bytes), content)
-        .map_err(|_| CodecError::WrongPassphrase)?;
+    let sealed = seal_with(cipher_kind, &key, &nonce_bytes, content)?;
 
     Ok((
         sealed,
         Layer::Symmetric {
+            cipher: cipher_kind,
             salt: BASE64.encode(salt),
             nonce: BASE64.encode(nonce_bytes),
             m_cost: DEFAULT_M_COST,
@@ -585,6 +711,7 @@ fn symmetric_seal(content: &[u8], passphrase: &str) -> Result<(Vec<u8>, Layer)> 
 fn symmetric_open(
     payload: &[u8],
     passphrase: &str,
+    cipher_kind: Cipher,
     salt: &str,
     nonce: &str,
     m_cost: u32,
@@ -602,12 +729,45 @@ fn symmetric_open(
     }
 
     let key = derive_key(passphrase, &salt, m_cost, t_cost, p_cost)?;
-    let cipher = ChaCha20Poly1305::new_from_slice(&key)
-        .map_err(|error| CodecError::Corrupt(format!("密钥长度不对：{error}")))?;
-    cipher
-        .decrypt(Nonce::from_slice(&nonce), payload)
-        // 口令不对与密文被改过在这里是同一件事：AEAD 分不出来，也不该分
-        .map_err(|_| CodecError::WrongPassphrase)
+    open_with(cipher_kind, &key, &nonce, payload)
+}
+
+/// 用这一档算法封上。两档都是 AEAD，nonce 都是 12 字节。
+fn seal_with(cipher_kind: Cipher, key: &[u8], nonce: &[u8], content: &[u8]) -> Result<Vec<u8>> {
+    // SM4 的密钥是 128 位：从派生出来的 32 字节里取前 16 字节（不是"截短了强度"，
+    // 这一档算法本来就用这么长的钥匙）
+    let key = &key[..cipher_kind.key_bytes()];
+    let nonce = aes_gcm::Nonce::<aes_gcm::aead::consts::U12>::try_from(nonce)
+        .map_err(|_| CodecError::Corrupt("nonce 长度不对".to_string()))?;
+
+    match cipher_kind {
+        Cipher::Aes256Gcm => Aes256Gcm::new_from_slice(key)
+            .map_err(|error| CodecError::Corrupt(format!("密钥长度不对：{error}")))?
+            .encrypt(&nonce, content)
+            .map_err(|_| CodecError::WrongPassphrase),
+        Cipher::Sm4Gcm => Sm4Gcm::new_from_slice(key)
+            .map_err(|error| CodecError::Corrupt(format!("密钥长度不对：{error}")))?
+            .encrypt(&nonce, content)
+            .map_err(|_| CodecError::WrongPassphrase),
+    }
+}
+
+/// 照头里那一档算法解开
+fn open_with(cipher_kind: Cipher, key: &[u8], nonce: &[u8], payload: &[u8]) -> Result<Vec<u8>> {
+    let key = &key[..cipher_kind.key_bytes()];
+    let nonce = aes_gcm::Nonce::<aes_gcm::aead::consts::U12>::try_from(nonce)
+        .map_err(|_| CodecError::Corrupt("nonce 长度不对".to_string()))?;
+
+    let opened = match cipher_kind {
+        Cipher::Aes256Gcm => Aes256Gcm::new_from_slice(key)
+            .map_err(|error| CodecError::Corrupt(format!("密钥长度不对：{error}")))?
+            .decrypt(&nonce, payload),
+        Cipher::Sm4Gcm => Sm4Gcm::new_from_slice(key)
+            .map_err(|error| CodecError::Corrupt(format!("密钥长度不对：{error}")))?
+            .decrypt(&nonce, payload),
+    };
+    // 口令不对与密文被改过在这里是同一件事：AEAD 分不出来，也不该分
+    opened.map_err(|_| CodecError::WrongPassphrase)
 }
 
 fn derive_key(
@@ -874,6 +1034,104 @@ mod tests {
         );
     }
 
+    /// 两档压缩算法都转得回来，而且**头里记着用的是哪一档**
+    #[test]
+    fn both_compression_algorithms_round_trip() {
+        let content = "重复的内容。".repeat(200);
+
+        for algorithm in [Compression::Deflate, Compression::Brotli] {
+            let policy = Policy {
+                compress: true,
+                compression: algorithm,
+                ..Default::default()
+            };
+            let file = encode(content.as_bytes(), &Meta::default(), &policy, None).unwrap();
+
+            let inspection = inspect(&file).unwrap();
+            assert!(inspection.protection.compress);
+            assert_eq!(inspection.protection.compression, algorithm);
+
+            // 头里也真的写着（换台机器读，靠的就是它）
+            let header = read_header(&file).unwrap();
+            assert!(matches!(
+                header.layers[0],
+                Layer::Compress { algorithm: found, .. } if found == algorithm
+            ));
+
+            assert!(file.len() < content.len(), "压缩该让体积变小");
+            assert_eq!(
+                decode(&file, &Secrets::default()).unwrap(),
+                content.as_bytes()
+            );
+        }
+    }
+
+    /// 密文要**与别家实现互通**：拿公开的测试向量对一遍（AES 那组来自 NIST，
+    /// SM4 那组来自 BouncyCastle）。国密那一档的意义就是"换个实现也解得开"。
+    #[test]
+    fn both_ciphers_match_published_test_vectors() {
+        let hex = |bytes: &[u8]| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+
+        // AES-256-GCM：密钥全 0、nonce 全 0、明文全 0 的 16 字节
+        let sealed = seal_with(Cipher::Aes256Gcm, &[0u8; 32], &[0u8; 12], &[0u8; 16]).unwrap();
+        assert_eq!(
+            hex(&sealed),
+            "cea7403d4d606b6e074ec5d3baf39d18d0d1c8a799996bf0265b98b5d48ab919"
+        );
+        assert_eq!(
+            open_with(Cipher::Aes256Gcm, &[0u8; 32], &[0u8; 12], &sealed).unwrap(),
+            vec![0u8; 16]
+        );
+
+        // SM4-GCM：同样是全 0，用的是 BouncyCastle 那组向量
+        let sealed = seal_with(Cipher::Sm4Gcm, &[0u8; 32], &[0u8; 12], b"hello world").unwrap();
+        assert_eq!(
+            hex(&sealed),
+            "1587c6137e306fed6a6a5f49539b6dd6fe2b7872c3279636db07c2"
+        );
+        assert_eq!(
+            open_with(Cipher::Sm4Gcm, &[0u8; 32], &[0u8; 12], &sealed).unwrap(),
+            b"hello world".to_vec()
+        );
+    }
+
+    /// 两档口令算法都转得回来；换个算法解不开（头说了算，不是当前设置说了算）
+    #[test]
+    fn both_ciphers_round_trip() {
+        let content = b"only for us".to_vec();
+
+        for cipher in [Cipher::Aes256Gcm, Cipher::Sm4Gcm] {
+            let policy = Policy {
+                symmetric: true,
+                cipher,
+                ..Default::default()
+            };
+            let file = encode(&content, &Meta::default(), &policy, Some("口令")).unwrap();
+
+            assert_eq!(inspect(&file).unwrap().protection.cipher, cipher);
+            assert_eq!(
+                decode(
+                    &file,
+                    &Secrets {
+                        passphrase: Some("口令")
+                    }
+                )
+                .unwrap(),
+                content
+            );
+
+            // 口令不对：两档都报同一句话
+            let error = decode(
+                &file,
+                &Secrets {
+                    passphrase: Some("别的"),
+                },
+            )
+            .unwrap_err();
+            assert_eq!(error, CodecError::WrongPassphrase);
+        }
+    }
+
     #[test]
     fn symmetric_round_trips_and_needs_the_right_passphrase() {
         let content = b"only for us".to_vec();
@@ -933,7 +1191,13 @@ mod tests {
 
         // 层链是从内到外的：压缩在内，对称在外
         let header = read_header(&file).unwrap();
-        assert!(matches!(header.layers[0], Layer::Deflate { .. }));
+        assert!(matches!(
+            header.layers[0],
+            Layer::Compress {
+                algorithm: Compression::Deflate,
+                ..
+            }
+        ));
         assert!(matches!(header.layers[1], Layer::Symmetric { .. }));
 
         assert_eq!(
@@ -1103,7 +1367,7 @@ mod tests {
                 compress: true,
                 gpg_sign: Some(recipient.to_string()),
                 gpg_encrypt: Some(recipient.to_string()),
-                symmetric: false,
+                ..Default::default()
             },
             None,
         )
