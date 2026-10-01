@@ -52,6 +52,13 @@ use crate::storage::workspace::{read_json, write_json, Workspace};
 /// 锁多久没动静算过期（秒）
 const LOCK_TTL: i64 = 300;
 
+/// 每走这么多步就把索引落一次盘。
+///
+/// 索引是"哪些文件已经对齐"的记账本：一直攒到最后才写的话，中途被打断
+/// （关窗前那颗"不等了"、断电、进程被杀）就得**从头再对一遍** —— 东西不会坏，
+/// 但白传的那些要重传。隔一段写一次，中断最多让你重做这一段的活。
+const INDEX_SAVE_EVERY: usize = 25;
+
 /// 锁放在云端哪个键上（在配置的前缀之下）
 const LOCK_KEY: &str = ".sync-lock.json";
 
@@ -579,6 +586,7 @@ pub fn run(
     let outcome = reconcile(
         &s3,
         &root,
+        workspace,
         &mut index,
         transform.as_ref(),
         settings.reupload,
@@ -604,6 +612,7 @@ pub fn run(
 fn reconcile(
     s3: &S3,
     root: &Path,
+    workspace: &Workspace,
     index: &mut Index,
     transform: &dyn SyncTransform,
     force_upload: bool,
@@ -669,6 +678,11 @@ fn reconcile(
             total,
             text,
         });
+
+        // 隔一段把记账落一次盘（见 `INDEX_SAVE_EVERY`）
+        if total > INDEX_SAVE_EVERY && done > 0 && done % INDEX_SAVE_EVERY == 0 {
+            let _ = index.save(workspace);
+        }
 
         match decision {
             Decision::Upload | Decision::TakeNewer("local") => {

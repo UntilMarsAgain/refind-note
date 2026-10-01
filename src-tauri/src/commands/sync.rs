@@ -93,7 +93,11 @@ pub fn sync_export_key(target: String) -> Result<(), String> {
 }
 
 /// 现在同步一次，返回这次做了些什么；每一步都会发 `sync-progress` 事件。
-#[tauri::command]
+///
+/// **`(async)` 是必须的**：不加的话这个命令在**主线程**上跑（Tauri 的默认），
+/// 一趟同步几秒钟里窗口是冻的 —— 进度不刷新，"不等了"那颗按钮点了也没用
+/// （它要回主线程才能把窗口关掉）。加了之后它在线程池里跑，界面照常活动。
+#[tauri::command(async)]
 pub fn sync_now(app: AppHandle) -> Result<SyncReport, String> {
     let workspace = open_workspace()?;
     let settings = sync::settings(&workspace);
