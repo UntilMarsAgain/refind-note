@@ -13,11 +13,10 @@ import { useTabs } from "./tabs.ts";
  *
  * - `WindowTitleBar` 绘制标题栏，与「当前标签页的地址」双向绑定；
  * - `TabRail` 绘制垂直标签页；
- * - `RenderPane` 显示当前标签页（暂时是内部数据，用来验证导航）。
+ * - `RenderPane` 显示当前标签页。
  *
  * 三块之间没有"谁驱动谁"的关系 —— 它们只是**读同一份标签页状态**。
  * 状态本身在 `useTabs()` 里，这里只做组装、导航入口与键盘快捷键。
- * （启动三态、顶栏菜单、真正的视图分发都还没接。）
  */
 const {
   tabs,
@@ -55,7 +54,7 @@ const address = computed({
   },
 });
 
-/** 地址栏回车 = 导航。语法一个字都不在这里解析（见 tabs.ts 里的临时替身） */
+/** 地址栏回车 = 导航。解析交给后端（`parse_address`），前端不认语法 */
 function onSubmit(value: string) {
   // 和点链接一样算一次跳转：往历史里推一条，回退键能退回上一条
   void navigate(value, "push");

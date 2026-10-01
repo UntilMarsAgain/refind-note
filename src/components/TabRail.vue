@@ -35,12 +35,7 @@ const emit = defineEmits<{
   (e: "trash"): void;
 }>();
 
-/**
- * 标签栏**此刻**展不展开。
- *
- * 只有标签栏自己用得到，先放组件本地；等设置页要读"下次打开的默认值"时再上移成
- * 模块级状态 —— 那是另一件事，别和"这一次的样子"混在一起。
- */
+/** 标签栏**此刻**展不展开；只有标签栏自己用得到，所以放在组件本地 */
 const railCollapsed = ref(false);
 
 function toggleRail(): void {

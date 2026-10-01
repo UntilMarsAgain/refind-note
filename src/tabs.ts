@@ -1,4 +1,6 @@
 import { computed, ref } from "vue";
+import { parseAddress, titleOf } from "./address.ts";
+import type { ParsedAddress } from "./bindings/address.ts";
 
 /** 切换标签页的原因 */
 export type Movement =
@@ -10,14 +12,18 @@ export type Movement =
 export interface TabState {
   /** 稳定身份：列表动画与拖动重排都靠它，不用下标（下标会随重排变） */
   id: string;
-  /** 地址栏里的字。标题栏与它双向绑定；**可能不是规范地址**（编辑中） */
+  /** 地址栏里的字。标题栏与它双向绑定；**可能不是规范地址**（编辑中、或刚写错） */
   address: string;
-  /** 标签栏上显示的名字。由"权威副本"派生并缓存在这里，便于列表渲染 */
+  /** 这个标签页当前在哪：一次地址解析的结果（`canonical` 就是规范地址）。新标签页是 null */
+  route: ParsedAddress | null;
+  /** 标签栏上显示的名字。由 `route` 派生并缓存在这里，便于列表渲染 */
   title: string;
   /** 这个标签页自己的浏览历史。存的是**规范地址**；新标签页是空的 */
   history: string[];
   /** 历史里的位置：后退 / 前进就是挪它。`-1` = 还没去过任何地方 */
   cursor: number;
+  /** 上一次地址解析失败的原因（一句给人看的话）。空串表示没有错误 */
+  error: string;
 }
 
 const NEW_TAB_TITLE = "新标签页";
@@ -43,20 +49,12 @@ export function createTab(): TabState {
   return {
     id: nextId(),
     address: "",
+    route: null,
     title: NEW_TAB_TITLE,
     history: [],
     cursor: -1,
+    error: "",
   };
-}
-
-/**
- * 地址解析的**临时替身**（地址模型未定稿，见文件头）。
- *
- * 只做最小判断：空白输入不是地址 —— 什么都不发生、地址栏也不动。
- */
-function resolve(input: string): string | null {
-  const address = input.trim();
-  return address === "" ? null : address;
 }
 
 /**
@@ -81,15 +79,9 @@ export function useTabs() {
 
   /**
    * 当前标签页的**规范地址**：标题栏失焦 / Esc 回显时以它为准。
-   * 现在就是历史游标所在的那一条 —— 上次导航成功的地方。
+   * 解析失败时不写 route，所以它自然还是上一次导航成功的地方。
    */
-  const committed = computed(() => {
-    const tab = active.value;
-    if (!tab || tab.cursor < 0) {
-      return "";
-    }
-    return tab.history[tab.cursor] ?? "";
-  });
+  const committed = computed(() => active.value?.route?.canonical ?? "");
 
   /** 后退 / 前进：历史游标决定，跟地址解析没关系 */
   const canGoBack = computed(() => (active.value?.cursor ?? 0) > 0);
@@ -208,13 +200,12 @@ export function useTabs() {
    *
    * 界面上「在哪」的所有变化都必须走这里，不做局部状态拼接。三种情况：
    *
-   * - **解析失败**：（等真解析接上后）只在覆盖层说原因，**地址栏一个字都不动**；
+   * - **解析失败**：只记下原因（`error`），**地址栏一个字都不动** ——
+   *   用户写错了，应当看见自己输入的内容；
    * - **空地址**：空输入不是地址 —— 保留当前地址，什么都不做；
    * - **成功**：权威副本先落地，然后**回显覆写**（把规范地址写回地址栏）。
    *
    * 返回是否真的落地了一次导航。
-   *
-   * 保持 async：接上后端解析后这里会真的 await，调用方不用改。
    */
   async function navigate(input: string, movement: Movement = "push"): Promise<boolean> {
     const tab = active.value;
@@ -222,23 +213,31 @@ export function useTabs() {
       return false;
     }
 
-    const address = resolve(input);
-    // 空输入不是地址：什么都不动
-    if (address === null) {
+    tab.error = "";
+    let route: ParsedAddress | null;
+    try {
+      route = await parseAddress(input);
+    } catch (error) {
+      tab.error = String(error);
       return false;
     }
 
-    // 权威副本先落地，其余（标签名、地址栏）都由它派生。
-    // 临时：还没有 route 字段，标签名 = 地址；接上解析后改从解析结果取。
-    tab.title = address;
+    // 空输入不是地址：什么都不动
+    if (route === null) {
+      return false;
+    }
+
+    // 权威副本先落地，其余（标签名、地址栏）都由它派生
+    tab.route = route;
+    tab.title = titleOf(route);
     // 回显覆写：规范地址盖掉用户敲的原文
-    tab.address = address;
+    tab.address = route.canonical;
 
     if (movement === "push") {
       // 跳转：丢掉原来的"前进"那一截，再压一条。
       // 新标签页的游标是 -1，`slice(0, 0)` 得空数组，正好从零开始。
       tab.history = tab.history.slice(0, tab.cursor + 1);
-      tab.history.push(address);
+      tab.history.push(route.canonical);
       tab.cursor = tab.history.length - 1;
     }
 
