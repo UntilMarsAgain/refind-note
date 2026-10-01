@@ -33,11 +33,30 @@ export const syncBusy = readonly(busy);
 export const syncProgress = readonly(progress);
 export const syncClosing = readonly(closing);
 
-/** 提交之后攒多久再同步：连着提交几次只跑一次 */
-const AFTER_COMMIT_DELAY_MS = 20_000;
+/**
+ * 提交之后隔多久**开始**同步：让"连着改几下"落定。
+ *
+ * 这一小段是**防抖**（每来一次就重新计时）—— 它只影响"什么时候开始"，
+ * 不影响"最后那次改动传不传得上去"。
+ */
+const SETTLE_MS = 3_000;
 
-/** 排队中的定时器与"跑完还要不要再跑一次" */
-let timer: number | undefined;
+/**
+ * 两次同步之间至少隔多久。
+ *
+ * 同步本身要跑一会儿（扫本地、列云端、挨个传），刚跑完又跑没有意义。
+ * 关键是冷却期间来的改动**不丢**：记一笔，冷却一结束立刻补跑一趟
+ * （见 `pendingAfterCooldown`）—— 这就是"最后一个一定传得上去"的保证。
+ */
+const COOLDOWN_MS = 30_000;
+
+/** 落定计时器 */
+let settleTimer: number | undefined;
+/** 冷却到什么时候为止 */
+let cooldownUntil = 0;
+/** 冷却期间又有人叫过：到点补跑一趟 */
+let pendingAfterCooldown = false;
+/** 正在跑的时候又有人叫：跑完再跑一趟（不是丢掉） */
 let queued = false;
 
 /** 同步开着吗、配置填全了吗（后端说了算） */
@@ -100,17 +119,45 @@ export async function syncNow(): Promise<SyncReport | null> {
 }
 
 /**
- * 提交之后叫一次：攒一会儿再跑，免得连着提交几次就同步几次。
+ * 提交之后叫一次。
  *
- * 没开同步就**什么也不做**（也不要去问后端一遍又一遍）—— 提交本身与同步无关。
+ * 节奏是这么定的：
+ *
+ * 1. **先等 [`SETTLE_MS`] 落定**：连着一串改动（提交、传图、再提交）只触发一次；
+ *    每来一次就重新计时 —— 这一步是防抖，但它只决定"什么时候开始"。
+ * 2. **跑完进入 [`COOLDOWN_MS`] 冷却**：免得刚跑完又跑。
+ * 3. 冷却期间来的改动**记一笔**（`pendingAfterCooldown`），到点立刻补跑 ——
+ *    所以"后面那次改动传不上去"不会发生；代价是最多等一个冷却周期。
+ *
+ * 另外三条路兜底：启动时、手动、关窗前都会同步一次 —— 定时器还没到点也不怕。
+ * 没开同步时这里**什么都不做**（提交本身与同步无关）。
  */
 export function requestSyncAfterCommit(): void {
-    window.clearTimeout(timer);
-    timer = window.setTimeout(async () => {
-        if (await syncReady()) {
-            void run();
-        }
-    }, AFTER_COMMIT_DELAY_MS);
+    window.clearTimeout(settleTimer);
+    settleTimer = window.setTimeout(() => void runWhenFree(), SETTLE_MS);
+}
+
+/** 冷却过了就跑一趟；没过就记一笔，到点再来 */
+async function runWhenFree(): Promise<void> {
+    const wait = cooldownUntil - Date.now();
+    if (wait > 0) {
+        pendingAfterCooldown = true;
+        window.setTimeout(() => {
+            if (pendingAfterCooldown) {
+                pendingAfterCooldown = false;
+                void runWhenFree();
+            }
+        }, wait + 50);
+        return;
+    }
+
+    if (!(await syncReady())) {
+        return;
+    }
+    const report = await run();
+    cooldownUntil = Date.now() + COOLDOWN_MS;
+    // 冷却期间攒下的改动（如果有）上面那个定时器会接手
+    void report;
 }
 
 /**

@@ -349,8 +349,10 @@ pub fn save_settings(workspace: &Workspace, settings: &SyncSettings) -> Result<(
 /// 上次对齐时的样子
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct Stamp {
-    size: u64,
-    /// 本机文件的时间（Unix 秒）
+    /// 上次对齐时本机这一份的内容指纹
+    hash: String,
+    /// 本机文件的时间（Unix 秒）—— 现在只用来给人看，判"变没变"看的是指纹
+    #[serde(default)]
     mtime: i64,
     /// 云端那一份的 ETag
     etag: String,
@@ -368,7 +370,11 @@ struct Index {
 /// 本机这一份
 #[derive(Debug, Clone, PartialEq)]
 struct Local {
-    size: u64,
+    /// 内容指纹：**内容寻址**的那些直接用文件名（名字就是哈希），其余算一遍 sha256。
+    ///
+    /// 为什么不用"大小 + 修改时间"那种便宜的判法：同一秒里改一笔、正好还一样长，
+    /// 那种判法看不出来（测试里就逮到过一次）。这一份仓库不大，算一遍更踏实。
+    hash: String,
     mtime: i64,
 }
 
@@ -410,7 +416,7 @@ fn decide(
         (Some(local), Some(remote), aligned) => {
             // "变没变"看两样：本机看（大小、时间），云端看 ETag
             let local_changed = aligned
-                .map(|stamp| stamp.size != local.size || stamp.mtime != local.mtime)
+                .map(|stamp| stamp.hash != local.hash)
                 .unwrap_or(true);
             let remote_changed = aligned
                 .map(|stamp| stamp.etag != remote.etag)
@@ -437,7 +443,7 @@ fn decide(
             // 上次对齐时云端有它、现在没了 —— 那是别的机器删了。
             // 但**只有本机这一份没动过**才跟着删：改过的那些是新的，
             // 传回去（宁可多一份，也别把刚写的东西删掉）
-            Some(stamp) if stamp.size == local.size && stamp.mtime == local.mtime => {
+            Some(stamp) if stamp.hash == local.hash => {
                 (Decision::DeleteLocal, "云端已经删掉".to_string())
             }
             Some(_) => (Decision::Upload, "云端删过，但本机这份改过".to_string()),
@@ -650,19 +656,38 @@ fn describe(path: &str, decision: &Decision) -> String {
     }
 }
 
-/// 记下这一份现在的样子（大小、时间、云端的 ETag）
+/// 记下这一份现在的样子（内容指纹、时间、云端的 ETag）
 fn stamp_local(index: &mut Index, root: &Path, path: &str, etag: String) {
-    let Ok(meta) = fs::metadata(root.join(path)) else {
+    let target = root.join(path);
+    let Ok(meta) = fs::metadata(&target) else {
         return;
+    };
+    let hash = if path.starts_with("db/blobs/") {
+        path.rsplit('/').next().unwrap_or_default().to_string()
+    } else {
+        content_hash(&target)
     };
     index.files.insert(
         path.to_string(),
         Stamp {
-            size: meta.len(),
+            hash,
             mtime: mtime_of(&meta),
             etag,
         },
     );
+}
+
+/// 一份文件的内容指纹（内容块不必走这里，它们的名字就是指纹）
+fn content_hash(path: &Path) -> String {
+    use sha2::{Digest, Sha256};
+
+    match fs::read(path) {
+        Ok(bytes) => Sha256::digest(&bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+        Err(_) => String::new(),
+    }
 }
 
 /// 写回本机（顺带把目录建出来 —— 云端有的那些目录，本机可能是空的）
@@ -703,10 +728,16 @@ fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<String, Local>) -> Result<()
             continue;
         }
         let Ok(meta) = entry.metadata() else { continue };
+        let hash = if relative.starts_with("db/blobs/") {
+            // 内容寻址：名字就是指纹，不必读内容
+            relative.rsplit('/').next().unwrap_or_default().to_string()
+        } else {
+            content_hash(&path)
+        };
         out.insert(
             relative,
             Local {
-                size: meta.len(),
+                hash,
                 mtime: mtime_of(&meta),
             },
         );
@@ -852,8 +883,11 @@ fn restrict(path: &Path) {
 mod tests {
     use super::*;
 
-    fn local(size: u64, mtime: i64) -> Local {
-        Local { size, mtime }
+    fn local(hash: &str, mtime: i64) -> Local {
+        Local {
+            hash: hash.to_string(),
+            mtime,
+        }
     }
 
     fn remote(etag: &str, modified: i64) -> Remote {
@@ -864,9 +898,9 @@ mod tests {
         }
     }
 
-    fn stamp(size: u64, mtime: i64, etag: &str) -> Stamp {
+    fn stamp(hash: &str, mtime: i64, etag: &str) -> Stamp {
         Stamp {
-            size,
+            hash: hash.to_string(),
             mtime,
             etag: etag.to_string(),
         }
@@ -936,9 +970,9 @@ mod tests {
     #[test]
     fn a_quiet_pair_does_nothing() {
         let (decision, _) = decide(
-            Some(&local(10, 100)),
+            Some(&local("h1", 100)),
             Some(&remote("aaa", 100)),
-            Some(&stamp(10, 100, "aaa")),
+            Some(&stamp("h1", 100, "aaa")),
         );
         assert_eq!(decision, Decision::Nothing);
     }
@@ -946,9 +980,9 @@ mod tests {
     #[test]
     fn only_the_local_side_changed_uploads() {
         let (decision, _) = decide(
-            Some(&local(20, 200)),
+            Some(&local("h2", 200)),
             Some(&remote("aaa", 100)),
-            Some(&stamp(10, 100, "aaa")),
+            Some(&stamp("h1", 100, "aaa")),
         );
         assert_eq!(decision, Decision::Upload);
     }
@@ -956,9 +990,9 @@ mod tests {
     #[test]
     fn only_the_remote_side_changed_downloads() {
         let (decision, _) = decide(
-            Some(&local(10, 100)),
+            Some(&local("h1", 100)),
             Some(&remote("bbb", 200)),
-            Some(&stamp(10, 100, "aaa")),
+            Some(&stamp("h1", 100, "aaa")),
         );
         assert_eq!(decision, Decision::Download);
     }
@@ -967,25 +1001,25 @@ mod tests {
     #[test]
     fn a_real_conflict_is_settled_by_time() {
         let (decision, why) = decide(
-            Some(&local(20, 200)),
+            Some(&local("h2", 200)),
             Some(&remote("bbb", 300)),
-            Some(&stamp(10, 100, "aaa")),
+            Some(&stamp("h1", 100, "aaa")),
         );
         assert_eq!(decision, Decision::TakeNewer("remote"));
         assert!(!why.is_empty(), "取哪边、为什么，要说得出来");
 
         let (decision, _) = decide(
-            Some(&local(20, 400)),
+            Some(&local("h2", 400)),
             Some(&remote("bbb", 300)),
-            Some(&stamp(10, 100, "aaa")),
+            Some(&stamp("h1", 100, "aaa")),
         );
         assert_eq!(decision, Decision::TakeNewer("local"));
 
         // 时间几乎一样时保守：留本机那份（宁可多传一次，也别把刚写的盖掉）
         let (decision, _) = decide(
-            Some(&local(20, 300)),
+            Some(&local("h2", 300)),
             Some(&remote("bbb", 300)),
-            Some(&stamp(10, 100, "aaa")),
+            Some(&stamp("h1", 100, "aaa")),
         );
         assert_eq!(decision, Decision::TakeNewer("local"));
     }
@@ -993,7 +1027,7 @@ mod tests {
     /// 新写的传上去，云端多出来的拿回来
     #[test]
     fn a_first_sync_takes_the_union() {
-        let (decision, _) = decide(Some(&local(10, 100)), None, None);
+        let (decision, _) = decide(Some(&local("h1", 100)), None, None);
         assert_eq!(decision, Decision::Upload);
 
         let (decision, _) = decide(None, Some(&remote("aaa", 100)), None);
@@ -1007,21 +1041,412 @@ mod tests {
         let (decision, why) = decide(
             None,
             Some(&remote("aaa", 100)),
-            Some(&stamp(10, 100, "aaa")),
+            Some(&stamp("h1", 100, "aaa")),
         );
         assert_eq!(decision, Decision::DeleteRemote);
         assert!(!why.is_empty());
 
         // 云端删了，本机没动过 → 本机也删
-        let (decision, _) = decide(Some(&local(10, 100)), None, Some(&stamp(10, 100, "aaa")));
+        let (decision, _) = decide(
+            Some(&local("h1", 100)),
+            None,
+            Some(&stamp("h1", 100, "aaa")),
+        );
         assert_eq!(decision, Decision::DeleteLocal);
 
         // 云端删了、本机**改过** → 不跟着删（本机那份是新的，传上去）
-        let (decision, _) = decide(Some(&local(20, 300)), None, Some(&stamp(10, 100, "aaa")));
+        let (decision, _) = decide(
+            Some(&local("h2", 300)),
+            None,
+            Some(&stamp("h1", 100, "aaa")),
+        );
         assert_eq!(
             decision,
             Decision::Upload,
             "本机改过的那份不能被云端的删除带走"
         );
+    }
+}
+
+/// **端到端**：拿一个内存里的假 S3（只认那几个方法）把整条流程走一遍 ——
+/// 传上去、把本机删干净、再从云端拿回来。签名另有官方向量盯着，这里验的是"这条路通不通"。
+#[cfg(test)]
+mod end_to_end {
+    use super::*;
+    use std::collections::HashMap;
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::{Arc, Mutex};
+
+    /// 桶里的东西：键 → (内容, ETag)
+    type Bucket = Arc<Mutex<HashMap<String, (Vec<u8>, String)>>>;
+
+    /// 起一个只够测试用的 S3，返回 (地址, 桶)
+    fn start_fake_s3() -> (String, Bucket) {
+        let bucket: Bucket = Arc::new(Mutex::new(HashMap::new()));
+        let listener = TcpListener::bind("127.0.0.1:0").expect("绑定本地端口");
+        let address = format!("http://{}", listener.local_addr().unwrap());
+
+        let served = bucket.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let _ = serve(stream, &served);
+            }
+        });
+        (address, bucket)
+    }
+
+    /// 一次请求的应答：状态码、该带的头、正文
+    struct Reply {
+        status: u16,
+        content_type: String,
+        /// 这一份的 ETag（**GET 与 LIST 必须说同一个** —— 引擎就是靠它判断
+        /// "云端变没变"，两个接口说法不一致会让它以为每次都变了）
+        etag: Option<String>,
+        body: Vec<u8>,
+    }
+
+    fn serve(mut stream: TcpStream, bucket: &Bucket) -> std::io::Result<()> {
+        let mut reader = BufReader::new(stream.try_clone()?);
+
+        // 请求行
+        let mut line = String::new();
+        reader.read_line(&mut line)?;
+        let mut parts = line.split_whitespace();
+        let method = parts.next().unwrap_or_default().to_string();
+        let target = parts.next().unwrap_or_default().to_string();
+
+        // 头
+        let mut headers: HashMap<String, String> = HashMap::new();
+        loop {
+            let mut header = String::new();
+            reader.read_line(&mut header)?;
+            let header = header.trim_end();
+            if header.is_empty() {
+                break;
+            }
+            if let Some((name, value)) = header.split_once(':') {
+                headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());
+            }
+        }
+
+        // 正文
+        let length: usize = headers
+            .get("content-length")
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0);
+        let mut body = vec![0u8; length];
+        if length > 0 {
+            reader.read_exact(&mut body)?;
+        }
+
+        let (path, query) = match target.split_once('?') {
+            Some((path, query)) => (path.to_string(), query.to_string()),
+            None => (target.clone(), String::new()),
+        };
+        let key = decode(path.trim_start_matches('/'));
+        let key = key
+            .split_once('/')
+            .map(|(_, rest)| rest.to_string())
+            .unwrap_or(key);
+
+        let reply = route(&method, &key, &query, &headers, body, bucket);
+
+        let mut out = format!(
+            "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n",
+            reply.status,
+            if reply.status == 200 { "OK" } else { "Error" },
+            reply.content_type,
+            reply.body.len()
+        );
+        if let Some(etag) = &reply.etag {
+            out.push_str(&format!("ETag: \"{etag}\"\r\n"));
+        }
+        out.push_str("Last-Modified: Wed, 01 Oct 2026 10:00:00 GMT\r\n\r\n");
+        stream.write_all(out.as_bytes())?;
+        stream.write_all(&reply.body)?;
+        Ok(())
+    }
+
+    /// 按方法分派（桶里的东西就是这个假服务的全部"状态"）
+    fn route(
+        method: &str,
+        key: &str,
+        query: &str,
+        headers: &HashMap<String, String>,
+        body: Vec<u8>,
+        bucket: &Bucket,
+    ) -> Reply {
+        let mut map = bucket.lock().unwrap();
+        // 假服务里 ETag 只要"内容一样就一样、变了就变"即可，够对账用了
+        let etag_of = |bytes: &[u8]| {
+            use sha2::{Digest, Sha256};
+            let digest = Sha256::digest(bytes);
+            digest
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        };
+
+        match method {
+            "PUT" => {
+                // 条件写：`If-None-Match: *` 只在不认识这个键时才写得进去
+                if headers.get("if-none-match").map(|v| v.as_str()) == Some("*")
+                    && map.contains_key(key)
+                {
+                    return Reply {
+                        status: 412,
+                        content_type: "text/plain".into(),
+                        etag: None,
+                        body: vec![],
+                    };
+                }
+                let etag = etag_of(&body);
+                map.insert(key.to_string(), (body, etag.clone()));
+                Reply {
+                    status: 200,
+                    content_type: "text/plain".into(),
+                    etag: Some(etag),
+                    body: vec![],
+                }
+            }
+            "GET" if query.contains("list-type=2") => {
+                let prefix = query
+                    .split('&')
+                    .find_map(|pair| pair.strip_prefix("prefix="))
+                    .map(decode)
+                    .unwrap_or_default();
+                let mut xml = String::from("<?xml version=\"1.0\"?><ListBucketResult>");
+                xml.push_str("<IsTruncated>false</IsTruncated>");
+                for (name, (content, etag)) in map.iter() {
+                    if !name.starts_with(&prefix) {
+                        continue;
+                    }
+                    xml.push_str(&format!(
+                        "<Contents><Key>{}</Key><LastModified>2026-10-01T10:00:00.000Z</LastModified><ETag>&quot;{}&quot;</ETag><Size>{}</Size></Contents>",
+                        escape(name),
+                        etag,
+                        content.len()
+                    ));
+                }
+                xml.push_str("</ListBucketResult>");
+                Reply {
+                    status: 200,
+                    content_type: "application/xml".into(),
+                    etag: None,
+                    body: xml.into_bytes(),
+                }
+            }
+            "GET" => match map.get(key) {
+                Some((content, etag)) => Reply {
+                    status: 200,
+                    content_type: "application/octet-stream".into(),
+                    etag: Some(etag.clone()),
+                    body: content.clone(),
+                },
+                None => Reply {
+                    status: 404,
+                    content_type: "text/plain".into(),
+                    etag: None,
+                    body: vec![],
+                },
+            },
+            "HEAD" => match map.get(key) {
+                Some((content, etag)) => Reply {
+                    status: 200,
+                    content_type: "application/octet-stream".into(),
+                    etag: Some(etag.clone()),
+                    body: content.clone(),
+                },
+                None => Reply {
+                    status: 404,
+                    content_type: "text/plain".into(),
+                    etag: None,
+                    body: vec![],
+                },
+            },
+            "DELETE" => {
+                map.remove(key);
+                Reply {
+                    status: 204,
+                    content_type: "text/plain".into(),
+                    etag: None,
+                    body: vec![],
+                }
+            }
+            _ => Reply {
+                status: 400,
+                content_type: "text/plain".into(),
+                etag: None,
+                body: vec![],
+            },
+        }
+    }
+
+    fn decode(text: &str) -> String {
+        let bytes = text.as_bytes();
+        let mut out = Vec::new();
+        let mut index = 0;
+        while index < bytes.len() {
+            if bytes[index] == b'%' && index + 2 < bytes.len() {
+                let high = (bytes[index + 1] as char).to_digit(16);
+                let low = (bytes[index + 2] as char).to_digit(16);
+                if let (Some(high), Some(low)) = (high, low) {
+                    out.push((high * 16 + low) as u8);
+                    index += 3;
+                    continue;
+                }
+            }
+            out.push(bytes[index]);
+            index += 1;
+        }
+        String::from_utf8_lossy(&out).to_string()
+    }
+
+    fn escape(text: &str) -> String {
+        text.replace('&', "&amp;").replace('<', "&lt;")
+    }
+
+    /// 一个干净的工作目录（只有该同步的那些文件）
+    fn workspace(name: &str) -> Workspace {
+        let dir = std::env::temp_dir().join(format!(
+            "refind-note-sync-test-{}-{name}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let workspace = Workspace::open(dir).unwrap();
+        // db 目录得先在（真正的程序是打开数据库时建的）
+        std::fs::create_dir_all(workspace.root().join("db/objects/0")).unwrap();
+        std::fs::create_dir_all(workspace.root().join("db/blobs/ab")).unwrap();
+        std::fs::create_dir_all(workspace.root().join("db/drafts")).unwrap();
+        std::fs::create_dir_all(workspace.root().join("settings")).unwrap();
+        workspace
+    }
+
+    fn settings_for(address: &str, key: &str) -> SyncSettings {
+        SyncSettings {
+            enabled: true,
+            encrypt: true,
+            key: key.to_string(),
+            s3: S3Config {
+                endpoint: address.to_string(),
+                region: "us-east-1".to_string(),
+                bucket: "bucket".to_string(),
+                prefix: "notes".to_string(),
+                access_key: "AK".to_string(),
+                secret_key: "SK".to_string(),
+            },
+        }
+    }
+
+    /// **用户在意的那个流程**：写点东西 → 传上去 → 把本机删干净 → 换台机器拿回来
+    #[test]
+    fn a_repository_travels_to_the_cloud_and_comes_back() {
+        let (address, _bucket) = start_fake_s3();
+        let key = generate_key().unwrap();
+
+        // ---- 甲机器：写了两样东西，传上去 ----
+        let first = workspace("push");
+        std::fs::write(
+            first.root().join("db/objects/0/1.log"),
+            "{\"rev\":1}\n".as_bytes(),
+        )
+        .unwrap();
+        std::fs::write(first.root().join("db/blobs/ab/abc"), b"PNGDATA").unwrap();
+        std::fs::write(first.root().join("settings/repository.json"), b"{\"x\":1}").unwrap();
+
+        let settings = settings_for(&address, &key);
+        let report = run(&first, &settings, &|_| {}).unwrap();
+        assert_eq!(report.uploaded, 3, "三份都该传上去：{report:?}");
+        assert_eq!(report.downloaded, 0);
+
+        // 本机自己的东西不该上去
+        std::fs::write(first.root().join("settings/preferences.json"), b"{}").unwrap();
+        std::fs::write(first.root().join("db/drafts/1"), "写了一半".as_bytes()).unwrap();
+        let report = run(&first, &settings, &|_| {}).unwrap();
+        assert_eq!(report.uploaded, 0, "没改过就什么都不传：{report:?}");
+
+        // ---- 把本机删干净（等于换台机器） ----
+        let second = workspace("pull");
+        assert!(!second.root().join("db/objects/0/1.log").exists());
+
+        // ---- 乙机器：配置同一个桶、同一把钥匙，同步一次 ----
+        let report = run(&second, &settings, &|_| {}).unwrap();
+        assert_eq!(report.downloaded, 3, "三份都该拿回来：{report:?}");
+        assert_eq!(
+            std::fs::read_to_string(second.root().join("db/objects/0/1.log")).unwrap(),
+            "{\"rev\":1}\n"
+        );
+        assert_eq!(
+            std::fs::read(second.root().join("db/blobs/ab/abc")).unwrap(),
+            b"PNGDATA"
+        );
+        assert_eq!(
+            std::fs::read_to_string(second.root().join("settings/repository.json")).unwrap(),
+            "{\"x\":1}"
+        );
+
+        // 乙机器上没配同步时写下的本机专属文件，不该被传上去
+        let report = run(&second, &settings, &|_| {}).unwrap();
+        assert_eq!(
+            report.uploaded + report.downloaded,
+            0,
+            "第二次同步应当无事可做：{report:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(first.root());
+        let _ = std::fs::remove_dir_all(second.root());
+    }
+
+    /// 钥匙不对：说得清是钥匙的问题（而不是"文件坏了"）
+    #[test]
+    fn the_wrong_key_says_so() {
+        let (address, _bucket) = start_fake_s3();
+
+        let first = workspace("key-a");
+        std::fs::write(first.root().join("db/objects/0/1.log"), b"secret").unwrap();
+        let settings = settings_for(&address, &generate_key().unwrap());
+        run(&first, &settings, &|_| {}).unwrap();
+
+        // 换台机器、抄错了钥匙
+        let second = workspace("key-b");
+        let wrong = settings_for(&address, &generate_key().unwrap());
+        let error = run(&second, &wrong, &|_| {}).unwrap_err();
+        assert!(error.contains("密钥"), "{error}");
+        assert!(!second.root().join("db/objects/0/1.log").exists());
+
+        let _ = std::fs::remove_dir_all(first.root());
+        let _ = std::fs::remove_dir_all(second.root());
+    }
+
+    /// 两台机器都改过同一份：按时间取新的那份，并且**报告里说一声**
+    #[test]
+    fn a_conflict_is_reported_not_swallowed() {
+        let (address, _bucket) = start_fake_s3();
+        let key = generate_key().unwrap();
+
+        let first = workspace("conflict-a");
+        std::fs::write(first.root().join("db/titles.json"), b"{\"from\":\"a\"}").unwrap();
+        let settings = settings_for(&address, &key);
+        run(&first, &settings, &|_| {}).unwrap();
+
+        let second = workspace("conflict-b");
+        run(&second, &settings, &|_| {}).unwrap();
+
+        // 乙机器改成"本机这份不旧"的样子（时间往后挪一点，甲机器那份会更旧）
+        std::fs::write(second.root().join("db/titles.json"), b"{\"from\":\"b\"}").unwrap();
+        // 同时让云端那份也变（拿"本地改过、云端改过"这条分支）
+        let third = workspace("conflict-c");
+        run(&third, &settings, &|_| {}).unwrap();
+        std::fs::write(third.root().join("db/titles.json"), b"{\"from\":\"c\"}").unwrap();
+        run(&third, &settings, &|_| {}).unwrap();
+
+        let report = run(&second, &settings, &|_| {}).unwrap();
+        assert_eq!(report.conflicts.len(), 1, "两边都改过要报出来：{report:?}");
+        assert_eq!(report.conflicts[0].path, "db/titles.json");
+
+        let _ = std::fs::remove_dir_all(first.root());
+        let _ = std::fs::remove_dir_all(second.root());
+        let _ = std::fs::remove_dir_all(third.root());
     }
 }
