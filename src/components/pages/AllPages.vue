@@ -107,27 +107,39 @@ onMounted(async () => {
   <div class="all">
     <header class="all__head">
       <h1 class="all__title">全部页面</h1>
-      <p class="all__count">共 {{ notes.length }} 篇</p>
     </header>
 
-    <h2 v-if="help.length > 0" class="all__section">帮助</h2>
-    <ol v-if="help.length > 0" class="all__list">
-      <li v-for="page in help" :key="page.slug">
-        <button type="button" class="all__item" @click="emit('navigate', `Help:${page.slug}`)">
-          <span class="all__name">{{ page.display }}</span>
+    <!-- 帮助与特殊页面：都只有几个入口，摆成一排小按钮 —— 它们是"去哪儿"，
+         不是内容本身。按行铺开会把笔记（这一页真正要看的东西）挤到屏幕外面去。 -->
+    <div v-if="help.length > 0 || pages.length > 0" class="all__jump">
+      <div v-if="help.length > 0" class="all__jump-group">
+        <h2 class="all__section all__section--inline">帮助</h2>
+        <button
+            v-for="page in help"
+            :key="page.slug"
+            type="button"
+            class="all__chip"
+            :title="page.display"
+            @click="emit('navigate', `Help:${page.slug}`)"
+        >
+          {{ page.slug }}
         </button>
-      </li>
-    </ol>
+      </div>
 
-    <h2 v-if="pages.length > 0" class="all__section">特殊页面</h2>
-    <ol v-if="pages.length > 0" class="all__list">
-      <li v-for="page in pages" :key="page">
-        <button type="button" class="all__item" @click="emit('navigate', `special:${page}`)">
-          <span class="all__name">{{ metaOf(page).label }}</span>
-          <span class="all__meta">{{ metaOf(page).tip }}</span>
+      <div v-if="pages.length > 0" class="all__jump-group">
+        <h2 class="all__section all__section--inline">特殊页面</h2>
+        <button
+            v-for="page in pages"
+            :key="page"
+            type="button"
+            class="all__chip"
+            :title="metaOf(page).tip"
+            @click="emit('navigate', `special:${page}`)"
+        >
+          {{ metaOf(page).label }}
         </button>
-      </li>
-    </ol>
+      </div>
+    </div>
 
     <h2 class="all__section">
       笔记
@@ -199,17 +211,43 @@ onMounted(async () => {
   line-height: 1.35;
 }
 
-.all__count {
-  margin: 6px 0 0;
+/* 帮助 / 特殊页面：一行一组，按钮自己换行 */
+.all__jump {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 18px;
+}
+
+.all__jump-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.all__chip {
+  padding: 4px 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
   color: var(--text-dim);
-  font-size: 13px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.all__chip:hover {
+  border-color: var(--accent-soft);
+  background: var(--accent-tint);
+  color: var(--text);
 }
 
 .all__section {
   display: flex;
   gap: 10px;
   align-items: baseline;
-  margin: 26px 0 0;
+  margin: 22px 0 0;
   padding-bottom: 6px;
   border-bottom: 1px solid var(--border);
   color: var(--text-dim);
@@ -221,6 +259,15 @@ onMounted(async () => {
   color: var(--text-dim);
   font-size: 12px;
   font-weight: 400;
+}
+
+/* 紧凑那一组里的标题：只是个行首的标签，不要下划线与上下留白 */
+.all__section--inline {
+  margin: 0 6px 0 0;
+  padding: 0;
+  border-bottom: 0;
+  font-size: 12.5px;
+  white-space: nowrap;
 }
 
 /* 翻页 */
