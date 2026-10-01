@@ -116,7 +116,7 @@ impl Database {
     ///
     /// 那一版复用删除前的内容（同一个 blob），所以还原出来的还是原来那篇；
     /// 删除标记留在日志里，"什么时候删过"也还查得到。
-    pub fn restore(&self, title: &str) -> Result<crate::vault::notes::Reading, String> {
+    pub fn restore(&self, title: &str) -> Result<(), String> {
         let mut titles = self.titles()?;
         let Some((id, display)) = titles
             .trashed
@@ -153,8 +153,9 @@ impl Database {
 
         // 还原也记成一次提交：历史里看得见"从回收站还原"
         self.append_restored(&id, &state.blob, state.bytes)?;
-        self.read(&display)
-            .map(|note| crate::vault::notes::Reading::Ready { note })
+        // 不读回来：文件页面的正文不是文本（读它只会撞上"不是文本"），
+        // 而调用方要的只是"还原了没有" —— 这件事上面已经做完了
+        Ok(())
     }
 
     /// 永久清除一条：日志删掉、表里的记录删掉。
@@ -454,10 +455,10 @@ mod tests {
         note(&database, "甲", "正文");
         database.delete("甲").unwrap();
 
-        let reading = database.restore("甲").unwrap();
-        let crate::vault::notes::Reading::Ready { note } = reading else {
-            panic!("还原出来的应当读得到");
-        };
+        database.restore("甲").unwrap();
+
+        // 内容与历史都在：正文读得回来，最后一版写着"从回收站还原"
+        let note = database.read("甲").unwrap();
         assert_eq!(note.markdown, "正文");
         assert_eq!(note.summary.as_deref(), Some("从回收站还原"));
 

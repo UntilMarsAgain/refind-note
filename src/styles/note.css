@@ -725,6 +725,38 @@
   margin-bottom: 0;
 }
 
+/* `::video` / `::audio`：与图片同一套摆放（尺寸是上限，位置由 align 决定） */
+.note-body .media video,
+.note-body .media audio {
+  display: block;
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.note-body .media--center video,
+.note-body .media--center audio {
+  margin: 0 auto;
+}
+
+.note-body .media--left video,
+.note-body .media--left audio {
+  margin-right: auto;
+}
+
+.note-body .media--right video,
+.note-body .media--right audio {
+  margin-left: auto;
+}
+
+/* 正文里按名字引用的视频/音频（`![](片子.mp4)` 会被换成播放器）：与 `::video` 同一副样子 */
+.note-body .note-media {
+  display: block;
+  max-width: 100%;
+  margin: 1.2em auto;
+  border-radius: 6px;
+  background: var(--surface);
+}
+
 /* `::image` 图片：尺寸是上限，位置由 align 决定 */
 .note-body .image {
   margin: 1.2em 0;

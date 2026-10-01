@@ -261,6 +261,28 @@ mod tests {
         assert!(bad.contains("template--problem"), "{bad}");
     }
 
+    /// `::video` / `::audio`：摆一个带控件的播放器（源写的是仓库里的名字）
+    #[test]
+    fn video_and_audio_render_players() {
+        let video = render("::video src=片子.mp4 width=720px\n  一段注释\n");
+        assert!(video.contains("<video"), "{video}");
+        assert!(video.contains("controls"), "{video}");
+        assert!(video.contains("src=\"片子.mp4\""), "{video}");
+        assert!(video.contains("max-width: 720px"), "{video}");
+        assert!(
+            video.contains("<figcaption>一段注释</figcaption>"),
+            "{video}"
+        );
+
+        let audio = render("::audio src=录音.mp3\n");
+        assert!(audio.contains("<audio"), "{audio}");
+        assert!(audio.contains("controls"), "{audio}");
+
+        // 没有 src 就报用法问题，而不是摆一个空的播放器
+        let bare = render("::video\n");
+        assert!(bare.contains("template--problem"), "{bare}");
+    }
+
     /// `::theme`：两节都渲染出来，由样式按主题决定显示哪一节
     #[test]
     fn theme_renders_both_versions_and_lets_the_stylesheet_pick() {

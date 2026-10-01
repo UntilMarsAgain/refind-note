@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { confirm, open, save } from "@tauri-apps/plugin-dialog";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { Download, History, Pencil, Trash2, Upload } from "@lucide/vue";
+import { Download, ExternalLink, History, Pencil, Trash2, Upload } from "@lucide/vue";
 import type { FileEntry, FileInfo, Uploaded } from "../../bindings/files.ts";
+import type { Policy } from "../../bindings/note.ts";
+import { protection } from "../../core/preferences.ts";
+import StoragePicker from "../StoragePicker.vue";
 import { formatBytes, formatTime } from "../../bindings/maintenance.ts";
 import { fileReferenceOf } from "../../view/file-links.ts";
+import { freshUrl } from "../../view/file-unlock.ts";
 import { saveVaultFile } from "../../view/file-save.ts";
 import { flash } from "../../core/notice.ts";
 import PageHeader, { type PageAction } from "../note/PageHeader.vue";
@@ -21,6 +25,8 @@ import PageHeader, { type PageAction } from "../note/PageHeader.vue";
 const props = defineProps<{
   /** 显示标题（`File:桥.png`） */
   title: string;
+  /** 看哪一版（地址里的版本 token）；null 就是最新一版 */
+  reference?: string | null;
   /** 正文滚下去了：页头收起 */
   collapsed: boolean;
   /** 这一页星标过没有 */
@@ -35,6 +41,16 @@ const emit = defineEmits<{
 const info = ref<FileInfo | null>(null);
 /** 原位输入的口令：只有口令层才用得上 */
 const passphrase = ref("");
+
+/** 传新版时这一版怎么存（与上传页、编辑器同一套选择器） */
+const uploadPolicy = ref<Policy>({ ...protection.value });
+const uploadPassphrase = ref("");
+
+/** 看的是不是一个旧版本 */
+const older = computed(() => {
+  const found = info.value;
+  return props.reference != null && found != null && String(found.rev) !== props.reference;
+});
 const problem = ref("");
 const loading = ref(false);
 const busy = ref(false);
@@ -49,7 +65,10 @@ async function load() {
   loading.value = true;
   problem.value = "";
   try {
-    info.value = await invoke<FileInfo>("file_info", { key: props.title });
+    info.value = await invoke<FileInfo>("file_info", {
+      key: props.title,
+      reference: props.reference ?? null,
+    });
   } catch (reason) {
     info.value = null;
     problem.value = String(reason);
@@ -84,7 +103,8 @@ async function unlock() {
   try {
     await invoke("unlock", {
       title: found.title,
-      reference: null,
+      // 看的是哪一版就解哪一版（口令按版本存）
+      reference: props.reference ?? null,
       passphrase: passphrase.value,
     });
     passphrase.value = "";
@@ -98,9 +118,11 @@ async function unlock() {
 
 const entry = computed(() => info.value);
 
-watch(() => props.title, () => void load(), { immediate: true });
+watch(() => [props.title, props.reference], () => void load(), { immediate: true });
 
 const isImage = computed(() => entry.value?.mime.startsWith("image/") ?? false);
+const isVideo = computed(() => entry.value?.mime.startsWith("video/") ?? false);
+const isAudio = computed(() => entry.value?.mime.startsWith("audio/") ?? false);
 const isText = computed(() => entry.value?.mime.startsWith("text/") ?? false);
 
 const actions: PageAction[] = [
@@ -144,7 +166,12 @@ async function update(file: FileEntry) {
 
   busy.value = true;
   try {
-    const uploaded = await invoke<Uploaded>("update_file", { title: file.title, path });
+    const uploaded = await invoke<Uploaded>("update_file", {
+      title: file.title,
+      path,
+      protection: uploadPolicy.value,
+      passphrase: uploadPolicy.value.symmetric ? uploadPassphrase.value || null : null,
+    });
     flash(`已更新到第 ${uploaded.entry.rev} 版（旧版仍在历史里）`);
     await load();
   } catch (reason) {
@@ -165,21 +192,66 @@ async function saveAs(file: FileEntry) {
   }
 }
 
-/** 改名：文件名就是页面名，所以要问一句新名字 */
-function rename(file: FileEntry) {
-  const wanted = window.prompt("新的文件名", file.name);
-  const name = wanted?.trim();
+/**
+ * 改名：文件名就是页面名，所以要问一句新名字。
+ *
+ * 用**系统的保存对话框**问 —— 系统给应用的就只有这一种"带输入框的窗口"。
+ * 只看它返回的文件名那一栏：选在哪个目录无所谓，仓库里的文件本来就不住在目录里。
+ */
+async function rename(file: FileEntry) {
+  const picked = await save({
+    title: "改名为…",
+    defaultPath: file.name,
+  });
+  if (!picked) {
+    return;
+  }
+  const name = picked.split(/[\\/]/).pop()?.trim() ?? "";
   if (!name || name === file.name) {
     return;
   }
-  void invoke<string>("rename_file", { title: file.title, name })
-    .then((display) => {
-      flash(`已改名为「${name}」；笔记里已写下的旧名称不会随之更改`);
-      emit("navigate", display);
-    })
-    .catch((reason) => {
-      problem.value = String(reason);
+
+  try {
+    const display = await invoke<string>("rename_file", { title: file.title, name });
+    flash(`已改名为「${name}」；笔记里已写下的旧名称不会随之更改`);
+    emit("navigate", display);
+  } catch (reason) {
+    problem.value = String(reason);
+  }
+}
+
+/**
+ * 交给系统的默认应用打开。
+ *
+ * 系统要的是**路径**，而仓库里存的是字节 —— 所以后端先把这一版落到临时目录里，
+ * 再把那个路径交出去（拷贝用完由系统回收，不进仓库）。
+ * 加密存的那几种，这一步等于在临时目录里留下一份**明文**：先把这件事说清楚再开。
+ */
+async function openWithSystem(file: FileInfo) {
+  const sealed = file.protection.symmetric || file.protection.encrypt !== null;
+  if (sealed) {
+    const go = await confirm(
+      `「${file.name}」在仓库里是加密存的。用系统应用打开会先解开，把一份**明文**写到临时目录，` +
+        `再交给外部程序 —— 那一份不受本程序保护。\n\n继续打开吗？`,
+      { title: "会写出明文副本", kind: "warning" },
+    );
+    if (!go) {
+      return;
+    }
+  }
+
+  busy.value = true;
+  try {
+    const staged = await invoke<string>("open_file", {
+      title: file.title,
+      reference: props.reference ?? null,
     });
+    flash(`已交给系统打开（临时副本：${staged}）`);
+  } catch (reason) {
+    problem.value = String(reason);
+  } finally {
+    busy.value = false;
+  }
 }
 
 async function copyReference() {
@@ -222,6 +294,14 @@ async function copyReference() {
         改于 {{ formatTime(entry.modified) }}
       </p>
 
+      <!-- 看的是历史里的一版：说清楚，并给一条回最新版的路 -->
+      <p v-if="older" class="file__older">
+        正在看第 {{ entry.rev }} 版，不是最新版。
+        <button type="button" class="file__link" @click="emit('navigate', entry.title)">
+          回到最新版
+        </button>
+      </p>
+
       <!--
         加密的先解锁：**原位输口令**，不跳页 —— 解锁之后这一页自己就刷新了。
         读得动之后：能预览的就地预览，不能预览的给一句实话 + 一个"另存为"。
@@ -247,16 +327,30 @@ async function copyReference() {
 
       <template v-else>
         <figure v-if="isImage" class="file__preview">
-          <img :src="`${entry.url}?t=${entry.rev}`" :alt="entry.name"/>
+          <!-- 地址里已经带着版本号（看历史时取的是那一版的字节）；
+               `freshUrl` 再加一个时间戳绕开 webview 的缓存 -->
+          <img :src="freshUrl(entry.url)" :alt="entry.name"/>
+        </figure>
+        <figure v-else-if="isVideo" class="file__preview">
+          <video :src="entry.url" controls preload="metadata"/>
+        </figure>
+        <figure v-else-if="isAudio" class="file__preview">
+          <audio :src="entry.url" controls preload="metadata"/>
         </figure>
         <p v-else-if="isText" class="file__note">这是文本文件，另存为之后可以打开查看。</p>
-        <p v-else class="file__note">这个类型不能在这里预览，另存为之后可以打开查看。</p>
+        <p v-else class="file__note">
+          这个类型不能在这里预览。可以交给系统的默认应用打开，或另存为。
+        </p>
       </template>
 
       <div class="file__actions">
         <button type="button" class="file__btn" :disabled="busy" @click="update(entry)">
           <Upload :size="14" :stroke-width="1.9"/>
           传新版
+        </button>
+        <button type="button" class="file__btn" :disabled="busy" @click="openWithSystem(entry)">
+          <ExternalLink :size="14" :stroke-width="1.9"/>
+          用系统应用打开
         </button>
         <button type="button" class="file__btn" @click="saveAs(entry)">
           <Download :size="14" :stroke-width="1.9"/>
@@ -265,6 +359,9 @@ async function copyReference() {
         <button type="button" class="file__btn" @click="copyReference">
           复制引用
         </button>
+
+        <!-- 传新版也要能指定怎么存：与上传页、编辑器同一个选择器 -->
+        <StoragePicker v-model:policy="uploadPolicy" v-model:passphrase="uploadPassphrase"/>
       </div>
 
       <code class="file__ref">{{ fileReferenceOf(entry) }}</code>
@@ -275,6 +372,26 @@ async function copyReference() {
 <style scoped>
 .file {
   padding-top: 4px;
+}
+
+.file__older {
+  margin: 8px 0 0;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.file__link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-soft);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.file__link:hover {
+  text-decoration: underline;
 }
 
 .file__meta {
@@ -334,11 +451,16 @@ async function copyReference() {
   margin: 16px 0 0;
 }
 
-.file__preview img {
+.file__preview img,
+.file__preview video {
   max-width: 100%;
   max-height: 70vh;
   border: 1px solid var(--border);
   border-radius: 8px;
+}
+
+.file__preview audio {
+  width: 100%;
 }
 
 .file__note {

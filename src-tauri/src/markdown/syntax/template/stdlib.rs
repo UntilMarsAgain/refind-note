@@ -21,6 +21,8 @@ pub static TEMPLATES: &[(&str, TemplateRenderer)] = &[
     ("tabs", render_tabs),
     ("theme", render_theme),
     ("image", render_image),
+    ("video", render_video),
+    ("audio", render_audio),
     ("css", render_css),
     ("html", render_html),
     ("js", render_js),
@@ -348,6 +350,105 @@ fn render_image(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
     }
     fmt.close("figure");
     fmt.cr();
+}
+
+/// `::video src=片子.mp4` / `::audio src=录音.mp3` —— 摆一个播放器。
+///
+/// 与 `::image` 同一套参数：`src` 必给，`width=` / `height=` 是**上限**，
+/// 注释写在块里一行或由 `caption=` 给出。`align=` 只对视频有意义（音频是个窄条）。
+///
+/// 名字里的 `src` 写的是**仓库里的名字**（`片子.mp4`），与 `![]()` 里写的是同一个东西；
+/// 换成能取到字节的地址是前端注入之后的事。
+fn render_video(template: &Template, node: &Node, fmt: &mut dyn Renderer) {
+    render_media(template, node, fmt, "video");
+}
+
+/// 见 [`render_video`]
+fn render_audio(template: &Template, node: &Node, fmt: &mut dyn Renderer) {
+    render_media(template, node, fmt, "audio");
+}
+
+/// 视频与音频只差一个标签名：源、尺寸、注释、位置的规矩完全一样
+fn render_media(template: &Template, _node: &Node, fmt: &mut dyn Renderer, kind: &str) {
+    let Some(source) = template.param("src") else {
+        render_problem(template, fmt, "缺少 src=…：至少要给出文件名字");
+        return;
+    };
+    let lowered = source.trim().to_lowercase();
+    if ["javascript:", "data:", "vbscript:"]
+        .iter()
+        .any(|bad| lowered.starts_with(bad))
+    {
+        render_problem(
+            template,
+            fmt,
+            "src 用的是不允许的协议（javascript / data / vbscript 会被拒绝）",
+        );
+        return;
+    }
+
+    let align = match template.param("align").map(str::trim) {
+        Some("left") => "left",
+        Some("right") => "right",
+        _ => "center",
+    };
+
+    let mut style = String::new();
+    if let Some(rule) = template
+        .param("width")
+        .and_then(|value| size_rule("max-width", value))
+    {
+        style.push_str(&rule);
+    }
+    if let Some(rule) = template
+        .param("height")
+        .and_then(|value| size_rule("max-height", value))
+    {
+        style.push_str(&rule);
+    }
+
+    fmt.cr();
+    fmt.open(
+        "figure",
+        &[("class", format!("media media--{kind} media--{align}"))],
+    );
+    fmt.cr();
+    let mut attrs: Vec<(&str, String)> = vec![
+        ("src", source.trim().to_string()),
+        // 播放器该有的控件一个不少；预加载只取头，别让长片子一打开就拖满带宽
+        ("controls", "controls".to_string()),
+        ("preload", "metadata".to_string()),
+    ];
+    if !style.is_empty() {
+        attrs.push(("style", style));
+    }
+    fmt.self_close(kind, &attrs);
+    fmt.cr();
+    if let Some(caption) = caption_of(template) {
+        fmt.open("figcaption", &[]);
+        fmt.text(&caption);
+        fmt.close("figcaption");
+        fmt.cr();
+    }
+    fmt.close("figure");
+    fmt.cr();
+}
+
+/// 注释：`caption=` 优先，其次块里写着的那一行（缩进与空行都不算）
+fn caption_of(template: &Template) -> Option<String> {
+    match template.param("caption") {
+        Some(caption) => Some(caption.trim().to_string()).filter(|text| !text.is_empty()),
+        None => {
+            let text = template
+                .body
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ");
+            Some(text).filter(|text| !text.is_empty())
+        }
+    }
 }
 
 /// `::title text="大标题" color=#5b8dd6` —— **居中的大标题，没有背景**。

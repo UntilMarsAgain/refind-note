@@ -480,7 +480,7 @@ impl command::CommandEnv for Database {
 }
 
 /// 版本 token → 版本号（现在只认数字；收 token 是语法层的事，解释 token 是这里的事）
-fn token_to_rev(token: &str) -> Result<u64, String> {
+pub(crate) fn token_to_rev(token: &str) -> Result<u64, String> {
     token
         .parse()
         .map_err(|_| format!("版本要写数字（拿到的是「{token}」）"))

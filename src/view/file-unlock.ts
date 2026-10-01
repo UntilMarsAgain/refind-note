@@ -12,7 +12,8 @@ import type { FileInfo } from "../bindings/files.ts";
 /** 问一份文件的现状（不读字节，只看明文头与本次会话里有没有口令） */
 export async function fileInfo(name: string): Promise<FileInfo | null> {
     try {
-        return await invoke<FileInfo>("file_info", { key: name });
+        // 正文里引用的都是**最新一版**，所以 reference 明确给 null
+        return await invoke<FileInfo>("file_info", { key: name, reference: null });
     } catch {
         // 不是文件、或者这一页不存在：调用方按"没有这回事"处理
         return null;
@@ -42,5 +43,7 @@ export function readable(info: FileInfo): boolean {
 
 /** 带一个"这次是新读的"后缀：解锁之后要让 webview 重新去取，而不是吃缓存 */
 export function freshUrl(url: string): string {
-    return `${url}?t=${Date.now()}`;
+    // 地址里可能已经带了查询（`?rev=3` —— 看的是历史里的某一版），那就用 `&` 接上
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}t=${Date.now()}`;
 }

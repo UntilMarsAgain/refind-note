@@ -2,7 +2,8 @@
  * 笔记 HTML 注入 DOM 之后的收尾工作。
  *
  * 几件事：把相对地址换成能取到字节的附件地址、给正文挂上右键菜单、
- * 图片取不到时换一句说明、选项卡接线，以及让 `::js` 真的跑起来。
+ * 图片取不到时换一句说明、把音视频换成播放器、选项卡接线，
+ * 以及让 `::js` 真的跑起来。
  *
  * 放在这里而不是各个组件里，是因为阅读视图与编辑器预览都会注入同一份 HTML，
  * 行为该由同一处决定。
@@ -210,10 +211,11 @@ export function decorateNoteHtml(root: HTMLElement): void {
         image.dataset.imageReady = "yes";
         attachImage(image);
 
-        // 本仓库里的图片：可能是加密存的 —— 那就不该直接去拉
+        // 本仓库里的文件：可能是加密存的（那就不该直接去拉），
+        // 也可能压根不是图（`![](片子.mp4)` —— markdown 一律渲染成 <img>，这里换成播放器）
         const name = fileTargetOf(image.getAttribute("src") ?? "");
         if (name) {
-            void attachLockedImage(image, name);
+            void attachVaultFile(image, name);
         }
     }
     wireTabs(root);
@@ -231,9 +233,29 @@ export function decorateNoteHtml(root: HTMLElement): void {
  *
  * 解锁之后再把它换回真正的 `<img>`，并带一个"这次是新读的"后缀绕开缓存。
  */
-async function attachLockedImage(image: HTMLImageElement, name: string) {
+async function attachVaultFile(image: HTMLImageElement, name: string) {
     const info = await fileInfo(name);
-    if (!info || !info.needs_unlock || readable(info)) {
+    if (!info) {
+        return;
+    }
+
+    // 视频 / 音频：markdown 把它们写成了 `<img>`（`![]()` 只产出图片标签），
+    // 换成真播放器。与 `::video` / `::audio` 摆出来的是同一副样子（同一套样式）
+    const player = mediaTag(info.mime);
+    if (player) {
+        const element = document.createElement(player);
+        element.className = "note-media";
+        element.setAttribute("src", image.getAttribute("src") ?? info.url);
+        element.setAttribute("controls", "controls");
+        element.setAttribute("preload", "metadata");
+        if (image.alt) {
+            element.setAttribute("title", image.alt);
+        }
+        image.replaceWith(element);
+        return;
+    }
+
+    if (!info.needs_unlock || readable(info)) {
         return;
     }
 
@@ -304,6 +326,17 @@ async function attachLockedImage(image: HTMLImageElement, name: string) {
 
     box.append(button, problem);
     image.replaceWith(box);
+}
+
+/** 这个类型该用哪个播放器；不是音视频就是 null（那就照常当图片） */
+function mediaTag(mime: string): "video" | "audio" | null {
+    if (mime.startsWith("video/")) {
+        return "video";
+    }
+    if (mime.startsWith("audio/")) {
+        return "audio";
+    }
+    return null;
 }
 
 /** 图片：点一下看大图，加载不出来给一句说明 */

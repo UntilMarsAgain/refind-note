@@ -204,15 +204,46 @@ defineExpose({
 
       <AllPages v-else-if="specialPage === 'all'" @navigate="emit('navigate', $event)"/>
 
-      <FileView
-          v-else-if="filePage"
-          :key="filePage.title"
-          :title="filePage.title"
-          :collapsed="collapsed"
-          :starred="starredHere"
-          @navigate="emit('navigate', $event)"
-          @toggle-star="onToggleStar"
-      />
+      <!--
+        文件页面（`File:桥.png`）：正文是字节，所以"看"这一态交给文件视图；
+        历史与删除与笔记**走同一套**（事件日志是同一种）——
+        先前这里只看 `filePage`、不看状态，于是那两个按钮点下去又回到原地。
+      -->
+      <template v-else-if="filePage && mode">
+        <FileView
+            v-if="mode.kind === 'view'"
+            :key="`${filePage.title}@${mode.ref ?? ''}`"
+            :title="filePage.title"
+            :reference="mode.ref"
+            :collapsed="collapsed"
+            :starred="starredHere"
+            @navigate="emit('navigate', $event)"
+            @toggle-star="onToggleStar"
+        />
+
+        <HistoryView
+            v-else-if="mode.kind === 'history'"
+            :title="filePage.title"
+            @open-version="emit('open-version', { title: filePage.title, rev: $event })"
+            @rollback="emit('rollback-version', { title: filePage.title, rev: $event })"
+            @cancel="emit('navigate', filePage.title)"
+        />
+
+        <DeleteView
+            v-else-if="mode.kind === 'delete'"
+            :title="filePage.title"
+            @cancel="emit('navigate', filePage.title)"
+            @deleted="emit('deleted')"
+        />
+
+        <RollbackView
+            v-else-if="mode.kind === 'rollback'"
+            :title="filePage.title"
+            :reference="mode.ref"
+            @cancel="emit('navigate', `${filePage.title}@view-${mode.ref}`)"
+            @rolled-back="emit('rolled-back', $event)"
+        />
+      </template>
 
       <CrossSiteView
           v-else-if="crossSite"

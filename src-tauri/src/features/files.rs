@@ -80,7 +80,7 @@ impl Database {
                 size: state.bytes,
                 rev: state.rev,
                 modified: state.modified.clone(),
-                url: url_of(&parsed.page),
+                url: url_of(&parsed.page, None),
                 needs_unlock: Self::needs_unlock(&inspection.protection),
                 protection: inspection.protection,
             });
@@ -117,7 +117,7 @@ impl Database {
         }
 
         // 保护策略照这一页当前的（新页面就是仓库默认）；显式给了就换，从这一版起粘住
-        let note = self.commit_bytes(
+        self.commit_bytes(
             &display,
             bytes,
             mime,
@@ -125,7 +125,6 @@ impl Database {
             protection,
             passphrase,
         )?;
-        let _ = note;
 
         let entry = self
             .list_files()?
@@ -190,26 +189,40 @@ impl Database {
     ///
     /// 它回答的是"这一版怎么存的、现在读不读得动" —— 于是界面可以在**不去读字节**的
     /// 前提下决定：直接显示，还是先摆一个"解锁"的按钮。
-    pub fn file_info(&self, key: &str) -> Result<FileInfo, String> {
+    ///
+    /// `reference` 给版本 token 就看那一版（`@view-3` 里的 3）：历史里点进一版时用得着。
+    pub fn file_info(&self, key: &str, reference: Option<&str>) -> Result<FileInfo, String> {
         let title = self.file_title(key);
         let id = self.locate(&title)?;
         let state = self.state_of(&id)?;
-        let inspection = self.inspect_rev(&state.blob)?;
         let page = crate::vault::title::parse(&title, &self.namespaces())?.page;
+
+        // 看的是哪一版：不给就是最新那版
+        let rev = match reference {
+            Some(token) => crate::vault::resolve::token_to_rev(token)?,
+            None => state.rev,
+        };
+        let (blob, bytes, modified) = if rev == state.rev {
+            (state.blob.clone(), state.bytes, state.modified.clone())
+        } else {
+            let (at, blob, bytes, _) = self.event_at(&id, &title, rev)?;
+            (blob, bytes, at)
+        };
+        let inspection = self.inspect_rev(&blob)?;
 
         Ok(FileInfo {
             entry: FileEntry {
                 title: title.clone(),
                 name: page.clone(),
                 mime: inspection.meta.mime.clone(),
-                size: state.bytes,
-                rev: state.rev,
-                modified: state.modified.clone(),
-                url: url_of(&page),
+                size: bytes,
+                rev,
+                modified,
+                url: url_of(&page, Some(rev)),
                 needs_unlock: Self::needs_unlock(&inspection.protection),
                 protection: inspection.protection.clone(),
             },
-            passphrase_ready: session::passphrase_for(&id, state.rev).is_some(),
+            passphrase_ready: session::passphrase_for(&id, rev).is_some(),
             needs_passphrase: inspection.protection.symmetric,
             needs_secret_key: inspection.protection.encrypt.is_some(),
         })
@@ -225,9 +238,16 @@ impl Database {
     }
 }
 
-/// 取字节的地址：`refind://localhost/file/<页面名>`（Rust 侧注册的协议）
-pub fn url_of(name: &str) -> String {
-    format!("refind://localhost/file/{}", encode_key(name))
+/// 取字节的地址：`refind://localhost/file/<页面名>`（Rust 侧注册的协议）。
+///
+/// 给了 `rev` 就带上版本号 —— 看历史里的某一版时，取的是那一版的字节，
+/// 与"最新一版"分得开（不然旧版的页面会显示成新版的样子）。
+pub fn url_of(name: &str, rev: Option<u64>) -> String {
+    let base = format!("refind://localhost/file/{}", encode_key(name));
+    match rev {
+        Some(rev) => format!("{base}?rev={rev}"),
+        None => base,
+    }
 }
 
 /// 地址里的键：只转义必要时的那几个字符，中文原样（便于排障时一眼看懂）
@@ -363,10 +383,12 @@ mod tests {
 
         assert!(!database.exists("File:图.png"));
         assert!(database.list_files().unwrap().is_empty());
-        // 回收站里躺着，能还原
+        // 回收站里躺着，能还原 —— 还原这条路同样"不读文本"（读它必失败）
         assert_eq!(database.list_trash().unwrap().len(), 1);
         database.restore("File:图.png").unwrap();
         assert!(database.exists("File:图.png"));
+        let (bytes, _) = database.read_file("File:图.png", None).unwrap();
+        assert_eq!(bytes, "字节".as_bytes());
 
         cleanup(&database);
     }
@@ -449,7 +471,7 @@ mod tests {
             .unwrap();
 
         // 刚用过口令：它还躺在本次会话里，所以"读得动"
-        let info = database.file_info("秘密.png").unwrap();
+        let info = database.file_info("秘密.png", None).unwrap();
         assert!(info.needs_passphrase, "头里写着有口令层");
         assert!(info.entry.needs_unlock);
         assert!(info.passphrase_ready, "刚用过的口令还在这次会话里");
@@ -457,13 +479,17 @@ mod tests {
 
         // 名字与标题两种写法都认
         assert_eq!(
-            database.file_info("File:秘密.png").unwrap().entry.name,
+            database
+                .file_info("File:秘密.png", None)
+                .unwrap()
+                .entry
+                .name,
             "秘密.png"
         );
 
         // 忘掉之后：**报得出"要口令"，但读不出来** —— 界面据此摆那个解锁按钮
         crate::storage::session::forget_all();
-        let info = database.file_info("秘密.png").unwrap();
+        let info = database.file_info("秘密.png", None).unwrap();
         assert!(!info.passphrase_ready, "忘掉之后要重新问");
         assert!(database.read_file("File:秘密.png", None).is_err());
 
@@ -476,6 +502,25 @@ mod tests {
         assert_eq!(bytes, "字节".as_bytes());
 
         crate::storage::session::forget_all();
+        cleanup(&database);
+    }
+
+    /// 传一张**不是文本**的图：不该在写完之后再报一句"不是文本"
+    /// （写入是写入、读回文本是另一回事 —— 上传路径不该顺手去读文本）
+    #[test]
+    fn uploading_binary_content_does_not_need_it_to_be_text() {
+        let database = scratch("binary");
+        // 0x89 打头的 PNG，按 UTF-8 解析必失败
+        let png = [0x89u8, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        let uploaded = database
+            .add_file("图.png", &png, "image/png", None, None)
+            .unwrap();
+
+        assert_eq!(uploaded.entry.rev, 1);
+        assert_eq!(uploaded.entry.size, png.len() as u64);
+        let (bytes, _) = database.read_file("File:图.png", None).unwrap();
+        assert_eq!(bytes, png);
+
         cleanup(&database);
     }
 
@@ -501,7 +546,7 @@ mod tests {
             .unwrap();
 
         // 头里写着有口令层，读得动是因为口令还在这次会话里
-        let info = database.file_info("秘密.txt").unwrap();
+        let info = database.file_info("秘密.txt", None).unwrap();
         assert!(info.needs_passphrase, "上传时指定的口令层没落上");
         assert!(info.entry.needs_unlock);
         let (bytes, _) = database.read_file("File:秘密.txt", None).unwrap();

@@ -104,9 +104,11 @@ fn serve_file(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<
     let Ok((_, database)) = open_database() else {
         return missing();
     };
+    // `?rev=N` 取的是历史里的那一版；不写就是最新一版
+    let rev = query_value(request.uri().query(), "rev");
     let title = format!("{}:{}", vault::namespace::FILE_NAME, decode_percent(name));
     // 读不出来（没有这一页、上了锁、内容坏了）都是 404：这里只说"取不到"
-    let Ok((bytes, mime)) = database.read_file(&title, None) else {
+    let Ok((bytes, mime)) = database.read_file(&title, rev.as_deref()) else {
         return missing();
     };
 
@@ -115,10 +117,75 @@ fn serve_file(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<
     } else {
         mime
     };
+    let total = bytes.len() as u64;
+
+    // 播放器拖着进度条时会来要一段（`Range: bytes=起点-`）—— 认得出就给那一段，
+    // 认不出就整份回去。视频能不能**拖动**，全看这一步
+    let wanted = request
+        .headers()
+        .get("range")
+        .and_then(|value| value.to_str().ok());
+    if let Some((start, end)) = parse_range(wanted, total) {
+        let slice = bytes[start as usize..=end as usize].to_vec();
+        return tauri::http::Response::builder()
+            .status(206)
+            .header("Content-Type", mime)
+            .header("Accept-Ranges", "bytes")
+            .header("Content-Range", format!("bytes {start}-{end}/{total}"))
+            .body(slice)
+            .unwrap_or_else(|_| missing());
+    }
+
     tauri::http::Response::builder()
         .header("Content-Type", mime)
+        .header("Accept-Ranges", "bytes")
         .body(bytes)
         .unwrap_or_else(|_| missing())
+}
+
+/// `Range: bytes=起点-终点` → 闭区间 `(起点, 终点)`；认不出就是 `None`。
+///
+/// 只认单段、只认字节：多段的写法（`bytes=0-1,5-6`）没有播放器会用，
+/// 认不了就整份回去，比猜错强。终点省略（`bytes=100-`）表示"到末尾"。
+fn parse_range(header: Option<&str>, total: u64) -> Option<(u64, u64)> {
+    let body = header?.trim().strip_prefix("bytes=")?.trim();
+    if body.contains(',') {
+        return None;
+    }
+    let (start, end) = body.split_once('-')?;
+    let start: u64 = start.trim().parse().ok()?;
+    let end: u64 = match end.trim() {
+        "" => total.saturating_sub(1),
+        value => value.parse().ok()?,
+    };
+    if start > end || end >= total {
+        return None;
+    }
+    Some((start, end))
+}
+
+#[cfg(test)]
+mod range_tests {
+    use super::parse_range;
+
+    #[test]
+    fn ranges_are_read_only_when_they_make_sense() {
+        // 常见三种：从头取、从中间取到末尾、取一段
+        assert_eq!(parse_range(Some("bytes=0-"), 100), Some((0, 99)));
+        assert_eq!(parse_range(Some("bytes=10-"), 100), Some((10, 99)));
+        assert_eq!(parse_range(Some("bytes=10-20"), 100), Some((10, 20)));
+        assert_eq!(parse_range(Some("bytes= 5 - 9 "), 100), Some((5, 9)));
+
+        // 认不出的：别的单位、多段、越界、反着写、压根没给
+        assert_eq!(parse_range(None, 100), None);
+        assert_eq!(parse_range(Some("items=0-"), 100), None);
+        assert_eq!(parse_range(Some("bytes=0-1,5-6"), 100), None);
+        assert_eq!(parse_range(Some("bytes=0-100"), 100), None);
+        assert_eq!(parse_range(Some("bytes=50-10"), 100), None);
+        assert_eq!(parse_range(Some("bytes=abc-"), 100), None);
+        // 空文件：没有可以给的段
+        assert_eq!(parse_range(Some("bytes=0-"), 0), None);
+    }
 }
 
 /// 钥匙串里的钥匙（新的在前）；没有 gpg 时是空列表
@@ -270,11 +337,66 @@ fn passphrase_arg(request: &tauri::ipc::Request<'_>) -> Option<String> {
     header_arg(request, "x-passphrase").filter(|value| !value.is_empty())
 }
 
-/// 一个文件的现状（怎么存的、现在读不读得动）—— 界面据此决定"直接显示还是先解锁"
+/// 查询串里的一个值（`rev=3` → `3`）；没有就是 `None`
+fn query_value(query: Option<&str>, wanted: &str) -> Option<String> {
+    query?
+        .split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .find(|(key, _)| *key == wanted)
+        .map(|(_, value)| decode_percent(value))
+        .filter(|value| !value.is_empty())
+}
+
+/// 一个文件的现状（怎么存的、现在读不读得动）—— 界面据此决定"直接显示还是先解锁"。
+/// `reference` 给版本 token 就看那一版
 #[tauri::command]
-fn file_info(key: String) -> Result<files::FileInfo, String> {
+fn file_info(key: String, reference: Option<String>) -> Result<files::FileInfo, String> {
     let (_, database) = open_database()?;
-    database.file_info(&key)
+    database.file_info(&key, reference.as_deref())
+}
+
+/// 用**系统默认应用**打开这一版。
+///
+/// 仓库里存的是字节，没有一个"能在文件管理器里双击"的路径 —— 所以先把它落到
+/// 一个临时文件上，再把那个路径交给系统的打开方式。落在临时目录里是**刻意**的：
+/// 它是给外部程序看的副本，用完由系统回收，不进仓库、也不该被当成原件的家。
+/// 加密存的内容到了这一步已经是明文，所以落盘时把权限收紧（见 `stage_file`）。
+#[tauri::command]
+fn open_file(
+    app: tauri::AppHandle,
+    title: String,
+    reference: Option<String>,
+) -> Result<String, String> {
+    let (_, database) = open_database()?;
+    let (bytes, _mime) = database.read_file(&title, reference.as_deref())?;
+    let page = database.parse_title(&title)?.page;
+    let path = stage_file(&page, &bytes)?;
+    let shown = path.to_string_lossy().to_string();
+    tauri_plugin_opener::OpenerExt::opener(&app)
+        .open_path(shown.clone(), None::<String>)
+        .map_err(|error| format!("交给系统打开失败：{error}"))?;
+    // 把落点告诉界面：临时副本在哪儿，值得让人知道（尤其加密的那些）
+    Ok(shown)
+}
+
+/// 把一个文件的字节落到临时目录里，返回那个路径。
+///
+/// 名字取页面名（后缀要留着：系统靠它挑应用）。**权限收紧到只有本人可读** ——
+/// 从仓库里出来的可能是解过密的明文，临时目录别的人也可能看得到。
+fn stage_file(name: &str, bytes: &[u8]) -> Result<std::path::PathBuf, String> {
+    let directory = std::env::temp_dir().join("refind-note-open");
+    std::fs::create_dir_all(&directory)
+        .map_err(|error| format!("建不出临时目录 {}：{error}", directory.display()))?;
+    let path = directory.join(name);
+    crate::storage::workspace::write_bytes(&path, bytes)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|error| format!("改权限失败：{error}"))?;
+    }
+    Ok(path)
 }
 
 /// 改文件的名字（页面名跟着改）
@@ -328,7 +450,7 @@ fn list_trash() -> Result<Vec<maintenance::TrashEntry>, String> {
 
 /// 还原一条：日志挪回 `objects/`，并补一版"从回收站还原"
 #[tauri::command]
-fn restore_note(title: String) -> Result<Reading, String> {
+fn restore_note(title: String) -> Result<(), String> {
     let (_, database) = open_database()?;
     database.restore(&title)
 }
@@ -615,6 +737,7 @@ pub fn run() {
             upload_file,
             update_file,
             file_info,
+            open_file,
             upload_bytes,
             rename_file,
             delete_file,

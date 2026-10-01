@@ -421,13 +421,19 @@ impl Database {
             summary,
             protection,
             passphrase,
-        )
+        )?;
+        self.read(title)
     }
 
-    /// 提交**任意字节**（文件页面走这条：正文不是文本，但它同样是一版内容）。
+    /// 提交**任意字节**（文件页面走这条：正文不是文本，但它同样是一版内容），
+    /// 返回**新版本号**。
     ///
     /// 与文本提交共用同一条路 —— 于是版本、封装、回收站、整理都自动接上，
     /// 区别只在 `mime` 与"读出来是字节而不是文本"。
+    ///
+    /// 它**不拼 `Note`**：那是"读出来给人看的"，而这里可能压根不是文本
+    /// （`String::from_utf8` 一失败就报"不是文本"—— 上传一张图也会撞上）。
+    /// 要文本用 [`Self::read`]，要字节用 [`Self::read_bytes`]。
     pub fn commit_bytes(
         &self,
         title: &str,
@@ -436,7 +442,7 @@ impl Database {
         summary: Option<String>,
         protection: Option<Policy>,
         passphrase: Option<String>,
-    ) -> Result<Note, String> {
+    ) -> Result<u64, String> {
         let id = self.locate(title)?;
         let state = self.state_of(&id)?;
         let rev = state.rev + 1;
@@ -473,7 +479,7 @@ impl Database {
             },
         )?;
 
-        self.read(title)
+        Ok(rev)
     }
 
     /// 读一篇**文件页面**的最新一版：字节 + 它自述的 mime。
