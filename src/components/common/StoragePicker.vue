@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { policyLabel, type Policy } from "../../ipc/note.ts";
+import {
+    CIPHER_NOTES,
+    COMPRESSION_NOTES,
+    policyLabel,
+    type Policy,
+} from "../../ipc/note.ts";
 import { gpgAvailable } from "../../core/preferences.ts";
 import KeyChooser from "./KeyChooser.vue";
 
@@ -30,6 +35,16 @@ const label = computed(() => policyLabel(policy.value));
         压缩
       </label>
 
+      <!-- 算法只在开了那一层时才有意义，也就只在开的时候露出来 -->
+      <label v-if="policy.compress" class="picker__field">
+        压缩算法
+        <select v-model="policy.compression" class="picker__select">
+          <option v-for="(note, name) in COMPRESSION_NOTES" :key="name" :value="name">
+            {{ name }}（{{ note }}）
+          </option>
+        </select>
+      </label>
+
       <label class="picker__field">
         签名密钥
         <KeyChooser v-model="policy.gpg_sign" empty-label="不签名" :disabled="!gpgAvailable"/>
@@ -45,6 +60,15 @@ const label = computed(() => policyLabel(policy.value));
         <input v-model="policy.symmetric" type="checkbox"/>
         口令加密
         <span class="picker__hint">口令仅用于本次会话，不写入磁盘</span>
+      </label>
+
+      <label v-if="policy.symmetric" class="picker__field">
+        口令算法
+        <select v-model="policy.cipher" class="picker__select">
+          <option v-for="(note, name) in CIPHER_NOTES" :key="name" :value="name">
+            {{ name }}（{{ note }}）
+          </option>
+        </select>
       </label>
 
       <label v-if="policy.symmetric" class="picker__field">
@@ -106,6 +130,18 @@ const label = computed(() => policyLabel(policy.value));
   gap: 8px;
   align-items: center;
   color: var(--text-dim);
+}
+
+.picker__select {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
 }
 
 .picker__field input[type="password"] {

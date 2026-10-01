@@ -35,7 +35,7 @@ const layers = computed<Layer[]>(() => {
   const found: Layer[] = [];
 
   if (protection.compress) {
-    found.push({ key: "compress", label: "已压缩", reportable: false });
+    found.push({ key: "compress", label: "已压缩", reportable: true });
   }
   if (protection.sign) {
     found.push({ key: "sign", label: "已签名", reportable: true });
@@ -211,6 +211,9 @@ const rows = computed<{ label: string; value: string }[]>(() => {
         { label: "本机", value: found.encryption.detail },
       ];
     }
+    case "compress":
+      // 没压过就没有这一行（压缩那一档本来也只在压过时才摆出来）
+      return found.compression ? [{ label: "算法", value: found.compression }] : [];
     case "symmetric":
       return [
         {
@@ -220,6 +223,8 @@ const rows = computed<{ label: string; value: string }[]>(() => {
               ? "口令已输入，可直接阅读"
               : "尚未输入口令，阅读前需要解锁",
         },
+        // 算法写在头里：同一份仓库里新旧两档可以并存，所以逐份说
+        ...(found.cipher ? [{ label: "算法", value: found.cipher }] : []),
       ];
     default:
       return [];

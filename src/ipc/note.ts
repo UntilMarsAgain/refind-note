@@ -5,22 +5,54 @@
  */
 
 /** 一个 blob 落盘时用了哪些层（读的时候照头解，不需要口令） */
+/**
+ * 压缩算法 —— 与 Rust 侧 `storage/codec.rs` 的 `Compression` 一一对应。
+ *
+ * 这些名字是**写进 blob 头里的**（格式的一部分），改名字会让已落盘的读不出来。
+ */
+export type Compression = "deflate" | "brotli";
+
+/**
+ * 口令层的加密算法 —— 与 Rust 侧的 `Cipher` 对应。
+ *
+ * 两档都是带认证的 AEAD：**换哪一档都解得开**（密文格式各家实现是互通的），
+ * 选哪档看你要跟哪套体系对齐。
+ */
+export type Cipher = "aes-256-gcm" | "sm4-gcm";
+
+/** 几档算法各自好在哪儿（界面上选的时候照这个说） */
+export const COMPRESSION_NOTES: Record<Compression, string> = {
+    deflate: "快，哪儿都认",
+    brotli: "更小，慢一些",
+};
+
+export const CIPHER_NOTES: Record<Cipher, string> = {
+    "aes-256-gcm": "国际通用，有硬件指令时很快",
+    "sm4-gcm": "国密 SM4",
+};
+
 export interface Protection {
     compress: boolean;
+    /** 压缩用的算法（这一版头上记着的） */
+    compression: Compression;
     /** 签名者密钥标识 */
     sign: string | null;
     /** 加密到的密钥标识 */
     encrypt: string | null;
     /** 是否套了口令对称层 */
     symmetric: boolean;
+    /** 口令层用的算法 */
+    cipher: Cipher;
 }
 
 /** 写的时候照它来（读的时候不看它） */
 export interface Policy {
     compress: boolean;
+    compression: Compression;
     gpg_sign: string | null;
     gpg_encrypt: string | null;
     symmetric: boolean;
+    cipher: Cipher;
 }
 
 /** 一页指令的信息（`$$COMMAND$$` 那一页；界面据此提示它会跳到哪） */
@@ -128,6 +160,10 @@ export interface ProtectionReport {
     encryption: EncryptionReport | null;
     /** 口令层：这次会话里有没有这一版的口令（没套口令层就是 null） */
     passphrase_ready: boolean | null;
+    /** 压过的话用的哪一档算法（没压过就是 null） */
+    compression: Compression | null;
+    /** 套了口令层的话用的哪一档算法（没套就是 null） */
+    cipher: Cipher | null;
 }
 
 /** 一份草稿 */
@@ -142,9 +178,11 @@ export interface Draft {
 export function policyFrom(protection: Protection): Policy {
     return {
         compress: protection.compress,
+        compression: protection.compression,
         gpg_sign: protection.sign,
         gpg_encrypt: protection.encrypt,
         symmetric: protection.symmetric,
+        cipher: protection.cipher,
     };
 }
 
@@ -152,7 +190,8 @@ export function policyFrom(protection: Protection): Policy {
 export function policyLabel(policy: Policy): string {
     const parts: string[] = [];
     if (policy.compress) {
-        parts.push("压缩");
+        // 算法跟着压不压一起说：两档差在"更快/更小"，选了就该看得见
+        parts.push(`压缩(${policy.compression})`);
     }
     if (policy.gpg_sign) {
         parts.push("签名");

@@ -2,7 +2,7 @@
 import { computed, nextTick, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { flash } from "../../core/notice.ts";
-import type { Policy } from "../../ipc/note.ts";
+import { CIPHER_NOTES, COMPRESSION_NOTES, type Cipher, type Compression, type Policy } from "../../ipc/note.ts";
 import KeyChooser from "../common/KeyChooser.vue";
 import NamespaceManager from "./NamespaceManager.vue";
 import type { ThemeMode } from "../../ipc/settings.ts";
@@ -153,6 +153,22 @@ function toggleCompress(event: Event) {
   void setProtection({
     ...protection.value,
     compress: (event.target as HTMLInputElement).checked,
+  });
+}
+
+/** 换压缩算法：只影响此后写的那些（读的时候照每份自己的头解） */
+function setCompression(event: Event) {
+  void setProtection({
+    ...protection.value,
+    compression: (event.target as HTMLSelectElement).value as Compression,
+  });
+}
+
+/** 换口令层的算法 */
+function setCipher(event: Event) {
+  void setProtection({
+    ...protection.value,
+    cipher: (event.target as HTMLSelectElement).value as Cipher,
   });
 }
 
@@ -451,6 +467,17 @@ watch(
         <input type="checkbox" :checked="protection.compress" @change="toggleCompress" />
         <span>存储前先压缩（在签名与加密之前进行）</span>
       </label>
+      <!-- 算法只在开着的时候才有意义，也就只在开的时候露出来 -->
+      <template v-if="protection.compress">
+        <label class="row__check">
+          <span>算法</span>
+          <select class="row__text" :value="protection.compression" @change="setCompression">
+            <option v-for="(note, name) in COMPRESSION_NOTES" :key="name" :value="name">
+              {{ name }}（{{ note }}）
+            </option>
+          </select>
+        </label>
+      </template>
     </div>
 
     <div
@@ -497,6 +524,14 @@ watch(
       <label class="row__check">
         <input type="checkbox" :checked="protection.symmetric" @change="toggleSymmetric" />
         <span>在最外层附加口令保护（口令由你输入，<strong>不写入磁盘</strong>）</span>
+      </label>
+      <label v-if="protection.symmetric" class="row__check">
+        <span>算法</span>
+        <select class="row__text" :value="protection.cipher" @change="setCipher">
+          <option v-for="(note, name) in CIPHER_NOTES" :key="name" :value="name">
+            {{ name }}（{{ note }}）
+          </option>
+        </select>
       </label>
       <span v-if="protection.symmetric" class="row__hint">
         新建笔记提交时会要求设置口令，此后阅读这些笔记也需要输入。口令不写入磁盘，遗失后无法恢复。

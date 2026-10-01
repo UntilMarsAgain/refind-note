@@ -76,9 +76,12 @@ export const gpgAvailable = ref(false);
  */
 export const protection = ref<Policy>({
     compress: true,
+    // 两档默认都取第一档：deflate 快、AES-256-GCM 通用
+    compression: "deflate",
     gpg_sign: null,
     gpg_encrypt: null,
     symmetric: false,
+    cipher: "aes-256-gcm",
 });
 
 /**
