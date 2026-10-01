@@ -9,6 +9,7 @@ import {
 import {
   ArrowLeft,
   ArrowRight,
+  CloudUpload,
   Copy,
   House,
   Menu,
@@ -20,6 +21,9 @@ import {
   X,
 } from "@lucide/vue";
 import { logoSrc } from "../../core/theme.ts";
+import { syncAvailable, syncBusy, syncNow, syncProgress } from "../../core/sync.ts";
+import { describeReport } from "../../ipc/sync.ts";
+import { flash } from "../../core/notice.ts";
 import { currentWindow } from "../../core/window-api.ts";
 import type { ThemeMode } from "../../ipc/settings.ts";
 import { preferences } from "../../core/preferences.ts";
@@ -78,6 +82,22 @@ const themeIcons: Record<ThemeMode, Component> = {
 };
 
 const themeIcon = computed(() => themeIcons[preferences.value.theme] ?? Monitor);
+
+/** 同步按钮上那句话：正在跑就报走到哪儿了，没跑就说"立即同步" */
+const syncTitle = computed(() => {
+  if (!syncBusy.value) {
+    return "立即同步";
+  }
+  return syncProgress.value ? `正在同步：${syncProgress.value.text}` : "正在同步…";
+});
+
+/** 点一下：立刻同步一次（不等冷却也不等落定），完事说一句做了什么 */
+async function runSync() {
+  const report = await syncNow();
+  if (report) {
+    flash(`同步完成：${describeReport(report)}`);
+  }
+}
 
 const fieldEl = ref<HTMLInputElement | null>(null);
 
@@ -143,6 +163,19 @@ function onBlur() {
           @click="emit('home')"
       >
         <House :size="16" :stroke-width="1.75"/>
+      </button>
+
+      <!-- 同步：没配同步就不摆它（摆了也只是点一下报"没开"） -->
+      <button
+          v-if="ready !== false && syncAvailable"
+          class="tbtn"
+          type="button"
+          aria-label="立即同步"
+          :title="syncTitle"
+          :disabled="syncBusy"
+          @click="runSync"
+      >
+        <CloudUpload :size="16" :stroke-width="1.75" :class="{ 'tbtn--spinning': syncBusy }"/>
       </button>
 
       <button
@@ -320,6 +353,23 @@ function onBlur() {
 
 .tbtn:disabled {
   opacity: 0.35;
+}
+
+/* 正在同步：那只云转起来（"在动"比"变灰"更能说明它没坏） */
+.tbtn--spinning {
+  animation: tbtn-spin 1.4s linear infinite;
+}
+
+@keyframes tbtn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tbtn--spinning {
+    animation: none;
+  }
 }
 
 /* 循环切换按钮紧挨着窗口按钮，但要留一条缝，

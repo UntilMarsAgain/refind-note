@@ -10,6 +10,7 @@ import {
   type SyncSettings,
   type SyncSettingsPatch,
 } from "../../ipc/sync.ts";
+import { refreshSyncAvailability } from "../../core/sync.ts";
 import KeyChooser from "../common/KeyChooser.vue";
 import NamespaceManager from "./NamespaceManager.vue";
 import type { ThemeMode } from "../../ipc/settings.ts";
@@ -229,6 +230,7 @@ onMounted(() => {
 async function loadSync() {
   try {
     sync.value = await invoke<SyncSettings>("sync_settings");
+    await refreshSyncAvailability();
   } catch (error) {
     syncProblem.value = String(error);
   }
@@ -250,6 +252,8 @@ async function saveSync() {
     sync.value = await invoke<SyncSettings>("set_sync_settings", { patch });
     secretDraft.value = "";
     syncProblem.value = "";
+    // 刚填好桶名/密钥：标题栏那颗"立即同步"该出现了
+    await refreshSyncAvailability();
   } catch (error) {
     syncProblem.value = String(error);
   }
@@ -293,6 +297,7 @@ async function generateSyncKey() {
   syncProblem.value = "";
   try {
     sync.value = await invoke<SyncSettings>("sync_generate_key");
+    await refreshSyncAvailability();
     flash("已生成密钥（不显示）；要带到别的机器上请「导出到文件」");
   } catch (error) {
     syncProblem.value = String(error);
@@ -305,6 +310,7 @@ async function usePastedKey() {
   try {
     sync.value = await invoke<SyncSettings>("sync_set_key", { key: pastedKey.value });
     pastedKey.value = "";
+    await refreshSyncAvailability();
     flash(sync.value.has_key ? "已用这把密钥；下次同步会把本机这份整份重传" : "已清掉云端加密");
   } catch (error) {
     syncProblem.value = String(error);

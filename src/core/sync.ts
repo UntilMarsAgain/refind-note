@@ -22,6 +22,11 @@ import type { SyncProgress, SyncReport } from "../ipc/sync.ts";
 import { flash } from "./notice.ts";
 import { setStartupNote } from "./startup.ts";
 
+/** 同步开着吗、配置填全了吗（后端说了算；界面据此决定摆不摆那颗按钮） */
+const available = ref(false);
+
+export const syncAvailable = readonly(available);
+
 /** 正在同步（同一时刻只跑一次） */
 const busy = ref(false);
 /** 跑到哪儿了（进度条/加载页用） */
@@ -59,14 +64,24 @@ let pendingAfterCooldown = false;
 /** 正在跑的时候又有人叫：跑完再跑一趟（不是丢掉） */
 let queued = false;
 
-/** 同步开着吗、配置填全了吗（后端说了算） */
-export async function syncReady(): Promise<boolean> {
+/**
+ * 问一遍"能不能同步"，并记住 —— 标题栏那颗按钮与启动那一步都看它。
+ *
+ * 设置页改完设置要叫一次（刚填好桶名，那颗按钮就该出现）。
+ */
+export async function refreshSyncAvailability(): Promise<boolean> {
     try {
-        return await invoke<boolean>("sync_ready");
+        available.value = await invoke<boolean>("sync_ready");
     } catch (error) {
         console.warn("问同步状态失败：", error);
-        return false;
+        available.value = false;
     }
+    return available.value;
+}
+
+/** 上一问的答案（不重新问） */
+export function syncReady(): boolean {
+    return available.value;
 }
 
 /**
@@ -111,11 +126,7 @@ async function run(): Promise<SyncReport | null> {
  * 所以取回来之后说一句，让人知道该把页面重新打开。
  */
 export async function syncNow(): Promise<SyncReport | null> {
-    const report = await run();
-    if (report && report.downloaded > 0) {
-        flash(`取回 ${report.downloaded} 份；重新打开标签页就能看到`);
-    }
-    return report;
+    return run();
 }
 
 /**
@@ -151,7 +162,7 @@ async function runWhenFree(): Promise<void> {
         return;
     }
 
-    if (!(await syncReady())) {
+    if (!(await refreshSyncAvailability())) {
         return;
     }
     const report = await run();
@@ -166,7 +177,7 @@ async function runWhenFree(): Promise<void> {
  * 失败不挡启动：网断了、桶名写错了、锁被别人拿着，都不该让人打不开自己的笔记。
  */
 export async function syncAtStartup(): Promise<void> {
-    if (!(await syncReady())) {
+    if (!(await refreshSyncAvailability())) {
         return;
     }
 
@@ -199,7 +210,7 @@ export async function syncAtStartup(): Promise<void> {
  * **不打断关闭**：失败了也照样关（东西在本机，下次同步还在），只是说明白。
  */
 export async function syncBeforeClose(): Promise<void> {
-    if (!(await syncReady())) {
+    if (!(await refreshSyncAvailability())) {
         return;
     }
     closing.value = true;
