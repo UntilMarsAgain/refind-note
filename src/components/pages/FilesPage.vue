@@ -73,7 +73,7 @@ async function collect(picked: File[]) {
       });
       names.push(uploaded.entry.name);
     });
-    flash(`已收进仓库：${names.join("、")}`);
+    flash(`已上传：${names.join("、")}`);
     await load();
   } catch (reason) {
     problem.value = String(reason);
@@ -98,7 +98,7 @@ async function pick() {
       const uploaded = await invoke<Uploaded>("upload_file", { path });
       names.push(uploaded.entry.name);
     }
-    flash(`已收进仓库：${names.join("、")}`);
+    flash(`已上传：${names.join("、")}`);
     await load();
   } catch (reason) {
     problem.value = String(reason);
@@ -132,7 +132,7 @@ async function saveRename(file: FileEntry) {
   busy.value = true;
   try {
     await invoke("rename_file", { id: file.id, name });
-    flash(`已改名为 ${name}（笔记里已经写下的旧名字不会自动改）`);
+    flash(`已重命名为「${name}」；笔记中已写下的旧名称不会随之更改`);
     renaming.value = "";
     await load();
   } catch (reason) {
@@ -151,7 +151,7 @@ async function remove(file: FileEntry) {
   busy.value = true;
   try {
     await invoke("delete_file", { id: file.id });
-    flash(`已删除：${file.name}`);
+    flash(`已删除「${file.name}」`);
     confirming.value = "";
     await load();
   } catch (reason) {
@@ -185,16 +185,16 @@ async function saveAs(file: FileEntry) {
     </div>
 
     <p class="files__lead">
-      附件存在仓库的 <code>db/files/</code> 下。笔记里按<strong>名字</strong>引用：
-      <code>![名字](名字)</code>，或者带排版的
-      <code>::image src=名字 align=right width=320</code>。
-      也可以在这一页上直接按 <strong>Ctrl+V</strong> 粘贴。
+      附件保存在当前仓库中，在笔记里按<strong>名称</strong>引用：
+      <code>![名称](名称)</code>，或使用图片排版语法
+      <code>::image src=名称 align=right width=320</code>。
+      也可以在此页直接按 <strong>Ctrl+V</strong> 粘贴上传。
     </p>
 
     <p v-if="problem" class="files__problem">{{ problem }}</p>
     <p v-if="loading" class="files__hint">正在读…</p>
     <p v-else-if="files.length === 0" class="files__hint">
-      还没有文件。点「上传文件」选一个，它就会出现在这里。
+      暂无文件。点击「上传文件」选择，或直接粘贴。
     </p>
 
     <ol v-else class="files__list">

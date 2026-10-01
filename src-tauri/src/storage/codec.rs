@@ -662,6 +662,18 @@ pub fn set_gpg_home(dir: std::path::PathBuf) {
     let _ = TEST_GPG_HOME.set(dir);
 }
 
+/// gpgme 的错说成人话。
+///
+/// 最要紧的是**取消**：口令输入框被关掉时 gpg 报的东西（`操作已取消 (gpg error 99)`）
+/// 对用户毫无意义 —— 那不是故障，是"没输口令"。
+fn gpg_error(action: &str, error: gpgme::Error) -> CodecError {
+    // 取消是 gpg 自己的一种"错"（99）：拿它自己那个常量比，别写死数字
+    if error.code() == gpgme::error::Error::CANCELED.code() {
+        return CodecError::Gpg(format!("{action}已取消：口令没有输入"));
+    }
+    CodecError::Gpg(format!("{action}失败：{error}"))
+}
+
 pub(crate) fn gpg_context() -> Result<gpgme::Context> {
     if !gpg_available() {
         return Err(CodecError::GpgUnavailable);
@@ -694,7 +706,7 @@ fn gpg_sign(content: &[u8], key_id: &str) -> Result<String> {
     let mut signature = Vec::new();
     context
         .sign(gpgme::SignMode::Detached, content, &mut signature)
-        .map_err(|error| CodecError::Gpg(format!("签名失败：{error}")))?;
+        .map_err(|error| gpg_error("签名", error))?;
 
     Ok(BASE64.encode(signature))
 }
@@ -717,7 +729,7 @@ fn gpg_verify(content: &[u8], signature: &[u8]) -> Result<VerifyOutcome> {
     // 注意参数顺序：第一个是**签名**，第二个才是被签的字节
     let result = context
         .verify_detached(signature, content)
-        .map_err(|error| CodecError::Gpg(format!("验签失败：{error}")))?;
+        .map_err(|error| gpg_error("验签", error))?;
 
     let Some(found) = result.signatures().next() else {
         return Err(CodecError::Gpg("这份没有可验的签名".to_string()));
@@ -778,7 +790,7 @@ fn gpg_encrypt(content: &[u8], key_id: &str) -> Result<Vec<u8>> {
             &mut cipher,
             gpgme::EncryptFlags::ALWAYS_TRUST,
         )
-        .map_err(|error| CodecError::Gpg(format!("加密失败：{error}")))?;
+        .map_err(|error| gpg_error("加密", error))?;
 
     Ok(cipher)
 }
@@ -788,7 +800,7 @@ fn gpg_decrypt(content: &[u8]) -> Result<Vec<u8>> {
     let mut plain = Vec::new();
     context
         .decrypt(content, &mut plain)
-        .map_err(|error| CodecError::Gpg(format!("解密失败：{error}")))?;
+        .map_err(|error| gpg_error("解密", error))?;
     Ok(plain)
 }
 

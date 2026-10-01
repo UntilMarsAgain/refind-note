@@ -7,13 +7,13 @@ import { flash } from "../../core/notice.ts";
 import { gpgAvailable, protection, setProtection } from "../../core/preferences.ts";
 
 /**
- * GPG 密钥（`special:keys`）：列出钥匙串里的钥匙，挑一把当默认。
+ * GPG 密钥（`special:keys`）：列出本机密钥环里的密钥，挑选默认项。
  *
  * 三件事：**看得见**（指纹、用户标识、信任程度、能不能签 / 加密、什么时候过期）、
  * **选得中**（设为仓库默认的签名密钥 / 加密密钥）、**管得了**（从文件导入公钥、
  * 删掉不再需要的公钥）。
  *
- * 私钥不会离开钥匙串：这一页只读公开信息，也不生成密钥 —— 那是 `gpg` 自己的活。
+ * 私钥不会离开密钥环：本页只读公开信息，也不生成密钥。
  */
 interface GpgKey {
   fingerprint: string;
@@ -70,8 +70,8 @@ async function useForSigning(key: GpgKey) {
     });
     flash(
       isSigning(key)
-        ? `以后不再默认签名`
-        : `以后新笔记默认用 ${short(key.fingerprint)} 签名`,
+        ? "已取消默认签名"
+        : `此后新建笔记默认使用 ${short(key.fingerprint)} 签名`,
     );
   } catch (error) {
     flash(`改默认签名密钥失败：${error}`);
@@ -89,8 +89,8 @@ async function useForEncrypting(key: GpgKey) {
     });
     flash(
       isEncrypting(key)
-        ? `以后不再默认加密`
-        : `以后新笔记默认加密到 ${short(key.fingerprint)}`,
+        ? "已取消默认加密"
+        : `此后新建笔记默认加密至 ${short(key.fingerprint)}`,
     );
   } catch (error) {
     flash(`改默认加密密钥失败：${error}`);
@@ -103,8 +103,8 @@ async function importKey() {
   // 私钥文件同样能导（gpg 自己分得清）：文件里带了私钥，导完要明说一声
   const picked = await open({
     multiple: false,
-    title: "选择要导入的钥匙文件（公钥或私钥）",
-    filters: [{ name: "钥匙文件", extensions: ["asc", "gpg", "pub", "key", "sec", "skr"] }],
+    title: "选择要导入的密钥文件（可含私钥）",
+    filters: [{ name: "密钥文件", extensions: ["asc", "gpg", "pub", "key", "sec", "skr"] }],
   });
   if (!picked || Array.isArray(picked)) {
     return;
@@ -119,16 +119,16 @@ async function importKey() {
       secret_unchanged: number;
     }>("import_gpg_key", { path: picked });
 
-    const parts = [`新收 ${summary.imported} 把`, `没有变化的 ${summary.unchanged} 把`];
+    const parts = [`新增 ${summary.imported} 个`, `无变化 ${summary.unchanged} 个`];
     if (summary.secret_imported > 0) {
-      parts.push(`其中 ${summary.secret_imported} 把带着私钥`);
+      parts.push(`其中含私钥 ${summary.secret_imported} 个`);
     }
     flash(`导入完成：${parts.join("，")}`);
 
     // 私钥进来了是件大事：从此这台机器能替那个人签名、解密
     notice.value =
       summary.secret_imported > 0
-        ? `这次导入带来了 ${summary.secret_imported} 把私钥：它们落在本机钥匙串里，这台机器从此能替它们签名与解密。用不上的话，请用 gpg 把私钥删掉（这一页只删公钥）。`
+        ? `本次导入包含 ${summary.secret_imported} 个私钥，已存入本机密钥环 —— 本机自此可用于其签名与解密。如非必要，请用 gpg 将其删除（本页仅能删除公钥）。`
         : "";
     await load();
   } catch (error) {
@@ -188,28 +188,28 @@ function expiresOf(key: GpgKey): string {
       <span class="keys__count">{{ keys.length }} 把</span>
       <button class="keys__import" type="button" :disabled="busy || !gpgAvailable" @click="importKey">
         <Upload :size="14" :stroke-width="2"/>
-        导入钥匙
+        导入密钥
       </button>
     </div>
 
     <p v-if="!gpgAvailable" class="keys__problem">
-      这台计算机上没有 gpg：签名、加密与验签都用不了，这一页也列不出钥匙。
-      装上 gpg（并确认它在 PATH 里）之后回来即可。
+      本机未安装 GnuPG（gpg），签名、加密与校验均不可用，此处也无法列出密钥。
+      安装 gpg 后重新打开本页即可。
     </p>
 
     <p class="keys__lead">
-      这份清单来自<strong>本机的钥匙串</strong>（不是这个仓库）。点「用作默认签名 / 加密」
-      只是改仓库的默认策略 —— 已经写过的笔记照自己最新一版粘住，改它不影响那些。
-      导入的文件里若带着私钥，它会落进本机钥匙串（gpg 自己收，程序不代劳），导完会明说是哪几把；
-      这一页<strong>不生成</strong>密钥，也<strong>只删公钥</strong>—— 私钥要删请自己用 gpg，
-      免得误删了本机主人自己的钥匙。
+      下列密钥来自<strong>本机密钥环</strong>，与当前仓库无关。设为默认后，仅影响此后新建笔记的
+      默认策略；已有笔记沿用各自的存储方式，不受影响。
+      导入含私钥的文件时，私钥将一并存入本机密钥环，导入结果会明确提示；
+      本页<strong>不生成</strong>密钥，也<strong>只删除公钥</strong> —— 如需删除私钥，请使用
+      gpg 自行操作。
     </p>
 
     <p v-if="notice" class="keys__notice">{{ notice }}</p>
     <p v-if="problem" class="keys__problem">{{ problem }}</p>
     <p v-if="loading" class="keys__hint">正在读…</p>
     <p v-else-if="keys.length === 0 && gpgAvailable" class="keys__hint">
-      钥匙串里还没有钥匙。用 <code>gpg --quick-generate-key</code> 生成一把，或者导入一份公钥。
+      本机密钥环中暂无密钥。可用 <code>gpg --quick-generate-key</code> 生成，或导入现有密钥。
     </p>
 
     <ol v-else class="keys__list">
@@ -260,7 +260,7 @@ function expiresOf(key: GpgKey): string {
               type="button"
               class="keys__btn keys__btn--danger"
               :disabled="busy || key.secret"
-              :title="key.secret ? '带私钥的钥匙请自己用 gpg 删' : '把这把公钥从钥匙串里删掉'"
+              :title="key.secret ? '含私钥的密钥请用 gpg 删除' : '从本机密钥环中删除这个公钥'"
               @click="remove(key)"
           >
             {{ confirming === key.fingerprint ? "确认删除公钥" : "删除公钥" }}

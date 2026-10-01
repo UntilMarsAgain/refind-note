@@ -103,27 +103,27 @@ async function confirm() {
     <h1 class="rollback__title">回退「{{ title }}」到第 {{ reference }} 版？</h1>
 
     <p class="rollback__note">
-      第 {{ reference }} 版的内容会成为<strong>新的一版</strong>；这之后写的版本都还在，
-      一条都不会被删掉。所以回退本身也可以再被回退。
+      第 {{ reference }} 版的内容将成为<strong>最新一版</strong>，其后的版本记录全部保留，
+      因此回退本身也可以再次回退。
     </p>
 
     <label class="rollback__copy">
       <input v-model="copy" type="checkbox"/>
       <span>
-        复制那一版的封装（不解锁）
+        沿用该版本的存储方式（无需解锁）
         <span class="rollback__copy-hint">
-          勾选：把那一版的字节原样复制成新的一版，不需要口令；这一篇往后的保护也跟着
-          变成那一版的。不勾选：解锁那一版、读出内容，照下面选的封装重写。
+          勾选：直接复制该版本的内容，不改变存储方式，也无需输入口令，此后该笔记沿用这一方式。
+          不勾选：需解锁并读取内容，按下方选定的方式重新写入。
         </span>
       </span>
     </label>
 
     <p v-if="copy" class="rollback__frozen">
-      封装跟着第 {{ reference }} 版原样走，不用另选。
+      存储方式沿用第 {{ reference }} 版，无需另行选择。
     </p>
 
     <details v-else class="rconf">
-      <summary class="rconf__cap">新封装的存法：{{ chosenLabel }}</summary>
+      <summary class="rconf__cap">新的存储方式：{{ chosenLabel }}</summary>
 
       <div class="rconf__body">
         <label class="rconf__check">
@@ -136,7 +136,7 @@ async function confirm() {
           <input
               v-model="perCommit.gpg_sign"
               type="text"
-              placeholder="留空 = 不签"
+              placeholder="留空表示不签名"
               :disabled="!gpgAvailable"
           />
         </label>
@@ -146,21 +146,21 @@ async function confirm() {
           <input
               v-model="perCommit.gpg_encrypt"
               type="text"
-              placeholder="留空 = 不加密"
+              placeholder="留空表示不加密"
               :disabled="!gpgAvailable"
           />
         </label>
-        <p v-if="!gpgAvailable" class="rconf__hint">这台计算机上没有 gpg，签名与加密用不了。</p>
+        <p v-if="!gpgAvailable" class="rconf__hint">本机未安装 gpg，签名与加密不可用。</p>
 
         <label class="rconf__check">
           <input v-model="perCommit.symmetric" type="checkbox"/>
           口令加密
-          <span class="rconf__hint">口令只在这次会话里，不落盘</span>
+          <span class="rconf__hint">口令仅用于本次会话，不写入磁盘</span>
         </label>
 
         <label v-if="perCommit.symmetric" class="rconf__field">
-          这一篇的口令
-          <input v-model="passphraseDraft" type="password" placeholder="回退时交给这次会话"/>
+          口令
+          <input v-model="passphraseDraft" type="password" placeholder="本次会话中使用"/>
         </label>
       </div>
     </details>

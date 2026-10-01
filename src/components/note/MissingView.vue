@@ -19,11 +19,11 @@ const emit = defineEmits<{
 <template>
   <section class="missing">
     <h1 class="missing__title">{{ title }}</h1>
-    <p class="missing__hint">这篇笔记还不存在。</p>
+    <p class="missing__hint">此笔记尚未创建。</p>
 
     <button class="missing__create" type="button" @click="emit('create')">
       <Plus :size="15" :stroke-width="2.1" />
-      创建这篇笔记
+      创建此笔记
     </button>
   </section>
 </template>

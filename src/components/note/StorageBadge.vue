@@ -90,7 +90,7 @@ function toggle(key: string) {
   }
 }
 
-/** 这一版的口令正攥在这次会话里（只有它忘得掉） */
+/** 这一版的口令正留在本次会话里（只有它忘得掉） */
 const holdingPassphrase = computed(
   () => openedKey.value === "symmetric" && report.value?.passphrase_ready === true,
 );
@@ -98,8 +98,7 @@ const holdingPassphrase = computed(
 /**
  * 忘掉这一篇的口令。
  *
- * 口令只在这次会话的内存里，"忘掉"就是把它丢掉 —— 下次读这一篇要重新输入。
- * 给"口令已经在别处记下了、不想让它一直留在内存里"的人用。
+ * 口令只存在于本次会话的内存里，"忘掉"即丢弃 —— 再次阅读时需要重新输入。
  */
 async function forget() {
   if (!props.title) {
@@ -109,7 +108,7 @@ async function forget() {
     await forgetPassphrase(props.title);
     openedKey.value = null;
     report.value = null;
-    flash(`已忘掉「${props.title}」的口令；下次读它要重新输入`);
+    flash(`已忘掉「${props.title}」的口令，再次阅读时需要重新输入`);
   } catch (error) {
     problem.value = String(error);
   }
@@ -127,10 +126,10 @@ watch(
 /** 弹窗里那几行，按点开的是哪一层来 */
 const rows = computed<{ label: string; value: string }[]>(() => {
   if (asking.value) {
-    return [{ label: "正在查", value: "……" }];
+    return [{ label: "正在查验", value: "……" }];
   }
   if (problem.value) {
-    return [{ label: "查不动", value: problem.value }];
+    return [{ label: "无法查验", value: problem.value }];
   }
 
   const found = report.value;
@@ -142,20 +141,20 @@ const rows = computed<{ label: string; value: string }[]>(() => {
     case "sign": {
       if (found.signature) {
         return [
-          { label: "结果", value: found.signature.verified ? "通过" : "没通过" },
-          { label: "信任", value: found.signature.trust ?? "（没查到）" },
+          { label: "校验", value: found.signature.verified ? "签名有效" : "签名无效" },
+          { label: "信任", value: found.signature.trust ?? "未查明" },
           { label: "签名者", value: found.signature.key },
           { label: "说明", value: found.signature.detail },
         ];
       }
       return [
-        { label: "结果", value: "验不了" },
-        { label: "原因", value: found.signature_problem ?? "这一版没有签名层" },
+        { label: "校验", value: "无法查验" },
+        { label: "原因", value: found.signature_problem ?? "这一版没有签名" },
       ];
     }
     case "encrypt": {
       if (!found.encryption) {
-        return [{ label: "结果", value: "这一版没有 gpg 加密层" }];
+        return [{ label: "校验", value: "这一版没有加密" }];
       }
       return [
         { label: "加密到", value: found.encryption.key },
@@ -165,11 +164,11 @@ const rows = computed<{ label: string; value: string }[]>(() => {
     case "symmetric":
       return [
         {
-          label: "这次会话",
+          label: "本次会话",
           value:
             found.passphrase_ready === true
-              ? "已经有这一版的口令：读得动"
-              : "还没输过这一版的口令：读之前要先解锁",
+              ? "口令已输入，可直接阅读"
+              : "尚未输入口令，阅读前需要解锁",
         },
       ];
     default:
@@ -205,7 +204,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <span ref="rootEl" class="storage" :title="`落盘封装：${label}`">
+  <span ref="rootEl" class="storage" :title="`存储方式：${label}`">
     <span v-if="layers.length === 0" class="storage__badge">原样</span>
 
     <template v-for="layer in layers" :key="layer.key">
@@ -242,18 +241,16 @@ onBeforeUnmount(() => {
       </span>
 
       <!--
-        口令只在这次会话里攥着。"我不想让它一直留着"是一条真实的诉求，
-        所以给一个出口 —— gpg 那几层的口令在 gpg-agent 手里（见下面那句），
-        程序碰不到，也就忘不掉。
+        口令只在本次会话的内存里，"不再留着"是一条真实的诉求，所以给一个出口；
+        gpg 那几层的口令由系统代理保管（见下面那句），程序碰不到，也就忘不掉。
       -->
       <span v-if="holdingPassphrase" class="report__action">
         <button type="button" class="report__btn" @click="forget">
-          忘掉这次会话里的口令
+          忘掉口令
         </button>
       </span>
       <span v-if="openedKey === 'encrypt'" class="report__note">
-        gpg 的口令由 gpg-agent 保管，这个程序碰不到（要清就
-        <code>gpgconf --kill gpg-agent</code>）。
+        解密所需的口令由系统密钥代理保管，本程序无法清除。
       </span>
     </span>
   </span>
@@ -358,13 +355,6 @@ onBeforeUnmount(() => {
   color: var(--text-dim);
   font-size: 11.5px;
   line-height: 1.6;
-}
-
-.report__note code {
-  padding: 0 4px;
-  border-radius: 3px;
-  background: var(--hover);
-  font-family: var(--mono-font);
 }
 
 .report__value {

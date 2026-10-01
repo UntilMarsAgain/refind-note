@@ -203,9 +203,9 @@ function create() {
 <template>
   <section class="ns">
     <p class="ns__lead">
-      命名空间是标题的前缀（`帮助:入门`）。<strong>标识与名称分开存放</strong>，
-      所以改名不会移动任何文件。配了站点地址的命名空间用来写跨站链接
-      （`[[zhwiki:条目]]` 画成绿链，交给浏览器打开），页面不在本仓库。
+      命名空间是标题的前缀（如 `帮助:入门`）。<strong>标识与名称分开保存</strong>，
+      因此改名不会移动任何文件。配置了站点地址的命名空间用于跨站链接
+      （`[[zhwiki:条目]]` 以绿色显示，交由浏览器打开），其页面不在本仓库中。
     </p>
 
     <p v-if="error" class="ns__notice">{{ error }}</p>
@@ -310,7 +310,7 @@ function create() {
             {{ armed === `delete:${item.id}` ? "确认删除" : "删除" }}
           </button>
           <span v-if="armed.startsWith(`empty:${item.id}`) || armed.startsWith(`delete:${item.id}`)" class="ns__warn">
-            里面的页面会移进回收站（还能还原）
+            其中页面将移入回收站（可还原）
           </span>
         </div>
       </div>
@@ -337,8 +337,8 @@ function create() {
     </div>
 
     <p class="ns__hint">
-      名称与别名不得重复（忽略大小写与空白），也不能含 `/` `:` `@` `#` 等字符。
-      别名只是"也认这个写法"：回显与列表里用的始终是规范名。
+      名称与别名不得重复（忽略大小写与空白），且不能包含 `/` `:` `@` `#` 等字符。
+      别名仅表示"也接受这种写法"，显示时始终使用规范名称。
     </p>
   </section>
 </template>

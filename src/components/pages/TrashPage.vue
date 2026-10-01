@@ -70,7 +70,7 @@ async function purge(entry: TrashEntry) {
   try {
     await invoke("purge_trash_entry", { title: entry.title });
     confirming.value = "";
-    flash(`已清除「${entry.title}」；内容块要等整理时才回收`);
+    flash(`已清除「${entry.title}」，其占用的空间将在仓库整理时释放`);
     await load();
   } catch (reason) {
     error.value = String(reason);
@@ -88,14 +88,14 @@ async function purge(entry: TrashEntry) {
     </div>
 
     <p class="trash__lead">
-      删过的笔记都在这里，历史一条没丢，随时能还原。超过
+      删除的笔记会保留在这里，其历史版本完整，可以随时还原。超过
       <strong>{{ maintenance.trash_keep_days }}</strong>
-      天的条目会在启动时自动清理（天数在设置里改，最近一次：{{ formatTime(maintenance.last_trash_purge) }}）。
+      天的条目将在下次启动时自动清理（可在设置中调整，上次清理：{{ formatTime(maintenance.last_trash_purge) }}）。
     </p>
 
     <p v-if="error" class="trash__problem">{{ error }}</p>
     <p v-if="loading" class="trash__hint">正在读…</p>
-    <p v-else-if="entries.length === 0" class="trash__hint">回收站是空的。</p>
+    <p v-else-if="entries.length === 0" class="trash__hint">回收站为空。</p>
 
     <ol v-else class="trash__list">
       <li v-for="entry in entries" :key="entry.title" class="trash__item">
@@ -106,7 +106,7 @@ async function purge(entry: TrashEntry) {
           <template v-if="entry.days_old !== null">已 {{ entry.days_old }} 天 · </template>
           {{ formatBytes(entry.bytes) }}
         </span>
-        <span v-if="entry.days_old === null" class="trash__badge">时间未知，不自动清</span>
+        <span v-if="entry.days_old === null" class="trash__badge">时间未知，不自动清理</span>
         <span
             v-else-if="entry.days_old >= maintenance.trash_keep_days"
             class="trash__badge"
@@ -131,10 +131,10 @@ async function purge(entry: TrashEntry) {
     </ol>
 
     <p class="trash__footer">
-      立即清除只删这一条，空间要在这里回收：
+      「立即清除」只移除这一条；释放它占用的空间，请前往
       <button type="button" class="trash__link" @click="emit('navigate', 'special:gc')">
-        去仓库整理
-      </button>
+        仓库整理
+      </button>。
     </p>
   </section>
 </template>

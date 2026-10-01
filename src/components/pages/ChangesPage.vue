@@ -90,13 +90,12 @@ function deltaOf(entry: ChangeEntry): string {
     </div>
 
     <p class="changes__lead">
-      各篇笔记的版本记录汇总，按时间倒序。点一条可以去看<strong>那一版</strong>；
-      草稿是每篇一个槽位、随时会被覆盖，所以默认不显示 —— 要看正在进行中的改动，
-      勾上右边那一项。
+      全部笔记的版本记录，按时间倒序排列。点击可查看<strong>对应版本</strong>。
+      草稿会被后续修改覆盖，因此默认不列出；如需查看进行中的改动，请勾选「包含草稿」。
     </p>
 
     <p v-if="problem" class="changes__problem">{{ problem }}</p>
-    <p v-else-if="entries.length === 0" class="changes__hint">这段时间里没有改动。</p>
+    <p v-else-if="entries.length === 0" class="changes__hint">暂无改动记录。</p>
 
     <ol v-else class="changes__list">
       <li v-for="(entry, index) in entries" :key="`${entry.title}-${entry.rev}-${index}`">

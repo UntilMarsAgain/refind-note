@@ -40,6 +40,13 @@ const emit = defineEmits<{
     (e: "navigate-new-tab", title: string): void;
     /** 点了页内锚点：章节交给上层叠进地址 */
     (e: "section", id: string): void;
+    /**
+     * 读不出来时退一步（退回上一页）。
+     *
+     * 出错的原因可能是"口令没输"这种本可以避免的事，把人困在一条报错上没有道理 ——
+     * 页面要留一条走得通的路。
+     */
+    (e: "leave"): void;
 }>();
 
 const note = ref<Note | null>(null);
@@ -136,7 +143,13 @@ watch(
   <div class="note">
     <p v-if="loading" class="note__hint">正在读「{{ title }}」…</p>
 
-    <p v-else-if="error" class="note__error">{{ error }}</p>
+    <div v-else-if="error" class="note__error">
+      <p class="note__error-text">{{ error }}</p>
+      <div class="note__error-actions">
+        <button type="button" class="note__error-btn" @click="load">重试</button>
+        <button type="button" class="note__error-btn" @click="emit('leave')">返回上一页</button>
+      </div>
+    </div>
 
     <template v-else-if="note">
       <PageHeader
@@ -223,5 +236,35 @@ watch(
   background: var(--surface);
   color: var(--text);
   font-size: 13.5px;
+}
+
+.note__error-text {
+  margin: 0;
+  line-height: 1.7;
+}
+
+/* 报错也要有出路：重试，或者退回去看别的 */
+.note__error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.note__error-btn {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.note__error-btn:hover {
+  border-color: var(--accent-soft);
+  background: var(--accent-tint);
+  color: var(--text);
 }
 </style>

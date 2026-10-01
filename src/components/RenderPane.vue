@@ -56,6 +56,8 @@ const emit = defineEmits<{
     (e: "unlocked"): void;
     /** 从解锁页退出来：它换掉的那条记录已经不在历史里了，交给上层决定去哪 */
     (e: "unlock-cancel"): void;
+    /** 读不出来时退一步：退回上一页（出错页上的"返回上一页"） */
+    (e: "leave"): void;
 }>();
 
 /** 权威副本：渲染区的一切都从这里派生 */
@@ -137,7 +139,7 @@ defineExpose({
   <main ref="scroller" class="pane" :class="{ 'pane--wide': !limited }" @scroll.passive="onScroll">
     <div class="pane__column" :class="{ 'pane__column--wide': !limited }">
       <!-- 理论上窗口里至少有一个标签页，这条是兜底 -->
-      <p v-if="!tab" class="pane__hint">没有标签页。</p>
+      <p v-if="!tab" class="pane__hint">当前没有打开的标签页。</p>
 
       <SettingsPage v-else-if="specialPage === 'settings'" :focus="section"/>
 
@@ -171,6 +173,7 @@ defineExpose({
             :collapsed="collapsed"
             @navigate="emit('navigate', $event)"
             @redirect="emit('redirect', $event)"
+            @leave="emit('leave')"
             @navigate-new-tab="emit('navigate-new-tab', $event)"
             @section="emit('section', $event)"
         />
@@ -222,7 +225,7 @@ defineExpose({
       />
 
       <!-- 兜底：到不了这里，真到了也别白屏 -->
-      <p v-else class="pane__hint">这一页还没有对应的视图。</p>
+      <p v-else class="pane__hint">此页面暂无对应视图。</p>
     </div>
   </main>
 </template>

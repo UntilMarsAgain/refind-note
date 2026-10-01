@@ -31,13 +31,13 @@ onMounted(async () => {
 
     <p v-if="error" class="all__error">{{ error }}</p>
     <p v-else-if="notes.length === 0" class="all__hint">
-      仓库里还没有笔记 —— 在地址栏敲一个名字开始。
+      仓库中暂无笔记，可在地址栏输入名称创建。
     </p>
     <ol v-else class="all__list">
       <li v-for="note in notes" :key="note.key">
         <button type="button" class="all__item" @click="emit('navigate', note.title)">
           <span class="all__name">{{ note.title }}</span>
-          <span class="all__meta">第 {{ note.rev }} 版 · {{ note.bytes }} 字节 · 改于 {{ note.modified }}</span>
+          <span class="all__meta">第 {{ note.rev }} 版 · {{ note.bytes }} 字节 · 修改于 {{ note.modified }}</span>
         </button>
       </li>
     </ol>

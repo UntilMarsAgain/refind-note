@@ -76,8 +76,8 @@ async function submit() {
     </h1>
 
     <p class="unlock__hint">
-      这一篇是加密存的。口令只交给这次会话，<strong>不会写进任何文件</strong>；
-      程序一关就没了，下次打开还要重新输入。
+      此笔记以口令加密存储。口令仅用于本次会话，<strong>不会保存到磁盘</strong>，
+      关闭程序后需要重新输入。
     </p>
 
     <div class="unlock__field">
@@ -95,14 +95,14 @@ async function submit() {
       </button>
     </div>
 
-    <p v-if="wrong" class="unlock__error">口令不对，再试一次。</p>
+    <p v-if="wrong" class="unlock__error">口令不正确，请重试。</p>
     <p v-if="error" class="unlock__error">{{ error }}</p>
 
     <!--
       想不起口令、或者这台机器上根本没有 gpg 时，得留几条不用解锁也走得通的路：
       历史版本、回退与删除都只看事件链与明文头，读不出正文照样能做。
     -->
-    <p class="unlock__escape-hint">这一版读不出来，但下面这些不用先解开它：</p>
+    <p class="unlock__escape-hint">无需解锁亦可进行以下操作：</p>
     <div class="unlock__escapes">
       <button type="button" class="unlock__escape" @click="emit('navigate', title + '@history')">
         版本历史

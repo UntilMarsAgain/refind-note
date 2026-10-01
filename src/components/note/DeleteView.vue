@@ -48,19 +48,17 @@ async function confirm() {
     <h1 class="delete__title">删除「{{ title }}」？</h1>
 
     <p class="delete__note">
-      正文与历史都会从列表里消失。日志会挪进回收站，<strong>没有真的抹掉</strong>
-      —— 在 `special:trash` 里还能捞回来。回收站里的笔记引用的内容块也一并留着，
-      所以还原出来还是原样。
+      删除后，该笔记将从列表中移除，但<strong>内容与历史版本均不会被清除</strong>，
+      可在回收站中随时还原，还原后与删除前一致。
     </p>
 
     <label class="delete__tidy">
       <input v-model="tidyUp" type="checkbox"/>
       <span>
-        同时整理一遍（回收早已没人引用的内容块）
+        同时执行一次仓库整理
         <span class="delete__tidy-hint">
-          这一篇刚进回收站、仍然被引用，所以这一步收不到它 ——
-          它的内容块要等这条被永久清除之后才谈得上回收。
-          这一步只是顺手把之前攒下的孤儿内容块收掉。
+          本次删除的笔记仍保留在回收站中，其内容不会被回收；此选项仅顺带清理
+          此前已无引用的数据。
         </span>
       </span>
     </label>

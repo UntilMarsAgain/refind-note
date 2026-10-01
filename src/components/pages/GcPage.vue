@@ -58,8 +58,8 @@ async function run() {
     report.value = gathered;
     flash(
       purged > 0
-        ? `清空回收站 ${purged} 条；回收内容块 ${gathered.removed_blobs} 个、草稿槽位 ${gathered.removed_drafts} 个`
-        : `回收内容块 ${gathered.removed_blobs} 个、草稿槽位 ${gathered.removed_drafts} 个，释放 ${formatBytes(gathered.freed_bytes)}`,
+        ? `已清空回收站 ${purged} 条，并释放 ${formatBytes(gathered.freed_bytes)}`
+        : `已释放 ${formatBytes(gathered.freed_bytes)}`,
     );
     await refreshWorkspaceInfo();
   } catch (reason) {
@@ -75,8 +75,8 @@ async function run() {
     <h1 class="gc__title">仓库整理</h1>
 
     <p class="gc__lead">
-      回收不再被引用的数据。<strong>历史版本引用的内容不会被回收</strong>，
-      包括回收站里那些笔记引用的 —— 它们还原回来还得靠那些内容块。
+      整理并释放不再被任何版本引用的数据。<strong>历史版本仍在引用的内容不会被删除</strong>，
+      回收站中笔记的内容同样保留 —— 还原它们时仍需要这些数据。
     </p>
 
     <ul class="gc__options">
@@ -84,8 +84,8 @@ async function run() {
         <label>
           <input v-model="orphanBlobs" type="checkbox"/>
           <span>
-            <strong>孤立内容块</strong>
-            <em>没有任何日志引用的内容块。它们只可能来自已经被永久清除的笔记。</em>
+            <strong>无引用的内容</strong>
+            <em>不再被任何版本引用的笔记内容，通常来自已永久清除的笔记。</em>
           </span>
         </label>
       </li>
@@ -93,8 +93,8 @@ async function run() {
         <label>
           <input v-model="orphanDrafts" type="checkbox"/>
           <span>
-            <strong>没有主的草稿槽位</strong>
-            <em>草稿按笔记存。笔记被永久清除之后，那份草稿再也不会被读到。</em>
+            <strong>无归属的草稿</strong>
+            <em>草稿随笔记保存；笔记被永久清除后，这些草稿不会再被读取。</em>
           </span>
         </label>
       </li>
@@ -104,8 +104,8 @@ async function run() {
           <span>
             <strong>先清空回收站</strong>
             <em>
-              回收站里的笔记先全部删掉，它们的内容块这时才成为孤块、可以顺带回收。
-              这一步<strong>不可撤销</strong>（那些笔记将不再能还原）。
+              先永久删除回收站中的全部笔记，它们占用的内容随即一并释放。
+              此操作<strong>不可撤销</strong>，这些笔记将无法再还原。
             </em>
           </span>
         </label>
@@ -116,26 +116,26 @@ async function run() {
       <button type="button" class="gc__go" :disabled="!canRun()" @click="run">
         {{ busy ? "正在整理…" : "开始整理" }}
       </button>
-      <span class="gc__warn">整理会删掉这些东西，无法撤销。</span>
+      <span class="gc__warn">整理将删除上述数据，且无法撤销。</span>
     </div>
 
     <p v-if="error" class="gc__problem">{{ error }}</p>
 
     <div v-if="report" class="gc__report">
       <p>
-        回收内容块 <strong>{{ report.removed_blobs }}</strong> 个、草稿槽位
-        <strong>{{ report.removed_drafts }}</strong> 个，释放
-        <strong>{{ formatBytes(report.freed_bytes) }}</strong>。
+        已释放 <strong>{{ formatBytes(report.freed_bytes) }}</strong>：
+        内容 <strong>{{ report.removed_blobs }}</strong> 项、草稿
+        <strong>{{ report.removed_drafts }}</strong> 份。
       </p>
     </div>
 
     <p class="gc__policy">
-      自动整理：每 <strong>{{ maintenance.gc_interval_days }}</strong> 天一次，
-      开机时跑（最近一次：{{ formatTime(maintenance.last_gc) }}）。自动那一轮
-      <strong>只回收孤立内容块</strong> —— 草稿是人写了一半的东西，清不清由你在这儿点。
-      间隔在设置里改。回收站：
+      自动整理每 <strong>{{ maintenance.gc_interval_days }}</strong>
+      天执行一次，在启动时进行（上次执行：{{ formatTime(maintenance.last_gc) }}）。
+      自动执行时<strong>只清理无引用的内容</strong>，不涉及草稿 ——
+      草稿是否清理，由你在这里决定。执行间隔可在设置中调整。回收站：
       <button type="button" class="gc__link" @click="emit('navigate', 'special:trash')">
-        去看看
+        查看
       </button>
     </p>
   </section>

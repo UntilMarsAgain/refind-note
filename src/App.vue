@@ -118,7 +118,7 @@ async function onMenu() {
     specialPages.value = await invoke<string[]>("special_pages");
   } catch (error) {
     console.warn("取特殊页面清单失败：", error);
-    flash(`取不到特殊页面清单：${error}`);
+    flash(`无法获取页面列表：${error}`);
     specialPages.value = [];
   }
 }
@@ -235,6 +235,19 @@ function afterUnlock() {
  * 所以"退一步"就是后退：回到进来之前待的地方。一整个标签页都是从 `@unlock` 开局的，
  * 没处可退，就摆到全部页面上让人挑。
  */
+/**
+ * 读不出来的页面留的那条出路：退一步。
+ *
+ * 后退回得去就后退（绝大多数时候是）；整个标签页就是从这一页开局的，那就去全部页面。
+ */
+function leavePage() {
+  if (canGoBack.value) {
+    void goBack();
+    return;
+  }
+  void navigate("special:all", "push");
+}
+
 function leaveUnlock() {
   if (canGoBack.value) {
     void goBack();
@@ -250,7 +263,7 @@ function leaveUnlock() {
  * 不说的话人会以为后面那几版没了。
  */
 function afterRollback(rev: number) {
-  flash(`已回滚：第 ${rev} 版保存的是旧内容，原历史一条未动`);
+  flash(`已回滚至所选版本（第 ${rev} 版），原有版本记录均保留`);
   const title = currentNoteTitle();
   if (title) {
     void navigate(title, "push");
@@ -331,7 +344,7 @@ async function runMaintenanceOnce() {
       );
     }
     if (parts.length > 0) {
-      flash(`仓库整理：${parts.join("、")}`);
+      flash(`仓库整理：${parts.join("；")}`);
     }
     await refreshWorkspaceInfo();
   } catch (error) {
@@ -428,6 +441,7 @@ onBeforeUnmount(() => {
             @rolled-back="afterRollback"
             @unlocked="afterUnlock"
             @unlock-cancel="leaveUnlock"
+            @leave="leavePage"
         />
       </template>
     </div>

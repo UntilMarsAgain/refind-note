@@ -117,8 +117,7 @@ async function copyFacts() {
     <h1 class="debug__title">诊断</h1>
 
     <p class="debug__lead">
-      这一页把工作目录、数据库、当前偏好与仓库默认保护摊开。报告由内置的信息拼成，
-      复制出去即可整段贴给别人看。
+      本页汇总数据位置、当前偏好与默认存储策略等诊断信息，可整段复制以便排查问题。
     </p>
 
     <div class="debug__actions">

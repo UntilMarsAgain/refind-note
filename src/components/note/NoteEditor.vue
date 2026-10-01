@@ -434,7 +434,7 @@ function writeAnyway() {
     markdown.value = "";
     committedMarkdown.value = "";
     hasNote.value = true;
-    status.value = "看不到旧内容，直接写新的一版。提交后旧版本都会留着。";
+    status.value = "无法读取原有内容，将以新版本写入；此前版本均会保留。";
 }
 
 /** 装载：读笔记，再读它槽位里的草稿 */
@@ -460,8 +460,8 @@ async function load() {
             locked.value = true;
             wrongPassphrase.value = reading.wrong_passphrase;
             loadProblem.value = reading.wrong_passphrase
-                ? "上次输的口令不对，解锁没成功。"
-                : "这一篇是加密存的，要先解锁才能看到当前内容。";
+                ? "上次输入的口令不正确，解锁未成功。"
+                : "此笔记为加密存储，需先解锁才能查看当前内容。";
             loading.value = false;
             return;
         }
@@ -576,7 +576,7 @@ async function discard() {
         await invoke<boolean>("discard_draft", { title: props.title });
         hasDraft.value = false;
         markdown.value = committedMarkdown.value;
-        status.value = "草稿已丢弃，已恢复为上一次提交的内容";
+        status.value = "草稿已丢弃，已恢复为上次提交的内容";
     } catch (error) {
         status.value = `丢弃失败：${String(error)}`;
     } finally {
@@ -752,13 +752,13 @@ watch(markdown, (value) => {
           v-model="summary"
           class="editor__summary"
           type="text"
-          placeholder="提交摘要（可留空）"
+          placeholder="提交说明（可留空）"
           @keydown.enter.prevent="commit"
       />
 
       <div class="editor__actions">
         <details class="econf">
-          <summary class="ecap" title="这一版怎么存；改了就从这一版起成为这篇笔记的保护">
+          <summary class="ecap" title="本版的存储方式；修改后此笔记将沿用新的方式">
             存储：{{ chosenLabel }}
           </summary>
 
@@ -773,7 +773,7 @@ watch(markdown, (value) => {
               <input
                   v-model="perCommit.gpg_sign"
                   type="text"
-                  placeholder="留空 = 不签"
+                  placeholder="留空表示不签名"
                   :disabled="!gpgAvailable"
               />
             </label>
@@ -783,21 +783,21 @@ watch(markdown, (value) => {
               <input
                   v-model="perCommit.gpg_encrypt"
                   type="text"
-                  placeholder="留空 = 不加密"
+                  placeholder="留空表示不加密"
                   :disabled="!gpgAvailable"
               />
             </label>
-            <p v-if="!gpgAvailable" class="econf__hint">这台计算机上没有 gpg，签名与加密用不了。</p>
+            <p v-if="!gpgAvailable" class="econf__hint">本机未安装 gpg，签名与加密不可用。</p>
 
             <label class="econf__check">
               <input v-model="perCommit.symmetric" type="checkbox"/>
               口令加密
-              <span class="econf__hint">口令只在这次会话里，不落盘</span>
+              <span class="econf__hint">口令仅用于本次会话，不写入磁盘</span>
             </label>
 
             <label v-if="perCommit.symmetric" class="econf__field">
-              这一篇的口令
-              <input v-model="passphraseDraft" type="password" placeholder="提交时交给这次会话"/>
+              口令
+              <input v-model="passphraseDraft" type="password" placeholder="本次会话中使用"/>
             </label>
           </div>
         </details>
@@ -856,11 +856,11 @@ watch(markdown, (value) => {
       </div>
     </div>
 
-    <!-- 槽位里有草稿：要不要接着写，点一下说了算。这期间不动槽位 -->
+    <!-- 有未提交的草稿：是否继续编辑由此处决定，此期间不覆盖草稿 -->
     <div v-if="pendingDraft" class="editor__draft">
       <span class="editor__draft-text">
-        槽位里有一份没提交的草稿（{{ pendingDraft.modified }}）。
-        现在打开的是已提交的那一版。
+        存在一份未提交的草稿（{{ pendingDraft.modified }}）。
+        当前显示的是已提交的版本。
       </span>
       <button class="ebtn" type="button" :disabled="busy || loading" @click="restoreDraft">
         <RotateCcw :size="14" :stroke-width="1.9"/>

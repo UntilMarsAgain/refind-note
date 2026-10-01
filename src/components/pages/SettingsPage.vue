@@ -134,7 +134,7 @@ function toggleCodeLineNumbers(event: Event) {
 async function lockEverything() {
   try {
     await lockAll();
-    flash("已忘掉这次会话里的全部口令；再读加密的内容要重新输入");
+    flash("已清除本次会话中的全部口令，阅读加密内容时需重新输入");
   } catch (reason) {
     flash(`锁定失败：${reason}`);
   }
@@ -342,7 +342,7 @@ watch(
           :checked="preferences.rail_collapsed"
           @change="setRailDefault"
         />
-        <span>下次打开时收起标签栏（只显示首字或图标）</span>
+        <span>下次启动时收起标签栏（仅显示图标）</span>
       </label>
     </div>
 
@@ -369,7 +369,7 @@ watch(
           :checked="preferences.record_history"
           @change="toggleHistory"
         />
-        <span>记录看过的页面（在 special:history 里可以单独清空）</span>
+        <span>记录访问过的页面（可在浏览历史页单独清空）</span>
       </label>
     </div>
 
@@ -381,19 +381,19 @@ watch(
       <span class="row__label">口令</span>
       <code class="row__id">#passphrase</code>
       <button type="button" class="ebtn" @click="lockEverything">
-        忘掉这次会话里的全部口令
+        清除本次会话中的全部口令
       </button>
       <span class="row__hint">
-        口令从不落盘，只活在这次会话的内存里；这一下就是把它丢掉（也就是"上锁"）。
-        某一篇单独忘掉：在那一页的「口令加密」徽章上点开。
+        口令不写入磁盘，仅保存在本次会话中。此操作会将其清除（即锁定），
+        再次阅读时需重新输入。若只想清除某一篇的口令，可在该页的「口令加密」标记上操作。
       </span>
     </div>
 
     <h2 class="settings__section">维护</h2>
 
     <p class="settings__note">
-      删掉的笔记先进回收站，到期由**开机时的自动维护**清理；整理只回收没人引用的内容块。
-      超过保留期的条目才会被清掉，所以调小这个数等于"下次开机就清掉一批"。
+      删除的笔记先进入回收站，超过保留期后由启动时的自动维护清理；
+      整理仅释放不再被引用的数据。缩短保留期会使一批条目在下次启动时被清理。
     </p>
 
     <div
@@ -454,7 +454,7 @@ watch(
       <code class="row__id">#storage-compress</code>
       <label class="row__check">
         <input type="checkbox" :checked="protection.compress" @change="toggleCompress" />
-        <span>落盘前先压缩（最内层，在加密之前）</span>
+        <span>存储前先压缩（在签名与加密之前进行）</span>
       </label>
     </div>
 
@@ -468,12 +468,12 @@ watch(
       <input
         class="row__text"
         type="text"
-        placeholder="签名密钥（留空 = 不签），如 me@example.com"
+        placeholder="签名密钥（留空表示不签名），如 me@example.com"
         :value="protection.gpg_sign ?? ''"
         :disabled="!gpgAvailable"
         @change="setSign"
       />
-      <span v-if="!gpgAvailable" class="row__hint">这台计算机上没有 gpg，签名不可用</span>
+      <span v-if="!gpgAvailable" class="row__hint">本机未安装 gpg，签名不可用</span>
     </div>
 
     <div
@@ -486,12 +486,12 @@ watch(
       <input
         class="row__text"
         type="text"
-        placeholder="加密到的密钥（留空 = 不加密）"
+        placeholder="加密使用的密钥（留空表示不加密）"
         :value="protection.gpg_encrypt ?? ''"
         :disabled="!gpgAvailable"
         @change="setEncrypt"
       />
-      <span v-if="!gpgAvailable" class="row__hint">这台计算机上没有 gpg，加密不可用</span>
+      <span v-if="!gpgAvailable" class="row__hint">本机未安装 gpg，加密不可用</span>
     </div>
 
     <div
@@ -503,10 +503,10 @@ watch(
       <code class="row__id">#storage-symmetric</code>
       <label class="row__check">
         <input type="checkbox" :checked="protection.symmetric" @change="toggleSymmetric" />
-        <span>最外层再套一层口令（口令由你输入，<strong>不落盘</strong>）</span>
+        <span>在最外层附加口令保护（口令由你输入，<strong>不写入磁盘</strong>）</span>
       </label>
       <span v-if="protection.symmetric" class="row__hint">
-        新笔记提交时会问你要一个口令；以后读这些笔记也要输入它。口令不落盘，忘了就解不开。
+        新建笔记提交时会要求设置口令，此后阅读这些笔记也需要输入。口令不写入磁盘，遗失后无法恢复。
       </span>
     </div>
   </section>

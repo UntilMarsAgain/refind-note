@@ -76,11 +76,11 @@ async function clear() {
     </div>
 
     <p v-if="!preferences.record_history" class="history__off">
-      浏览历史已在设置里关掉：不再记录新的，已有记录仍然留着，清空由你决定。
+      浏览历史已在设置中关闭：不再记录新的访问，已有记录保留，可随时清空。
     </p>
 
     <p v-if="browsingHistory.length === 0" class="history__hint">
-      还没有记录。看过的页面会出现在这里，点一条就能回去。
+      暂无记录。访问过的页面会显示在这里，点击即可返回。
     </p>
 
     <ol v-else class="history__list">

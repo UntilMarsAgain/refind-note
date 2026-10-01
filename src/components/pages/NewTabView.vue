@@ -29,8 +29,8 @@ function submit() {
     <h1 class="newtab__title">新标签页</h1>
 
     <p class="newtab__hint">
-      输入笔记名打开；名字不存在时进入创建流程。要打开特殊页面就写
-      <code>special:settings</code> 这样的页面标识。地址栏同样可用。
+      输入笔记名称即可打开，名称不存在时可直接创建；
+      以 <code>special:</code> 开头的标识用于打开系统页面。也可直接使用地址栏。
     </p>
 
     <div class="newtab__field">
@@ -38,7 +38,7 @@ function submit() {
         v-model="typed"
         class="newtab__input"
         type="text"
-        placeholder="笔记名，或 命名空间:笔记名"
+        placeholder="笔记名称，或 命名空间:笔记名称"
         @keydown.enter.prevent="submit"
       />
       <button class="newtab__go" type="button" @click="submit">打开</button>
