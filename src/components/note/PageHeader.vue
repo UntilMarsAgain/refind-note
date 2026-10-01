@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { History, Pencil, Star, Trash2, type LucideIcon } from "@lucide/vue";
+import { Download, History, Pencil, Star, Trash2, type LucideIcon } from "@lucide/vue";
 import { computed } from "vue";
 import type { Via } from "../../bindings/address.ts";
 import ViaHint from "./ViaHint.vue";
@@ -45,10 +45,11 @@ export interface PageAction {
   danger?: boolean;
 }
 
-/** 默认三个：读一篇笔记时真用得上的那几件事 */
+/** 默认几个：读一篇笔记时真用得上的那几件事 */
 const STANDARD: PageAction[] = [
   { name: "edit", label: "编辑", icon: Pencil },
   { name: "history", label: "版本历史", icon: History },
+  { name: "export", label: "导出", icon: Download },
   { name: "delete", label: "删除", icon: Trash2, danger: true },
 ];
 

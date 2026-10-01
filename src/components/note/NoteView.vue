@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { ArrowLeft, History, RotateCcw } from "@lucide/vue";
+import { ArrowLeft, Download, History, RotateCcw } from "@lucide/vue";
 import type { Via } from "../../bindings/address.ts";
 import type { Note, Reading } from "../../bindings/note.ts";
 import { parentOf } from "../../core/title.ts";
+import { flash } from "../../core/notice.ts";
+import { saveNoteMarkdown } from "../../view/file-save.ts";
 import NoteContent from "./NoteContent.vue";
 import PageHeader, { type PageAction } from "./PageHeader.vue";
 import StorageBadge from "./StorageBadge.vue";
@@ -78,6 +80,8 @@ const headerActions = computed<PageAction[] | undefined>(() => {
         { name: "back", label: `返回「${found.title}」`, icon: ArrowLeft },
         { name: "rollback", label: "回退到这一版", icon: RotateCcw },
         { name: "history", label: "版本历史", icon: History },
+        // 旧版也能导出：要的是那一版的原文，与"能不能编辑"无关
+        { name: "export", label: "导出", icon: Download },
     ];
 });
 
@@ -103,6 +107,26 @@ function onAction(name: string) {
         case "rollback":
             emit("navigate", `${found.title}@rollback-${props.reference}`);
             break;
+        case "export":
+            void exportMarkdown();
+            break;
+    }
+}
+
+/**
+ * 导出这一版的 markdown 原文。
+ *
+ * 内容由后端从仓库里读（前端不转手），路径由系统保存对话框给出 ——
+ * 与"另存为一份文件"是同一条路。
+ */
+async function exportMarkdown() {
+    try {
+        const target = await saveNoteMarkdown(props.title, props.reference);
+        if (target) {
+            flash(`已导出：${target}`);
+        }
+    } catch (error) {
+        flash(`导出失败：${error}`);
     }
 }
 

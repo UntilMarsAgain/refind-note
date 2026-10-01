@@ -322,6 +322,25 @@ impl Database {
         Ok(pick_one(&titles)?.cloned())
     }
 
+    /// 导出：把某一版的 markdown **原文**写到用户选的位置。
+    ///
+    /// 只写正文，不带任何外壳 —— 导出的就是笔记里写下的那些字，拿到别处照样读得懂。
+    /// 上锁的版本要先解锁（与"读它"同一条路，不另开一条能绕过口令的道）。
+    pub fn export_note(
+        &self,
+        title: &str,
+        reference: Option<&str>,
+        target: &str,
+    ) -> Result<(), String> {
+        let Reading::Ready { note } = self.read_note(title, reference)? else {
+            return Err("这一版是加密的：先解锁，再导出".to_string());
+        };
+        crate::storage::workspace::write_bytes(
+            std::path::Path::new(target),
+            note.markdown.as_bytes(),
+        )
+    }
+
     /// 读某一版：`reference` 是地址里的 token，`None` = 最新版
     pub fn read_note(&self, title: &str, reference: Option<&str>) -> Result<Reading, String> {
         match reference {
@@ -498,6 +517,33 @@ mod tests {
         if let Some(root) = database.root().parent() {
             let _ = std::fs::remove_dir_all(root);
         }
+    }
+
+    /// 导出：写到用户给的位置，内容就是 markdown **原文**（连模板记号一起带走）
+    #[test]
+    fn exporting_writes_the_markdown_source() {
+        let database = scratch("export");
+        database.create("导出我").unwrap();
+        database
+            .commit("导出我", "# 标题\n\n::banner text=\"一条\"\n", None)
+            .unwrap();
+
+        let target =
+            std::env::temp_dir().join(format!("refind-note-export-test-{}.md", std::process::id()));
+        database
+            .export_note("导出我", None, target.to_str().unwrap())
+            .unwrap();
+
+        let written = std::fs::read_to_string(&target).unwrap();
+        assert_eq!(written, "# 标题\n\n::banner text=\"一条\"\n");
+
+        // 取不到的位置：报错，而不是悄悄当成功
+        assert!(database
+            .export_note("导出我", None, "/没有这个目录/也/不许/写.md")
+            .is_err());
+
+        let _ = std::fs::remove_file(&target);
+        cleanup(&database);
     }
 
     /// 写一篇指令页

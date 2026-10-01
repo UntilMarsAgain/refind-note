@@ -402,6 +402,13 @@ fn resolve_address(input: String) -> Result<Option<ResolvedAddress>, String> {
 
 /// 读一篇笔记（`reference` 是地址里的版本 token，`None` = 最新版）。
 /// 读不到不是错误：上了锁会明说。
+/// 导出某一版的 markdown 原文到用户选的位置（路径由系统保存对话框给出）
+#[tauri::command]
+fn export_note(title: String, reference: Option<String>, target: String) -> Result<(), String> {
+    let (_, database) = open_database()?;
+    database.export_note(&title, reference.as_deref(), &target)
+}
+
 #[tauri::command]
 fn read_note(title: String, reference: Option<String>) -> Result<Reading, String> {
     let (_, database) = open_database()?;
@@ -550,6 +557,7 @@ pub fn run() {
             parse_address,
             resolve_address,
             read_note,
+            export_note,
             create_note,
             commit_note,
             load_draft,
