@@ -12,7 +12,7 @@
 //! 只输出 `data-doc`。
 
 use crate::markdown::current_resolver;
-use crate::title::Resolved;
+use crate::vault::title::Resolved;
 use markdown_it::parser::inline::{InlineRule, InlineState, Text};
 use markdown_it::{MarkdownIt, Node, NodeValue, Renderer};
 
@@ -97,7 +97,7 @@ impl InlineRule for WikiLinkScanner {
 #[cfg(test)]
 mod tests {
     use crate::markdown::{render, render_with};
-    use crate::title::LinkResolver;
+    use crate::vault::title::LinkResolver;
     use std::collections::HashSet;
     use std::sync::Arc;
 
@@ -149,7 +149,7 @@ mod tests {
         keys.insert("0:存在的条目".to_string());
         let resolver = LinkResolver::new(
             Arc::new(keys),
-            Arc::new(crate::namespace::NamespaceTable::builtin()),
+            Arc::new(crate::vault::namespace::NamespaceTable::builtin()),
             None,
         );
 

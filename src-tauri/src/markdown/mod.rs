@@ -8,7 +8,7 @@
 
 pub mod syntax;
 
-use crate::title::LinkResolver;
+use crate::vault::title::LinkResolver;
 use markdown_it::MarkdownIt;
 use std::cell::RefCell;
 use std::sync::LazyLock;
@@ -264,7 +264,7 @@ mod tests {
                     keys.insert(format!("0:条目{index}"));
                     let resolver = LinkResolver::new(
                         Arc::new(keys),
-                        Arc::new(crate::namespace::NamespaceTable::builtin()),
+                        Arc::new(crate::vault::namespace::NamespaceTable::builtin()),
                         None,
                     );
                     let html = render_with(

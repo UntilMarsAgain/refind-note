@@ -1,31 +1,19 @@
-mod address;
-pub mod browsing;
-pub mod changes;
-pub mod codec;
-pub mod database;
-pub mod files;
-pub mod keys;
-pub mod maintenance;
+pub mod features;
 pub mod markdown;
-pub mod namespace;
-pub mod notes;
-pub mod resolve;
-pub mod session;
 pub mod settings;
-pub mod store;
-pub mod title;
-pub mod workspace;
+pub mod storage;
+pub mod vault;
 
 use serde::Serialize;
 
-use address::ParsedAddress;
-use codec::Policy;
-use database::{Database, Meta};
-use namespace::Namespace;
-use notes::{Draft, Note, NoteSummary, Reading, RevisionSummary};
-use resolve::ResolvedAddress;
+use features::{browsing, changes, files, keys, maintenance};
 use settings::Preferences;
-use workspace::Workspace;
+use storage::{codec::Policy, session, workspace::Workspace};
+use vault::address::{self, ParsedAddress};
+use vault::database::{Database, Meta};
+use vault::namespace::Namespace;
+use vault::notes::{Draft, Note, NoteSummary, Reading, RevisionSummary};
+use vault::resolve::{self, ResolvedAddress};
 
 /// 工作目录与数据库的概览：启动时读一次，界面据此显示"东西存在哪、什么状态"
 #[derive(Serialize)]
@@ -477,6 +465,15 @@ fn lock() {
     session::forget_all();
 }
 
+/// 忘掉这一篇在这次会话里存过的口令（它的每一版）
+#[tauri::command]
+fn forget_passphrase(title: String) -> Result<(), String> {
+    let (_, database) = open_database()?;
+    let id = database.locate(&title)?;
+    session::forget_note(&id);
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -531,6 +528,7 @@ pub fn run() {
             render_markdown,
             unlock,
             lock,
+            forget_passphrase,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

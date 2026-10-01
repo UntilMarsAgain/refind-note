@@ -1,6 +1,6 @@
 import { createApp } from "vue";
 import App from "./App.vue";
-import { openWorkspace } from "./preferences.ts";
+import { openWorkspace } from "./core/preferences.ts";
 // 全局样式要在挂载前就位，否则首帧会是浏览器默认的那套配色
 import "./css/clean.css";
 import "./css/theme.css";

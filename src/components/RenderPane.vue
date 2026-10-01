@@ -1,25 +1,25 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 import type { ResolvedAddress } from "../bindings/address.ts";
-import { preferences } from "../preferences.ts";
-import type { TabState } from "../tabs.ts";
-import AllPages from "./AllPages.vue";
-import ChangesPage from "./ChangesPage.vue";
-import DebugPage from "./DebugPage.vue";
-import FilesPage from "./FilesPage.vue";
-import GcPage from "./GcPage.vue";
-import DeleteView from "./DeleteView.vue";
-import HistoryPage from "./HistoryPage.vue";
-import KeysPage from "./KeysPage.vue";
-import HistoryView from "./HistoryView.vue";
-import MissingView from "./MissingView.vue";
-import NewTabView from "./NewTabView.vue";
-import NoteEditor from "./NoteEditor.vue";
-import NoteView from "./NoteView.vue";
-import RollbackView from "./RollbackView.vue";
-import SettingsPage from "./SettingsPage.vue";
-import TrashPage from "./TrashPage.vue";
-import UnlockView from "./UnlockView.vue";
+import { preferences } from "../core/preferences.ts";
+import type { TabState } from "../core/tabs.ts";
+import AllPages from "./pages/AllPages.vue";
+import ChangesPage from "./pages/ChangesPage.vue";
+import DebugPage from "./pages/DebugPage.vue";
+import FilesPage from "./pages/FilesPage.vue";
+import GcPage from "./pages/GcPage.vue";
+import DeleteView from "./note/DeleteView.vue";
+import HistoryPage from "./pages/HistoryPage.vue";
+import KeysPage from "./pages/KeysPage.vue";
+import HistoryView from "./note/HistoryView.vue";
+import MissingView from "./note/MissingView.vue";
+import NewTabView from "./pages/NewTabView.vue";
+import NoteEditor from "./note/NoteEditor.vue";
+import NoteView from "./note/NoteView.vue";
+import RollbackView from "./note/RollbackView.vue";
+import SettingsPage from "./pages/SettingsPage.vue";
+import TrashPage from "./pages/TrashPage.vue";
+import UnlockView from "./note/UnlockView.vue";
 
 /**
  * 渲染区。

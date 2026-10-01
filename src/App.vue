@@ -1,21 +1,21 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import AppMenu from "./components/AppMenu.vue";
-import ContextMenu from "./components/ContextMenu.vue";
-import DebugPanel from "./components/DebugPanel.vue";
-import FloatingTools from "./components/FloatingTools.vue";
-import ImageViewer from "./components/ImageViewer.vue";
+import AppMenu from "./components/shell/AppMenu.vue";
+import ContextMenu from "./components/shell/ContextMenu.vue";
+import DebugPanel from "./components/shell/DebugPanel.vue";
+import FloatingTools from "./components/shell/FloatingTools.vue";
+import ImageViewer from "./components/shell/ImageViewer.vue";
 import RenderPane from "./components/RenderPane.vue";
-import StartupError from "./components/StartupError.vue";
-import StartupLoading from "./components/StartupLoading.vue";
-import TabRail from "./components/TabRail.vue";
-import WindowResizeHandles from "./components/WindowResizeHandles.vue";
-import WindowTitleBar from "./components/WindowTitleBar.vue";
-import { withSection } from "./address.ts";
-import { loadBrowsing } from "./browsing.ts";
-import { dismissNotice, flash, notice } from "./notice.ts";
-import { setOpenInNewTab } from "./note-html.ts";
+import StartupError from "./components/shell/StartupError.vue";
+import StartupLoading from "./components/shell/StartupLoading.vue";
+import TabRail from "./components/shell/TabRail.vue";
+import WindowResizeHandles from "./components/shell/WindowResizeHandles.vue";
+import WindowTitleBar from "./components/shell/WindowTitleBar.vue";
+import { withSection } from "./core/address.ts";
+import { loadBrowsing } from "./core/browsing.ts";
+import { dismissNotice, flash, notice } from "./core/notice.ts";
+import { setOpenInNewTab } from "./view/note-html.ts";
 import {
   cycleTheme,
   flushPreferences,
@@ -23,11 +23,11 @@ import {
   preferences,
   refreshWorkspaceInfo,
   updatePreferences,
-} from "./preferences.ts";
-import { restartStartup, startupPhase } from "./startup.ts";
+} from "./core/preferences.ts";
+import { restartStartup, startupPhase } from "./core/startup.ts";
 import { formatBytes, type MaintenanceReport } from "./bindings/maintenance.ts";
-import { useTabs } from "./tabs.ts";
-import { installWheelZoom } from "./zoom-wheel.ts";
+import { useTabs } from "./core/tabs.ts";
+import { installWheelZoom } from "./view/zoom-wheel.ts";
 
 /**
  * 窗口骨架。

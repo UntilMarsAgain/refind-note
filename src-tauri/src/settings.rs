@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::workspace::{read_json, write_json, Workspace};
+use crate::storage::workspace::{read_json, write_json, Workspace};
 
 const PREFERENCES_FILE: &str = "preferences.json";
 
