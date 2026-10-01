@@ -1,8 +1,8 @@
 /**
  * 笔记 HTML 注入 DOM 之后的收尾工作。
  *
- * 三件事：把相对地址换成能取到字节的附件地址、给正文挂上右键菜单、
- * 图片取不到时换一句说明。
+ * 几件事：把相对地址换成能取到字节的附件地址、给正文挂上右键菜单、
+ * 图片取不到时换一句说明、选项卡接线，以及让 `::js` 真的跑起来。
  *
  * 放在这里而不是各个组件里，是因为阅读视图与编辑器预览都会注入同一份 HTML，
  * 行为该由同一处决定。
@@ -14,6 +14,7 @@ import { fileTargetOf, fileUrl } from "./file-links.ts";
 import { saveNameOf, saveVaultFile, savableTitle } from "./file-save.ts";
 import { fileInfo, freshUrl, readable, unlockFile } from "./file-unlock.ts";
 import { viewImage } from "./image-viewer.ts";
+import { wireTabs } from "./tabs.ts";
 
 /**
  * "在新标签页打开"由 App 注入。
@@ -149,6 +150,30 @@ function decoded(target: string): string {
     }
 }
 
+/**
+ * 让正文里的 `<script>` 真的跑起来（`::js`、以及 `::html js`）。
+ *
+ * `v-html` 走的是 `innerHTML`，而**这样插进去的脚本不会执行**（HTML 的规矩：
+ * 只有解析器插入的脚本才跑）。于是 `::js` 只会是一段死字。这里的做法是把每个脚本
+ * **重新装一次**：新建一个 `script` 节点、搬过属性与正文，替进文档 —— 这样就会执行。
+ *
+ * 新节点带 `data-ran`：同一棵树被收尾两次时不会重复执行。
+ */
+function runScripts(root: HTMLElement) {
+    for (const stale of root.querySelectorAll("script")) {
+        if (stale.dataset.ran) {
+            continue;
+        }
+        const fresh = document.createElement("script");
+        for (const attribute of stale.attributes) {
+            fresh.setAttribute(attribute.name, attribute.value);
+        }
+        fresh.dataset.ran = "yes";
+        fresh.text = stale.textContent ?? "";
+        stale.replaceWith(fresh);
+    }
+}
+
 /** 笔记 HTML 注入之后的收尾 */
 export function decorateNoteHtml(root: HTMLElement): void {
     attachContextMenu(root);
@@ -167,6 +192,9 @@ export function decorateNoteHtml(root: HTMLElement): void {
             void attachLockedImage(image, name);
         }
     }
+    wireTabs(root);
+    // 脚本放最后：跑起来时，正文该接的线都接好了
+    runScripts(root);
 }
 
 /**

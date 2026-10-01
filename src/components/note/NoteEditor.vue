@@ -19,6 +19,7 @@ import { resolvedTheme } from "../../core/theme.ts";
 import { applyLineNumbers, codeLineNumbers, highlightCode } from "../../view/code-blocks.ts";
 import { decorateNoteHtml } from "../../view/note-html.ts";
 import {
+    scriptRanges,
     templateBlockLines,
     templateFoldRange,
     templateRanges,
@@ -29,8 +30,9 @@ import { basicSetup } from "codemirror";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { markdown as markdownLanguage } from "@codemirror/lang-markdown";
+import { javascriptLanguage } from "@codemirror/lang-javascript";
 import { HighlightStyle, foldService, syntaxHighlighting } from "@codemirror/language";
-import { tags } from "@lezer/highlight";
+import { highlightTree, tags } from "@lezer/highlight";
 import type { DecorationSet, ViewUpdate } from "@codemirror/view";
 import { Decoration, MatchDecorator, ViewPlugin } from "@codemirror/view";
 
@@ -173,6 +175,54 @@ const appHighlight = HighlightStyle.define([
  * 匹配的是整个 `[[…]]`，所以里面无论写标题还是 `名称#章节`，都会被一起标出来
  * （地址的识别本就在这一对方括号里）。
  */
+/**
+ * `::js`（与 `::code lang=js`）块里的 JavaScript 上色。
+ *
+ * markdown 的语法树里，模板块的正文只是一段普通文字 —— 编辑器不认识里面写的是什么，
+ * 于是 `::js` 的正文是一片没有颜色的字，写起来最容易出错的就是这种地方。
+ *
+ * 做法：把块内正文**单独**交给 JS 解析器解析一遍，再用**同一个** `appHighlight`
+ * 把 token 翻成 class（`highlightTree` 产出的正是 `syntaxHighlighting(appHighlight)`
+ * 用的那套类名，所以颜色与围栏代码块是同一套，不必再配一遍）。
+ * 只加装饰、不改文档：保存下来的仍是原文，渲染仍由后端负责。
+ */
+function buildScriptDecorations(view: EditorView): DecorationSet {
+    const lines = view.state.doc.toString().split("\n");
+    const items: { from: number; to: number; decoration: Decoration }[] = [];
+
+    for (const block of scriptRanges(lines)) {
+        const tree = javascriptLanguage.parser.parse(block.code);
+        highlightTree(tree, appHighlight, (from, to, classes) => {
+            items.push({
+                from: block.from + from,
+                to: block.from + to,
+                decoration: Decoration.mark({ class: classes }),
+            });
+        });
+    }
+
+    items.sort((a, b) => a.from - b.from || a.to - b.to);
+    return Decoration.set(
+        items.map((item) => item.decoration.range(item.from, item.to)),
+        true,
+    );
+}
+
+const scriptHighlight = ViewPlugin.fromClass(
+    class {
+        decorations: DecorationSet;
+        constructor(view: EditorView) {
+            this.decorations = buildScriptDecorations(view);
+        }
+        update(update: ViewUpdate) {
+            if (update.docChanged || update.viewportChanged) {
+                this.decorations = buildScriptDecorations(update.view);
+            }
+        }
+    },
+    { decorations: (plugin) => plugin.decorations },
+);
+
 const wikilinkMatcher = new MatchDecorator({
     regexp: /\[\[[^\]\n]+\]\]/g,
     decoration: Decoration.mark({ class: "cm-wikilink" }),
@@ -680,6 +730,7 @@ onMounted(async () => {
                     syntaxHighlighting(appHighlight),
                     wikilinkHighlight,
                     templateHighlight,
+                    scriptHighlight,
                     templateFold,
                     EditorView.lineWrapping,
                     // 剪贴板里是文件（截图、复制的图）就收进仓库并插入引用；

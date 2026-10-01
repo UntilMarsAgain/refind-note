@@ -49,6 +49,80 @@ export function isTemplateHead(text: string): boolean {
 }
 
 /**
+ * 头行里的**名字**（`::js` → `js`）；不是头行就是空串。
+ *
+ * 与 [`isTemplateHead`] 同一套认法：引号名去掉引号，普通名字取第一个 token。
+ */
+export function templateNameOf(text: string): string {
+  const trimmed = text.trimStart();
+  if (!trimmed.startsWith("::")) {
+    return "";
+  }
+  const rest = trimmed.slice(2);
+  const first = rest[0];
+  if (first === '"' || first === "'") {
+    const end = rest.indexOf(first, 1);
+    return end > 0 ? rest.slice(1, end) : "";
+  }
+  const token = rest.split(/\s/)[0] ?? "";
+  return token.includes("=") || token.includes(":") ? "" : token;
+}
+
+/** 头行里的 `lang=`（引号可有可无），小写；没写就是空串 */
+function languageOf(head: string): string {
+  const found = /lang=(?:"([^"]*)"|'([^']*)'|(\S+))/.exec(head);
+  return (found?.[1] ?? found?.[2] ?? found?.[3] ?? "").toLowerCase();
+}
+
+/** 一块要按 JavaScript 上色的内容：文档偏移量与正文 */
+export interface ScriptRange {
+  from: number;
+  to: number;
+  code: string;
+}
+
+/**
+ * 编辑器该按 **JavaScript** 上色的那几块（偏移量是**块内**，不含头行）。
+ *
+ * 两类：`::js` 的正文（那个模板的内容本来就是 JS），以及 `::code lang=js` 的正文 ——
+ * 后者是"当代码显示"，但显示成一片没有颜色的字也白搭。
+ *
+ * 规则仍在这一处：编辑器的高亮与后端"这段是什么"必须同规，否则高亮会说谎。
+ */
+export function scriptRanges(lines: string[]): ScriptRange[] {
+  const starts: number[] = [];
+  let offset = 0;
+  for (const text of lines) {
+    starts.push(offset);
+    offset += text.length + 1; // 加上被 split 掉的那个换行
+  }
+
+  const out: ScriptRange[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const head = lines[index] ?? "";
+    if (!isTemplateHead(head)) {
+      continue;
+    }
+    const name = templateNameOf(head);
+    const isScript =
+      name === "js" ||
+      (name === "code" && ["js", "javascript"].includes(languageOf(head)));
+    if (!isScript) {
+      continue;
+    }
+
+    const last = templateBlockEnd(lines, index, headIndent(head));
+    if (last <= index) {
+      continue;
+    }
+    const from = starts[index + 1] ?? 0;
+    const to = (starts[last] ?? 0) + (lines[last] ?? "").length;
+    out.push({ from, to, code: lines.slice(index + 1, last + 1).join("\n") });
+  }
+  return out;
+}
+
+/**
  * 块的最后一行（0 基下标，含端点）；一条都不属于块内时返回 `start`。
  *
  * `lines` 是全文按行切开的数组，`start` 是头行的下标，`markerIndent` 是头行的缩进。

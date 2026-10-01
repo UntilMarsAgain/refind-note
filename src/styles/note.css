@@ -595,6 +595,106 @@
   border-bottom: 1px solid currentColor;
 }
 
+/* 给了高度的横条：内容在条里**居中**。一条矮横条用不上（文字本来就在那一行上），
+   所以这条样式只在 height= 时才挂上来 —— 免得把"一行文字"也变成 flex 项 */
+.note-body .banner--sized {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* rounded=off：直角 */
+.note-body .banner--square {
+  border-radius: 0;
+}
+
+/* `::title` 居中大标题（没有背景） */
+.note-body .title-block {
+  margin: 1.4em 0 0.8em;
+  color: var(--text);
+  text-align: center;
+  font-size: 1.75em;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.note-body div.title-block {
+  text-align: left;
+  font-weight: 400;
+}
+
+.note-body div.title-block > :first-child {
+  margin-top: 0;
+}
+
+.note-body div.title-block > :last-child {
+  margin-bottom: 0;
+}
+
+/* `::theme` 深浅色两版：两段都在 DOM 里，显示哪一段由当前主题决定 */
+.note-body .theme__part--dark {
+  display: none;
+}
+
+:root[data-theme="dark"] .note-body .theme__part--light {
+  display: none;
+}
+
+:root[data-theme="dark"] .note-body .theme__part--dark {
+  display: block;
+}
+
+/* `::tabs` 选项卡：条 + 面板；切换由前端接线（后端只给结构） */
+.note-body .tabs {
+  margin: 1.2em 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.note-body .tabs__bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 6px 6px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.note-body .tabs__tab {
+  appearance: none;
+  padding: 6px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.95em;
+  cursor: pointer;
+}
+
+.note-body .tabs__tab:hover {
+  color: var(--text);
+}
+
+.note-body .tabs__tab--on {
+  border-bottom-color: var(--accent-soft);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.note-body .tabs__panel {
+  padding: 2px 14px;
+}
+
+.note-body .tabs__panel > :first-child {
+  margin-top: 0.9em;
+}
+
+.note-body .tabs__panel > :last-child {
+  margin-bottom: 0.9em;
+}
+
 /* 横条里写了多段（少见）：左对齐读起来才不别扭 */
 .note-body div.banner {
   text-align: left;

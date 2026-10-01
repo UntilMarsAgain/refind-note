@@ -95,6 +95,18 @@ fn body_as_code(template: &Template, fmt: &mut dyn Renderer) {
 mod tests {
     use super::*;
 
+    /// 分节表里的名字都得是真模板：两张表一旦对不上，写下的名字会被当成"未知模板"，
+    /// 而"要不要分节"却已经按这张表决定了 —— 这种半截状态最难查
+    #[test]
+    fn every_sectioned_name_is_a_real_template() {
+        for name in super::super::stdlib::SECTIONED {
+            assert!(
+                TEMPLATES.iter().any(|(template, _)| template == name),
+                "{name} 在分节表里，却不在模板表里"
+            );
+        }
+    }
+
     #[test]
     fn dispatch_table_has_unique_names() {
         let mut names: Vec<&str> = TEMPLATES.iter().map(|(name, _)| *name).collect();

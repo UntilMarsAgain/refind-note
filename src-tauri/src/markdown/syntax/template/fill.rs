@@ -42,12 +42,46 @@ pub fn source_of(template: &Template) -> Option<String> {
     }
 }
 
+/// 开关式参数开没开：写了 `flag`、`flag=true`、`flag=yes`、`flag=on` 都算开了。
+///
+/// 只写 key 的写法（`js`）本来就是"打开"的意思 —— 要让开关式的参数能表达"关"，
+/// 得写它专有的关值（比如 `rounded=off`），那由各个模板自己说。
+pub fn flag(template: &Template, key: &str) -> bool {
+    template.params.iter().any(|(name, value)| {
+        name == key && matches!(value.to_lowercase().as_str(), "" | "true" | "yes" | "on")
+    })
+}
+
 /// `js` 参数是否显式打开了（`js` 或 `js=true`）
 pub fn allows_js(template: &Template) -> bool {
-    template
-        .params
-        .iter()
-        .any(|(key, value)| key == "js" && (value.is_empty() || value == "true"))
+    flag(template, "js")
+}
+
+/// 脚本原文里不能出现 `</script`：HTML 解析器见到它就提前收尾，
+/// 后面的字会漏到页面上。转义成 `<\/script` —— JS 里这两种写法等价。
+///
+/// 只**插**一个反斜杠，不动原文的大小写：这一串也可能出现在字符串或正则里，
+/// 改一个字母就是改了那一段代码的意思。
+pub fn escape_script_end(code: &str) -> String {
+    const NEEDLE: &str = "</script";
+    let mut out = String::with_capacity(code.len());
+    let mut rest = code;
+    loop {
+        let found = rest.char_indices().find(|(at, _)| {
+            rest[*at..]
+                .get(..NEEDLE.len())
+                .is_some_and(|slice| slice.eq_ignore_ascii_case(NEEDLE))
+        });
+        let Some((at, _)) = found else {
+            out.push_str(rest);
+            return out;
+        };
+        out.push_str(&rest[..at]);
+        // 只插一个反斜杠，其余原样搬 —— `\/` 与 `/` 在 JS 里是同一个字符
+        out.push_str("<\\");
+        out.push_str(&rest[at + 1..at + NEEDLE.len()]);
+        rest = &rest[at + NEEDLE.len()..];
+    }
 }
 
 /// 去掉会执行脚本的东西：`<script>` 整块、`on*=` 事件属性、`javascript:` 协议。

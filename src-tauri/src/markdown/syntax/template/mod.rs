@@ -20,6 +20,24 @@ mod parse;
 mod stdlib;
 
 pub use parse::Template;
+
+/// 分节模板（`::tabs` / `::theme`）里的一节：`[标签]` 开头的那一段。
+///
+/// 内容**各自**解析成子节点挂在它下面 —— 分节的意义就在这里：一节里的正文是一篇
+/// 独立的小文档（可以写列表、链接，也可以再嵌模板），而不是大块里的一段普通文字。
+#[derive(Debug, Clone, PartialEq)]
+pub struct Section {
+    /// `[标签]` 里的那几个字；写在第一个标签**之前**的内容，标签是空串
+    pub label: String,
+}
+
+impl NodeValue for Section {
+    fn render(&self, node: &Node, fmt: &mut dyn Renderer) {
+        // 兜底：万一某个渲染器忘了拆节、直接把内容写出来，也不该整段消失
+        fmt.contents(&node.children);
+    }
+}
+
 // 标准模板表对外公开：模板分发与调试都要按名字看这张表。
 #[allow(unused_imports)]
 pub use stdlib::TEMPLATES;
@@ -118,15 +136,71 @@ impl BlockRule for TemplateScanner {
             None => body.clone(),
         };
 
+        let sectioned = stdlib::takes_sections(&name);
         let mut node = Node::new(Template { name, params, body });
         // 内容交给**整个解析器**再解析一遍：模板里因此可以写 markdown、内部链接，
         // 也可以再嵌模板（嵌套的 `::quote` 就是靠这一步成立的）。
         //
         // `Node` 带 Drop，字段不能直接搬出来，所以用 `mem::take` 换走它的 children。
-        let mut parsed = state.md.parse(&source);
-        node.children = std::mem::take(&mut parsed.children);
+        if sectioned {
+            // 分节模板：块内容先按 `[标签]` 切成几节，**各节各解析一遍** ——
+            // 一节是一篇小文档，这才谈得上"这一节里写什么"（见 [`Section`]）
+            for (label, text) in split_sections(&source) {
+                let mut section = Node::new(Section { label });
+                let mut parsed = state.md.parse(&text);
+                section.children = std::mem::take(&mut parsed.children);
+                node.children.push(section);
+            }
+        } else {
+            let mut parsed = state.md.parse(&source);
+            node.children = std::mem::take(&mut parsed.children);
+        }
         Some((node, line - start))
     }
+}
+
+/// 把块内容按 `[标签]` 行切成几节：`(标签, 该节的正文)`。
+///
+/// 第一个标签**之前**的内容归到一个标签为空串的节里 —— 切分只管切，
+/// 那一节算"两边都要"还是"这写法不对"，由各个模板自己定。
+fn split_sections(source: &str) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for line in source.lines() {
+        if let Some(label) = section_label(line) {
+            out.push((label, String::new()));
+            continue;
+        }
+        if out.is_empty() {
+            // 还没有任何标签：空白丢掉，有字就先开一节（空标签）
+            if line.trim().is_empty() {
+                continue;
+            }
+            out.push((String::new(), String::new()));
+        }
+        let section = out.last_mut().expect("上面保证过至少开了一节");
+        // 节首的空行不留（那是标签与正文之间的空档）；节内的空行留着，正文要用它分段
+        if line.trim().is_empty() && section.1.trim().is_empty() {
+            continue;
+        }
+        section.1.push_str(line);
+        section.1.push('\n');
+    }
+    out
+}
+
+/// `[标签]` —— 分节模板里一节的开头。
+///
+/// 两条都认：**整行**就是一对中括号（正文里一句 `[注] 说明` 不该被当成新的一节），
+/// 而且**从行首开始**（块内容此时已去掉公共缩进，所以本体的一行就在第 0 列，
+/// 缩进更深的是**里层**的内容）。少了第二条，嵌套的选项卡会被外层吃掉：
+/// 里层的 `[内]` 也当成外层的节了。
+fn section_label(line: &str) -> Option<String> {
+    let inner = line.strip_prefix('[')?.trim_end().strip_suffix(']')?;
+    let label = inner.trim();
+    if label.is_empty() || label.contains(['[', ']']) {
+        return None;
+    }
+    Some(label.to_string())
 }
 
 #[cfg(test)]
@@ -149,6 +223,106 @@ mod tests {
     fn banner_renders_markdown_in_its_text_parameter() {
         let html = render("::banner text=\"**加粗**的标题\"\n");
         assert!(html.contains("<strong>加粗</strong>"), "{html}");
+    }
+
+    /// `::title`：居中的大标题，没有背景；`color=` 给的是字色
+    #[test]
+    fn title_renders_a_centered_heading_without_a_background() {
+        let html = render("::title\n  卷首的题名\n");
+        assert!(html.contains("class=\"title-block\""), "{html}");
+        assert!(html.contains("卷首的题名"), "{html}");
+        assert!(!html.contains("background"), "大标题没有背景：{html}");
+
+        let colored = render("::title text=\"**重**的标题\" color=#123456\n");
+        assert!(colored.contains("color: #123456"), "{colored}");
+        assert!(colored.contains("<strong>重</strong>"), "{colored}");
+
+        let bad = render("::title text=\"x\" color=红色\n");
+        assert!(bad.contains("template--problem"), "{bad}");
+    }
+
+    /// `::banner` 的高度与圆角：高度是**最小**高度，圆角默认开着
+    #[test]
+    fn banner_takes_a_height_and_a_square_corner() {
+        let sized = render("::banner text=\"标题\" height=120px\n");
+        assert!(sized.contains("min-height: 120px"), "{sized}");
+        assert!(sized.contains("banner--sized"), "{sized}");
+        assert!(
+            !sized.contains("banner--square"),
+            "不写 rounded= 就是圆角：{sized}"
+        );
+
+        let square = render("::banner text=\"标题\" rounded=off\n");
+        assert!(square.contains("banner--square"), "{square}");
+
+        let bad = render("::banner text=\"标题\" height=很久\n");
+        assert!(bad.contains("template--problem"), "{bad}");
+        let bad = render("::banner text=\"标题\" rounded=也许\n");
+        assert!(bad.contains("template--problem"), "{bad}");
+    }
+
+    /// `::theme`：两节都渲染出来，由样式按主题决定显示哪一节
+    #[test]
+    fn theme_renders_both_versions_and_lets_the_stylesheet_pick() {
+        let html = render("::theme\n  [light]\n  浅色下看这个\n  [dark]\n  深色下看这个\n");
+        assert!(html.contains("theme__part--light"), "{html}");
+        assert!(html.contains("theme__part--dark"), "{html}");
+        assert!(
+            html.contains("浅色下看这个") && html.contains("深色下看这个"),
+            "{html}"
+        );
+
+        // 标签之前的内容两边都显示
+        let both = render("::theme\n  两种主题都显示\n  [dark]\n  只有深色\n");
+        assert!(both.contains("class=\"theme__part\""), "{both}");
+
+        let bad = render("::theme\n  [blue]\n  没有这个主题\n");
+        assert!(bad.contains("template--problem"), "{bad}");
+    }
+
+    /// `::tabs`：后端给结构与内容（第一节选中），切换留给前端
+    #[test]
+    fn tabs_render_a_bar_and_one_panel_each() {
+        let html = render("::tabs\n  [北岸]\n  走北路\n  [南岸]\n  走南路\n");
+        assert_eq!(html.matches("class=\"tabs__tab").count(), 2, "{html}");
+        assert!(html.contains("tabs__tab--on"), "{html}");
+        assert!(html.contains("走北路") && html.contains("走南路"), "{html}");
+        // 没选中的面板先藏着，点标签才出来（前端接线）
+        assert!(html.contains("hidden"), "{html}");
+
+        // 一节里的正文按 markdown 渲染
+        let rich = render("::tabs\n  [一]\n  **加粗**\n");
+        assert!(rich.contains("<strong>加粗</strong>"), "{rich}");
+
+        let stray = render("::tabs\n  没写标签的内容\n  [一]\n  正文\n");
+        assert!(stray.contains("template--problem"), "{stray}");
+
+        // 一节里还能再嵌一个选项卡（各节是各自解析的小文档）
+        let nested = render("::tabs\n  [甲]\n  ::tabs\n    [内]\n    内文\n  [乙]\n  乙文\n");
+        assert_eq!(nested.matches("class=\"tabs\"").count(), 2, "{nested}");
+        assert!(
+            nested.contains("内文") && nested.contains("乙文"),
+            "{nested}"
+        );
+    }
+
+    /// `::js`：内容原样进 <script>，只是 `</script` 会被转义掉
+    #[test]
+    fn js_goes_in_raw_and_cannot_close_its_own_tag() {
+        let html = render("::js\n  console.log(\"你好\");\n");
+        assert!(html.contains("<script"), "{html}");
+        assert!(html.contains("console.log(\"你好\");"), "{html}");
+
+        let tricky = render("::js\n  const s = \"</script>\";\n");
+        assert!(
+            !tricky.contains("</script>\";"),
+            "不能让它提前闭合：{tricky}"
+        );
+        assert!(tricky.contains("<\\/script>"), "{tricky}");
+
+        // 大小写照原样留着：那可能是字符串里的内容，改一个字母就改了它的意思
+        let shouted = render("::js\n  const s = \"</SCRIPT>\";\n");
+        assert!(shouted.contains("<\\/SCRIPT>"), "{shouted}");
     }
 
     #[test]

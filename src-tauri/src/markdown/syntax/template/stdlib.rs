@@ -6,6 +6,7 @@ use super::dispatch::render_problem;
 use super::dispatch::TemplateRenderer;
 use super::fill;
 use super::parse::Template;
+use super::Section;
 use markdown_it::plugins::cmark::block::paragraph::Paragraph;
 use markdown_it::{Node, Renderer};
 
@@ -16,10 +17,40 @@ pub static TEMPLATES: &[(&str, TemplateRenderer)] = &[
     ("aside", render_aside),
     ("fields", render_fields),
     ("banner", render_banner),
+    ("title", render_title),
+    ("tabs", render_tabs),
+    ("theme", render_theme),
     ("image", render_image),
     ("css", render_css),
     ("html", render_html),
+    ("js", render_js),
 ];
+
+/// 内容按 `[标签]` 分节的模板。
+///
+/// 分节发生在**扫描时**（各节要各自解析成 markdown，见 `mod.rs`），所以扫描器得知道
+/// 哪些模板分节 —— 这张表因此和 `TEMPLATES` 放在一起：两张表加起来才是"有哪些模板"。
+pub static SECTIONED: &[&str] = &["tabs", "theme"];
+
+/// 这个模板是不是分节的（扫描器用）
+pub fn takes_sections(name: &str) -> bool {
+    SECTIONED.contains(&name)
+}
+
+/// 取分节模板的几节：`(标签原样, 那一节的节点)`。
+///
+/// 标签**不做大小写转换**：它是显示用的字（`[API]` 该照原样出现在选项卡上），
+/// 要按大小写不敏感地认标签的地方（`::theme`）自己转。
+fn sections(node: &Node) -> Vec<(&str, &Node)> {
+    node.children
+        .iter()
+        .filter_map(|child| {
+            child
+                .cast::<Section>()
+                .map(|section| (section.label.as_str(), child))
+        })
+        .collect()
+}
 
 /// 署名前面那条横线。
 ///
@@ -120,30 +151,60 @@ fn render_banner(template: &Template, node: &Node, fmt: &mut dyn Renderer) {
     }
 
     // 颜色只认十六进制：这个值会写进 style 属性，宽松了就等于允许塞任意声明
-    let mut attrs: Vec<(&str, String)> = vec![("class", "banner".to_string())];
+    let mut class = "banner".to_string();
+    let mut style = String::new();
     if let Some(color) = template.param("color") {
         let Some(hex) = normalize_hex(color) else {
             render_problem(template, fmt, "color= 只认 #rgb 或 #rrggbb 这两种写法");
             return;
         };
-        attrs.push((
-            "style",
-            format!("background: {hex}; color: {};", text_on(&hex)),
-        ));
+        style.push_str(&format!("background: {hex}; color: {};", text_on(&hex)));
+    }
+
+    // 高度给的是**最小**高度：字大了往下长，不会被裁掉；给了它就顺带把内容在条里摆正
+    if let Some(height) = template.param("height") {
+        let Some(rule) = size_rule("min-height", height) else {
+            render_problem(
+                template,
+                fmt,
+                "height= 只认数字加单位（px / % / em / rem / vh / vw），例如 height=120px",
+            );
+            return;
+        };
+        style.push_str(&rule);
+        class.push_str(" banner--sized");
+    }
+
+    // 圆角默认开着；要直角就写 rounded=off
+    let rounded = template
+        .param("rounded")
+        .map(|value| value.trim().to_lowercase());
+    match rounded.as_deref() {
+        None | Some("" | "on" | "true" | "yes") => {}
+        Some("off" | "false" | "no" | "0") => class.push_str(" banner--square"),
+        Some(_) => {
+            render_problem(template, fmt, "rounded= 只认 off（要直角）；不写就是圆角");
+            return;
+        }
+    }
+
+    let mut attrs: Vec<(&str, String)> = vec![("class", class)];
+    if !style.is_empty() {
+        attrs.push(("style", style));
     }
 
     fmt.cr();
-    match banner_content(node) {
+    match inline_or_blocks(node) {
         // 常见情形：一行文字（解析出来就是一个段落）。横条里不能再套一个块，
         // 所以把段落的**行内内容**摊平放进来。
-        BannerContent::Inline(inline) => {
+        InlineOrBlocks::Inline(inline) => {
             fmt.open("p", &attrs);
             fmt.contents(inline);
             fmt.close("p");
         }
         // 写成了好几段、或者塞了别的块：那不是一条横条了，照块的规矩渲染，
         // 内容不能丢，但换成 <div>，免得把一个块塞进 <p> 里。
-        BannerContent::Blocks => {
+        InlineOrBlocks::Blocks => {
             fmt.open("div", &attrs);
             fmt.cr();
             fmt.contents(&node.children);
@@ -153,19 +214,20 @@ fn render_banner(template: &Template, node: &Node, fmt: &mut dyn Renderer) {
     fmt.cr();
 }
 
-/// 标题带里的东西该按行内还是按块渲染
-enum BannerContent<'a> {
+/// "一行内容"的模板（横条、大标题）里的东西该按行内还是按块渲染
+enum InlineOrBlocks<'a> {
     /// 一个段落：渲染它里面的行内内容
     Inline(&'a [Node]),
     /// 别的：按块渲染
     Blocks,
 }
 
-/// 只有一个段落时按行内渲染 —— 这是"一条横条"该有的样子
-fn banner_content<'a>(node: &'a Node) -> BannerContent<'a> {
+/// 只有一个段落时按行内渲染 —— 这是"一条横条 / 一个大标题"该有的样子：
+/// 它们本身不是容器，里面再套一个块（`<p>` 里套 `<p>`）就散了
+fn inline_or_blocks<'a>(node: &'a Node) -> InlineOrBlocks<'a> {
     match node.children.as_slice() {
-        [only] if only.is::<Paragraph>() => BannerContent::Inline(&only.children),
-        _ => BannerContent::Blocks,
+        [only] if only.is::<Paragraph>() => InlineOrBlocks::Inline(&only.children),
+        _ => InlineOrBlocks::Blocks,
     }
 }
 
@@ -285,6 +347,220 @@ fn render_image(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
         fmt.cr();
     }
     fmt.close("figure");
+    fmt.cr();
+}
+
+/// `::title text="大标题" color=#5b8dd6` —— **居中的大标题，没有背景**。
+///
+/// 与 `::banner` 是一对：那条是横条（有底色、占一整行），这个是标题（只有字）。
+/// 卷首的题名、章节的分节标题用它；要一条有底色的横条就用 `::banner`。
+/// `color=` 在这里给的是**字色**（没有底色可给）。
+///
+/// 内容与 `banner` 同一套规矩：块里写一行，或由 `text=` 给出，都按 markdown 渲染。
+fn render_title(template: &Template, node: &Node, fmt: &mut dyn Renderer) {
+    if node.children.is_empty() {
+        render_problem(template, fmt, "标题是空的：写一行字，或用 text=… 给");
+        return;
+    }
+
+    let mut attrs: Vec<(&str, String)> = vec![("class", "title-block".to_string())];
+    if let Some(color) = template.param("color") {
+        let Some(hex) = normalize_hex(color) else {
+            render_problem(template, fmt, "color= 只认 #rgb 或 #rrggbb 这两种写法");
+            return;
+        };
+        attrs.push(("style", format!("color: {hex};")));
+    }
+
+    fmt.cr();
+    match inline_or_blocks(node) {
+        InlineOrBlocks::Inline(inline) => {
+            fmt.open("p", &attrs);
+            fmt.contents(inline);
+            fmt.close("p");
+        }
+        // 写成了好几段：那就不是一个标题了，但内容不能丢，换成 <div> 照块渲染
+        InlineOrBlocks::Blocks => {
+            fmt.open("div", &attrs);
+            fmt.cr();
+            fmt.contents(&node.children);
+            fmt.close("div");
+        }
+    }
+    fmt.cr();
+}
+
+/// `::tabs` —— 选项卡：块里用 `[标签]` 分节，一节就是一个面板。
+///
+/// ```text
+/// ::tabs
+///   [北岸]
+///   北岸的走法……
+///   [南岸]
+///   南岸的走法……
+/// ```
+///
+/// 后端只产出**结构**（一排标签 + 各面板），切换由前端接上 —— 渲染器往输出里塞不了
+/// `onclick`，塞了也过不了 CSP，而且阅读页与编辑器预览是两处注入，行为该由前端一处管。
+/// 第一节默认选中。标签是显示用的字，原样保留（`[API]` 不会变成 `[api]`）。
+///
+/// `[标签]` 与本节的其他行**左对齐**：写得更深就当成里层内容了（嵌套的选项卡靠这条分得开）。
+fn render_tabs(template: &Template, node: &Node, fmt: &mut dyn Renderer) {
+    let sections = sections(node);
+    if sections.is_empty() {
+        render_problem(template, fmt, "选项卡是空的：每一节要以 [标签] 开头");
+        return;
+    }
+    if sections.iter().any(|(label, _)| label.is_empty()) {
+        render_problem(
+            template,
+            fmt,
+            "有内容写在第一个 [标签] 之前：选项卡的每一节都要以 [标签] 开头",
+        );
+        return;
+    }
+
+    fmt.cr();
+    fmt.open("div", &[("class", "tabs".to_string())]);
+    fmt.cr();
+    fmt.open(
+        "div",
+        &[
+            ("class", "tabs__bar".to_string()),
+            ("role", "tablist".to_string()),
+        ],
+    );
+    for (index, (label, _)) in sections.iter().enumerate() {
+        let selected = index == 0;
+        // 用真按钮：Tab 键走得到、回车就切（切换的接线在前端）
+        let attrs: Vec<(&str, String)> = vec![
+            (
+                "class",
+                if selected {
+                    "tabs__tab tabs__tab--on".to_string()
+                } else {
+                    "tabs__tab".to_string()
+                },
+            ),
+            ("type", "button".to_string()),
+            ("role", "tab".to_string()),
+            ("data-tab", index.to_string()),
+            (
+                "aria-selected",
+                if selected { "true" } else { "false" }.to_string(),
+            ),
+        ];
+        fmt.open("button", &attrs);
+        fmt.text(label);
+        fmt.close("button");
+    }
+    fmt.cr();
+    fmt.close("div");
+    fmt.cr();
+
+    for (index, (_, content)) in sections.iter().enumerate() {
+        let mut attrs: Vec<(&str, String)> = vec![
+            ("class", "tabs__panel".to_string()),
+            ("role", "tabpanel".to_string()),
+            ("data-panel", index.to_string()),
+        ];
+        if index != 0 {
+            attrs.push(("hidden", "hidden".to_string()));
+        }
+        fmt.open("div", &attrs);
+        fmt.cr();
+        fmt.contents(&content.children);
+        fmt.cr();
+        fmt.close("div");
+    }
+    fmt.cr();
+    fmt.close("div");
+    fmt.cr();
+}
+
+/// `::theme` —— 同一段内容，深浅色各给一版。
+///
+/// ```text
+/// ::theme
+///   [light]
+///   浅色下显示这一段（浅底上的图，用的是浅色描边）
+///   [dark]
+///   深色下显示这一段
+/// ```
+///
+/// **两节都会渲染进 HTML**，显示哪一节由样式按当前主题决定（`<html data-theme="…">`
+/// 是主题的落点，见前端 `core/theme.ts`）。这样切主题不必重新渲染正文 ——
+/// 就像别的样式一样，当场就变。
+///
+/// 写在第一个标签**之前**的内容两边都显示（`[both]` 同义）：前言、说明常常要这样写。
+/// 与 `::tabs` 同一个规矩：`[标签]` 要与本节的其他行**左对齐**。
+fn render_theme(template: &Template, node: &Node, fmt: &mut dyn Renderer) {
+    let sections = sections(node);
+    if sections.is_empty() {
+        render_problem(template, fmt, "要分节：每一节以 [light] 或 [dark] 开头");
+        return;
+    }
+
+    // 先整块认一遍再渲染：标签写错了就整块报出来，免得渲染半截
+    let mut parts: Vec<(&str, &Node)> = Vec::new();
+    for (label, content) in &sections {
+        let slot = match label.to_lowercase().as_str() {
+            "" | "both" | "all" => "",
+            "light" => "light",
+            "dark" => "dark",
+            _ => {
+                let why = format!(
+                    "认不出这一节的标签 [{label}]：只认 [light] 与 [dark]  \
+                     （写在最前面的内容两边都显示）"
+                );
+                render_problem(template, fmt, &why);
+                return;
+            }
+        };
+        parts.push((slot, content));
+    }
+
+    fmt.cr();
+    fmt.open("div", &[("class", "theme".to_string())]);
+    for (slot, content) in parts {
+        let class = match slot {
+            "light" => "theme__part theme__part--light",
+            "dark" => "theme__part theme__part--dark",
+            _ => "theme__part",
+        };
+        fmt.cr();
+        fmt.open("div", &[("class", class.to_string())]);
+        fmt.cr();
+        fmt.contents(&content.children);
+        fmt.cr();
+        fmt.close("div");
+    }
+    fmt.cr();
+    fmt.close("div");
+    fmt.cr();
+}
+
+/// `::js` —— 把内容当**原始 JavaScript** 注入这一页，随页面加载执行。
+///
+/// 与 `::html` 一个规矩：内容原样，`{{参数}}` 会替换（见 [`fill`]）。不过滤 ——
+/// 打开它（写下 `::js` 本身）就是一次显式的决定，与 `::html js` 是同一个意思。
+///
+/// 注入的脚本里若出现 `</script`，HTML 解析器会当场收尾，后面的字会漏到页面上，
+/// 所以那一处先转义（见 [`fill::escape_script_end`]）。
+///
+/// 前端在正文注入 DOM 之后把 `<script>` 重新装成真节点（`v-html` 塞进去的脚本不会执行），
+/// 所以这段代码才会真的跑起来。
+fn render_js(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
+    let Some(source) = fill::source_of(template) else {
+        render_problem(template, fmt, "src= 指向模板页，取不到它");
+        return;
+    };
+    let filled = fill::substitute(&source, template, &template.body);
+
+    fmt.cr();
+    fmt.open("script", &[("class", "note-js".to_string())]);
+    fmt.text_raw(&fill::escape_script_end(&filled));
+    fmt.close("script");
     fmt.cr();
 }
 

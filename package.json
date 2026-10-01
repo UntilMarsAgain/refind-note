@@ -11,6 +11,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@codemirror/lang-javascript": "^6.2.5",
     "@codemirror/lang-markdown": "^6.5.2",
     "@codemirror/language": "^6.12.4",
     "@codemirror/state": "^6.7.6",
