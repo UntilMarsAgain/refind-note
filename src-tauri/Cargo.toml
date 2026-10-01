@@ -23,6 +23,25 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# ---- 存储仓库 ----
+
+# 内容寻址：blob 的地址就是落盘字节的 sha256。
+# 用最新一代（0.11）：这一代 API 与 0.10 不同，但安全更新只会往新版走，迁早就早。
+sha2 = "0.11"
+# 封装格式的压缩层。默认后端是纯 Rust 的 miniz_oxide，不引 C 依赖。
+flate2 = "1"
+# 封装格式的对称加密层（AEAD）与口令派生。
+chacha20poly1305 = "0.10"
+argon2 = "0.5"
+# 生成 salt / nonce。
+getrandom = "0.2"
+# 封装头里的 salt / nonce 以文本存放（base64）。
+base64 = "0.22"
+# 封装格式的 gpg 层：OpenPGP 自己实现是灾难，交给系统配置（走 gpgme）。
+gpgme = "0.11"
+# 时间戳用 RFC3339：建库时间、日志里的时间、草稿的修改时间。
+time = { version = "0.3", features = ["formatting", "parsing"] }
+
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

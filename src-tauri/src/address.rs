@@ -9,19 +9,12 @@
 
 use serde::Serialize;
 
-/// 虚拟命名空间 `special`：前缀大小写不敏感，规范串里写成 `Special`。
-const SPECIAL_NAMESPACE: &str = "special";
+use crate::title::{self, SPECIAL_NAMESPACE};
 
 /// 现有的特殊页面。不在这里面的 `special:` 地址直接报「没有这个特殊页面」。
 const SPECIAL_PAGES: [&str; 10] = [
     "newtab", "settings", "all", "random", "gc", "trash", "debug", "files", "history", "changes",
 ];
-
-/// 页面名最长 255 字节（按 UTF-8 计）。
-const MAX_TITLE_BYTES: usize = 255;
-
-/// 页面名里不允许出现的字符。
-const ILLEGAL_CHARS: &[char] = &['#', '<', '>', '[', ']', '|', '{', '}', ':', '@', '$'];
 
 /// 命名空间部分：`id` 是它的身份，`spelling` 是回显时用的拼写。
 ///
@@ -86,10 +79,7 @@ pub fn parse(input: &str) -> Result<Option<ParsedAddress>, String> {
     }
 
     let AddressParts { name, state, section } = split_address(raw);
-    let name = normalize(&name);
-    if name.is_empty() {
-        return Err("标题不能为空".to_string());
-    }
+    let name = title::normalize(&name);
 
     // 冒号只可能属于命名空间前缀：命中 special 是虚拟命名空间，其余前缀
     // 不认得就报错 —— **不回退主命名空间**，MediaWiki 那套不同于此。
@@ -97,12 +87,7 @@ pub fn parse(input: &str) -> Result<Option<ParsedAddress>, String> {
         return if prefix.trim().eq_ignore_ascii_case(SPECIAL_NAMESPACE) {
             special(rest.trim(), section).map(Some)
         } else {
-            let prefix = prefix.trim();
-            Err(if prefix.is_empty() {
-                "「:」前面要写命名空间名".to_string()
-            } else {
-                format!("没有这个命名空间：{prefix}（目前只有主命名空间）")
-            })
+            Err(title::reject_namespace(prefix.trim()))
         };
     }
 
@@ -111,7 +96,7 @@ pub fn parse(input: &str) -> Result<Option<ParsedAddress>, String> {
             id: String::new(),
             spelling: String::new(),
         },
-        page: check_page(&name)?,
+        page: title::check_page(&name)?,
         mode: mode_of(state.as_deref().unwrap_or(""))?,
         section: section.unwrap_or_default(),
     };
@@ -138,9 +123,9 @@ fn special(page: &str, section: Option<String>) -> Result<ParsedAddress, String>
     let address = Address {
         namespace: NamespaceRef {
             id: SPECIAL_NAMESPACE.to_string(),
-            spelling: capitalize_first(SPECIAL_NAMESPACE),
+            spelling: title::capitalize_first(SPECIAL_NAMESPACE),
         },
-        page: capitalize_first(&id),
+        page: title::capitalize_first(&id),
         mode: Mode::View { reference: None },
         section: section.unwrap_or_default(),
     };
@@ -267,63 +252,6 @@ fn split_address(raw: &str) -> AddressParts {
         name,
         state: state.filter(|value| !value.is_empty()),
         section: section.filter(|value| !value.is_empty()),
-    }
-}
-
-/// 页面名的词法检查：首字母大写、非空、不超长、没有保留字符。
-fn check_page(page: &str) -> Result<String, String> {
-    let page = capitalize_first(page);
-    if page.is_empty() {
-        return Err("标题不能为空".to_string());
-    }
-    if page.len() > MAX_TITLE_BYTES {
-        return Err(format!(
-            "标题过长（{} 字节，上限 {MAX_TITLE_BYTES}）",
-            page.len()
-        ));
-    }
-    if let Some(ch) = page
-        .chars()
-        .find(|ch| ch.is_control() || ILLEGAL_CHARS.contains(ch))
-    {
-        return Err(format!("标题里不能有 {ch}"));
-    }
-    Ok(page)
-}
-
-/// 去首尾空白、`_` 视作空格、连续空白折叠成一个空格。
-///
-/// 它决定「两个写法算不算同一篇笔记」，所以是笔记身份的一部分：地址解析与页面名的
-/// 比较都从这里过一遍。
-fn normalize(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut pending_space = false;
-    for ch in text.trim().chars() {
-        let ch = if ch == '_' { ' ' } else { ch };
-        if ch.is_whitespace() {
-            pending_space = !out.is_empty();
-            continue;
-        }
-        if pending_space {
-            out.push(' ');
-            pending_space = false;
-        }
-        out.push(ch);
-    }
-    out
-}
-
-/// 首字母大写。
-///
-/// 用 `is_alphabetic()` + `to_uppercase()`：对 CJK 是**空操作** —— 汉字虽然是
-/// `alphabetic`，但 `to_uppercase()` 返回它自己，所以中文标题不会被改。
-fn capitalize_first(text: &str) -> String {
-    let mut chars = text.chars();
-    match chars.next() {
-        Some(first) if first.is_alphabetic() => {
-            first.to_uppercase().collect::<String>() + chars.as_str()
-        }
-        _ => text.to_string(),
     }
 }
 
