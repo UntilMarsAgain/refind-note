@@ -4,12 +4,25 @@ import {ArrowLeft, ArrowRight, Menu, Minus, Copy, Square, X} from "@lucide/vue";
 import {currentWindow} from "../window-api.ts";
 import {onMounted, onUnmounted, ref} from "vue";
 
+const props = defineProps<{
+  /** 规范地址（当前标签页解析结果里那一份）。失焦 / Esc 以它回显 */
+  committed: string;
+  canBack?: boolean;
+  canForward?: boolean;
+}>();
+const address = defineModel<string>({required: true});
+
+const emit = defineEmits<{
+  (e: "back"): void;
+  (e: "forward"): void;
+  (e: "menu"): void;
+  /** 用户按下回车：交给持有标签页的一方去解析、导航 */
+  (e: "submit", value: string): void;
+}>();
+
 const appWindow = currentWindow();
-
 const isMaximized = ref(false);
-
 let unlistenResized: (() => void) | undefined;
-
 onMounted(async () => {
   if (!appWindow) {
     return;
@@ -21,6 +34,32 @@ onMounted(async () => {
   });
 });
 onUnmounted(() => unlistenResized?.());
+
+const fieldEl = ref<HTMLInputElement | null>(null);
+
+function onFocus() {
+  // 地址栏惯例：一点就全选
+  fieldEl.value?.select();
+}
+
+function onKeydown(event: KeyboardEvent) {
+  if (event.key === "Enter") {
+    emit("submit", address.value);
+    // 刻意**不 blur**：提交后光标留在地址栏，方便接着敲下一条。
+    // 回显（规范地址）由父组件写回来，这里不碰焦点。
+    return;
+  }
+  if (event.key === "Escape") {
+    // 放弃这次编辑：退回规范地址
+    address.value = props.committed;
+    fieldEl.value?.blur();
+  }
+}
+
+// 失焦一律以**规范地址**回显 —— 无论刚才有没有导航成功。
+function onBlur() {
+  address.value = props.committed;
+}
 </script>
 
 <template>
@@ -32,6 +71,8 @@ onUnmounted(() => unlistenResized?.());
           class="tbtn"
           type="button"
           aria-label="后退"
+          :disabled="!canBack"
+          @click="emit('back')"
       >
         <ArrowLeft :size="16" :stroke-width="1.75"/>
       </button>
@@ -39,20 +80,27 @@ onUnmounted(() => unlistenResized?.());
           class="tbtn"
           type="button"
           aria-label="前进"
+          :disabled="!canForward"
+          @click="emit('forward')"
       >
         <ArrowRight :size="16" :stroke-width="1.75"/>
       </button>
-      <button class="tbtn" type="button" aria-label="菜单">
+      <button class="tbtn" type="button" aria-label="菜单" @click="emit('menu')">
         <Menu :size="16" :stroke-width="1.75"/>
       </button>
     </div>
     <div class="titlebar-middle">
       <input
           ref="fieldEl"
+          v-model="address"
           class="field"
           type="text"
           spellcheck="false"
           placeholder="请输入地址"
+          :title="address"
+          @focus="onFocus"
+          @blur="onBlur"
+          @keydown="onKeydown"
       />
     </div>
     <div class="titlebar-right">
@@ -121,12 +169,12 @@ onUnmounted(() => unlistenResized?.());
 }
 
 .logo {
-  width: 38px;        /* 20 / (67/128) ≈ 38 */
+  width: 38px; /* 20 / (67/128) ≈ 38 */
   height: 38px;
   object-fit: contain;
   align-self: center;
   pointer-events: none;
-  margin: -9px 0;     /* 抵消多出来的上下留白，避免撑高标题栏 */
+  margin: -9px 0; /* 抵消多出来的上下留白，避免撑高标题栏 */
 }
 
 .divider {
@@ -152,10 +200,9 @@ onUnmounted(() => unlistenResized?.());
   height: 100%;
   border-radius: 0;
   position: relative;
-  transition:
-      background-color 0.18s ease,
-      color 0.18s ease,
-      transform 0.08s ease;
+  transition: background-color 0.18s ease,
+  color 0.18s ease,
+  transform 0.08s ease;
   -webkit-app-region: no-drag;
   will-change: background-color, color;
 }
@@ -215,9 +262,8 @@ onUnmounted(() => unlistenResized?.());
   text-overflow: ellipsis;
   outline: none;
   cursor: default;
-  transition:
-      background-color 120ms ease,
-      border-color 120ms ease;
+  transition: background-color 120ms ease,
+  border-color 120ms ease;
 }
 
 .field::placeholder {

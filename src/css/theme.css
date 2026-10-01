@@ -30,6 +30,10 @@
     /* 标题栏高度 */
     --titlebar-height: 40px;
 
+    /* 垂直标签栏的两档宽度（展开 / 收起） */
+    --rail-width: 168px;
+    --rail-collapsed-width: 46px;
+
     /* 覆盖浏览器模式 */
     color-scheme: dark;
 
