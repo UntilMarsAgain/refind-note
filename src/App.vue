@@ -548,6 +548,16 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
+/*
+ * 窗口窄了：主区域改竖排，标签栏（它自己会 `order: 2`）落到正文下面变成一条横栏。
+ * 断点 760px 与 `TabRail.vue` 里那条是**同一个数** —— 两处一起改。
+ */
+@media (max-width: 760px) {
+  .app__main {
+    flex-direction: column;
+  }
+}
+
 /* 右下角那一堆：按钮与它上方的调试信息框 */
 .corner {
   position: fixed;

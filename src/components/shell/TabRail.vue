@@ -103,7 +103,7 @@ function onTabMenu(event: MouseEvent, index: number) {
   <aside class="rail" :class="{ 'rail--collapsed': railCollapsed }">
     <div class="rail__head">
       <button
-        class="rail__icon"
+        class="rail__icon rail__icon--fold"
         type="button"
         :title="railCollapsed ? '展开标签栏' : '收起标签栏'"
         :aria-label="railCollapsed ? '展开标签栏' : '收起标签栏'"
@@ -428,6 +428,102 @@ function onTabMenu(event: MouseEvent, index: number) {
 
   80% {
     transform: translateX(2px);
+  }
+}
+
+/* ---------- 窗口窄了：竖排标签栏挪到页面下方，横过来 ---------- */
+
+/*
+ * 窄窗口里 168px 的竖栏要占掉四分之一，正文被挤成一条；横过来之后它只吃几十像素高。
+ *
+ * 断点 760px 与 `App.vue` 里把 `.app__main` 改成竖排的那条是**同一个数** ——
+ * 两处一起改，否则会出现"栏横过来了但还在左边"这种半截状态。
+ *
+ * 横过来之后展开/收起没有意义（省不出空间），所以那枚按钮藏起来，
+ * 收起态的样式也一并作废 —— 这样"上次收起着"的人在窄窗口里也看得见标签名。
+ */
+@media (max-width: 760px) {
+  .rail,
+  .rail--collapsed {
+    /* 排到正文下面（`order` 见 App.vue 里那条竖排规则） */
+    order: 2;
+    flex-direction: row;
+    align-items: center;
+    width: 100%;
+    height: 44px;
+    padding: 4px 6px;
+    border-right: 0;
+    border-top: 1px solid var(--divider);
+  }
+
+  .rail__head,
+  .rail--collapsed .rail__head {
+    flex-direction: row;
+  }
+
+  .rail__icon--fold {
+    display: none;
+  }
+
+  /* 标签横着排一行，太长就在这一条里横向滚 */
+  .rail__list {
+    display: flex;
+    flex: 1 1 auto;
+    gap: 4px;
+    align-items: center;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .rail__list > li {
+    flex: 0 0 auto;
+    max-width: 180px;
+  }
+
+  .rail__item,
+  .rail--collapsed .rail__item {
+    width: auto;
+  }
+
+  .rail__item--over {
+    /* 横排里插入位置在**左边** */
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+
+  .rail__pick,
+  .rail--collapsed .rail__pick {
+    justify-content: flex-start;
+    padding: 4px 8px;
+  }
+
+  /* 收起态那套"只留首字"作废：窄窗口里更要知道这一格是哪一页 */
+  .rail--collapsed .rail__initial {
+    display: none;
+  }
+
+  .rail--collapsed .rail__text {
+    display: block;
+  }
+
+  .rail--collapsed .rail__close,
+  .rail__close {
+    display: inline-flex;
+    /* 横排的格子里没有"悬停才出现"的余地：这么窄的一条，找不着就是找不着 */
+    opacity: 0.7;
+  }
+
+  .rail__entry,
+  .rail--collapsed .rail__entry {
+    justify-content: center;
+    margin: 0;
+    padding: 4px 8px;
+  }
+
+  /* 竖向堆叠时"正在离开的项脱离文档流"是为了别让剩下的项跳一下；
+     横排里那条绝对定位会盖住整行，改成不脱流 */
+  .tab-leave-active {
+    position: static;
+    width: auto;
   }
 }
 
