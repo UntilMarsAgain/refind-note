@@ -1,4 +1,6 @@
 mod address;
+pub mod browsing;
+pub mod changes;
 pub mod codec;
 pub mod database;
 pub mod files;
@@ -128,6 +130,34 @@ fn serve_file(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<
         .header("Content-Type", mime)
         .body(bytes)
         .unwrap_or_else(|_| missing())
+}
+
+/// 最近的改动（跨全部笔记，新的在前）
+#[tauri::command]
+fn recent_changes(limit: usize, include_drafts: bool) -> Result<Vec<changes::ChangeEntry>, String> {
+    let (_, database) = open_database()?;
+    database.recent_changes(limit, include_drafts)
+}
+
+/// 浏览历史（新的在前）
+#[tauri::command]
+fn browsing_history() -> Result<Vec<browsing::Visit>, String> {
+    let (_, database) = open_database()?;
+    Ok(database.browsing())
+}
+
+/// 记一次访问；返回记完之后的整份清单
+#[tauri::command]
+fn record_visit(address: String, title: String) -> Result<Vec<browsing::Visit>, String> {
+    let (_, database) = open_database()?;
+    database.record_visit(&address, &title)
+}
+
+/// 清空浏览历史
+#[tauri::command]
+fn clear_history() -> Result<(), String> {
+    let (_, database) = open_database()?;
+    database.clear_browsing()
 }
 
 /// 附件清单（新的在前）
@@ -451,6 +481,10 @@ pub fn run() {
             protection_report,
             delete_note,
             list_notes,
+            recent_changes,
+            browsing_history,
+            record_visit,
+            clear_history,
             list_files,
             upload_file,
             upload_bytes,

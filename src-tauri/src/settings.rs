@@ -40,6 +40,8 @@ pub struct Preferences {
     pub rail_collapsed: bool,
     /// 代码块是否显示行号
     pub code_line_numbers: bool,
+    /// 记不记浏览历史（记下来的在 `settings/browsing.json`，随时可以单独清空）
+    pub record_history: bool,
 }
 
 impl Default for Preferences {
@@ -51,6 +53,7 @@ impl Default for Preferences {
             limit_width: true,
             rail_collapsed: false,
             code_line_numbers: true,
+            record_history: true,
         }
     }
 }
@@ -145,6 +148,7 @@ mod tests {
                 limit_width: true,
                 rail_collapsed: false,
                 code_line_numbers: true,
+                ..Default::default()
             }
         );
 
@@ -164,6 +168,7 @@ mod tests {
                 limit_width: false,
                 rail_collapsed: true,
                 code_line_numbers: false,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -203,6 +208,7 @@ mod tests {
                 limit_width: false,
                 rail_collapsed: false,
                 code_line_numbers: true,
+                ..Default::default()
             },
         )
         .unwrap();

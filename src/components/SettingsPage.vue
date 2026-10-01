@@ -129,6 +129,10 @@ function toggleCodeLineNumbers(event: Event) {
   updatePreferences({ code_line_numbers: (event.target as HTMLInputElement).checked });
 }
 
+function toggleHistory(event: Event) {
+  updatePreferences({ record_history: (event.target as HTMLInputElement).checked });
+}
+
 function setRailDefault(event: Event) {
   updatePreferences({ rail_collapsed: (event.target as HTMLInputElement).checked });
 }
@@ -339,6 +343,23 @@ watch(
       :class="{ 'row--target': isFocused('namespaces') }"
     >
       <NamespaceManager/>
+    </div>
+
+    <div
+      id="browsing-history"
+      class="row"
+      :class="{ 'row--target': isFocused('browsing-history') }"
+    >
+      <span class="row__label">浏览历史</span>
+      <code class="row__id">#browsing-history</code>
+      <label class="row__check">
+        <input
+          type="checkbox"
+          :checked="preferences.record_history"
+          @change="toggleHistory"
+        />
+        <span>记录看过的页面（在 special:history 里可以单独清空）</span>
+      </label>
     </div>
 
     <h2 class="settings__section">维护</h2>

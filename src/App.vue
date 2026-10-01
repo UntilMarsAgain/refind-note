@@ -13,6 +13,7 @@ import TabRail from "./components/TabRail.vue";
 import WindowResizeHandles from "./components/WindowResizeHandles.vue";
 import WindowTitleBar from "./components/WindowTitleBar.vue";
 import { withSection } from "./address.ts";
+import { loadBrowsing } from "./browsing.ts";
 import { dismissNotice, flash, notice } from "./notice.ts";
 import { setOpenInNewTab } from "./note-html.ts";
 import {
@@ -354,6 +355,8 @@ watch(
         void navigate("special:newtab", "push");
       }
       void runMaintenanceOnce();
+      // 浏览历史读回来一次：那一页要显示它，不必等打开那一页才读
+      void loadBrowsing();
     }
   },
   { immediate: true },

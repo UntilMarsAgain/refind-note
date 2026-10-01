@@ -21,6 +21,7 @@ export const preferences = ref<Preferences>({
     limit_width: true,
     rail_collapsed: false,
     code_line_numbers: true,
+    record_history: true,
 });
 
 /** 工作目录与数据库的位置（诊断页显示"东西存在哪"） */

@@ -286,7 +286,7 @@ impl Database {
             .ok_or_else(|| format!("没有这篇笔记：{title}"))
     }
 
-    fn read_events(&self, id: &str) -> Result<Vec<Event>, String> {
+    pub(crate) fn read_events(&self, id: &str) -> Result<Vec<Event>, String> {
         let path = self.log_path(id);
         let text = match fs::read_to_string(&path) {
             Ok(text) => text,

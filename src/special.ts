@@ -10,8 +10,10 @@
 
 import type { Component } from "vue";
 import {
+    Clock,
     Dices,
     FolderOpen,
+    History,
     List,
     Plus,
     Settings,
@@ -39,6 +41,18 @@ export const FALLBACK_GROUP = "其它";
 const META: Record<string, SpecialPageMeta> = {
     all: { label: "全部页面", tip: "列出所有笔记", icon: List, group: "导航" },
     random: { label: "随机条目", tip: "随机跳到一篇笔记", icon: Dices, group: "导航" },
+    changes: {
+        label: "最近编辑",
+        tip: "全仓库最近的提交；勾上后连草稿一起看",
+        icon: Clock,
+        group: "导航",
+    },
+    history: {
+        label: "浏览历史",
+        tip: "看过的页面；可单独清空，也能在设置里关掉",
+        icon: History,
+        group: "导航",
+    },
     newtab: { label: "新标签页", tip: "打开一个空白标签页", icon: Plus, group: "导航" },
     settings: { label: "设置", tip: "外观与界面偏好", icon: Settings, group: "工具" },
     debug: { label: "诊断", tip: "工作目录与数据库的现状", icon: Stethoscope, group: "工具" },

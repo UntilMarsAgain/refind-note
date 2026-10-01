@@ -1,5 +1,6 @@
 import { computed, ref } from "vue";
 import { resolveAddress, titleOf } from "./address.ts";
+import { recordVisit } from "./browsing.ts";
 import type { ResolvedAddress } from "./bindings/address.ts";
 
 /** 切换标签页的原因 */
@@ -246,6 +247,8 @@ export function useTabs() {
     // 权威副本先落地，其余（标签名、地址栏）都由它派生
     tab.route = route;
     tab.title = titleOf(route);
+    // 记一笔浏览历史：**只有这一处**记录点，所以点链接、敲地址、前进后退都算
+    recordVisit(route.canonical, tab.title);
     // 回显覆写：规范地址盖掉用户敲的原文
     tab.address = route.canonical;
 

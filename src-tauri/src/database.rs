@@ -197,6 +197,11 @@ impl Database {
         BlobStore::new(self.root.join(BLOBS_DIR))
     }
 
+    /// 配置所在的那一层（`settings/`）：偏好、语义设置、浏览历史都在这儿
+    pub fn settings_dir(&self) -> &Path {
+        &self.settings
+    }
+
     /// 笔记日志所在的目录（整理那一轮要扫它）
     pub fn objects_dir(&self) -> PathBuf {
         self.root.join(OBJECTS_DIR)

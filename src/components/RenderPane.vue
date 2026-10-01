@@ -4,10 +4,12 @@ import type { ResolvedAddress } from "../bindings/address.ts";
 import { preferences } from "../preferences.ts";
 import type { TabState } from "../tabs.ts";
 import AllPages from "./AllPages.vue";
+import ChangesPage from "./ChangesPage.vue";
 import DebugPage from "./DebugPage.vue";
 import FilesPage from "./FilesPage.vue";
 import GcPage from "./GcPage.vue";
 import DeleteView from "./DeleteView.vue";
+import HistoryPage from "./HistoryPage.vue";
 import HistoryView from "./HistoryView.vue";
 import MissingView from "./MissingView.vue";
 import NewTabView from "./NewTabView.vue";
@@ -141,6 +143,10 @@ defineExpose({
       <DebugPage v-else-if="specialPage === 'debug'"/>
 
       <FilesPage v-else-if="specialPage === 'files'"/>
+
+      <ChangesPage v-else-if="specialPage === 'changes'" @open="emit('navigate', $event)"/>
+
+      <HistoryPage v-else-if="specialPage === 'history'" @navigate="emit('navigate', $event)"/>
 
       <TrashPage
           v-else-if="specialPage === 'trash'"

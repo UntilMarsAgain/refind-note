@@ -20,6 +20,8 @@ export interface Preferences {
     rail_collapsed: boolean;
     /** 代码块是否显示行号 */
     code_line_numbers: boolean;
+    /** 记不记浏览历史（记下来的在 settings/browsing.json，可单独清空） */
+    record_history: boolean;
 }
 
 /** 数据库的认领标记与版本 */
