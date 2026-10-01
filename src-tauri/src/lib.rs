@@ -86,7 +86,7 @@ fn save_preferences(preferences: Preferences) -> Result<Preferences, String> {
     settings::save(&workspace, preferences)
 }
 
-/// `refind://localhost/files/<键>` → 附件的字节。
+/// `refind://localhost/file/<名字>` → 文件页面的字节。
 ///
 /// 只给 webview 里的 `<img src>` 用：笔记正文里写的是相对名字，渲染之后由前端
 /// 换成这个地址。键照表查，查不到、文件不在、读不动都是 404 —— **不猜路径**。
