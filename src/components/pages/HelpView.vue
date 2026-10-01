@@ -5,12 +5,14 @@ import { BookOpen, Code } from "@lucide/vue";
 import type { HelpPage } from "../../bindings/help.ts";
 import NoteContent from "../note/NoteContent.vue";
 import PageHeader, { type PageAction } from "../note/PageHeader.vue";
+import SourceView from "../note/SourceView.vue";
 
 /**
  * 帮助页（`Help:入门`）。
  *
- * 内容**随程序发布**，不在仓库里，所以这一页是只读的：`@edit` 只把源码摊开给人看，
- * 不改任何东西 —— 改帮助要去改仓库里 `help/` 下的文件，再重新编译。
+ * 内容**随程序发布**，不在仓库里，所以这一页是只读的：`@edit` 只把源码摊开给人看
+ * （用编辑器同一套 CodeMirror，但**不许编辑**），不改任何东西 ——
+ * 改帮助要去改仓库里 `help/` 下的文件，再重新编译。
  *
  * 渲染与笔记走的是同一个渲染器（后端一处），所以帮助里的模板块、代码块、表格
  * 与笔记里长得一模一样。
@@ -97,8 +99,8 @@ function onAction() {
         帮助内容随程序发布，无法在这里编辑。
       </p>
 
-      <!-- 源码：只读摊开。改它要去改仓库里的帮助文件，再重新编译 -->
-      <pre v-if="props.source" class="help__source selectable">{{ entry.markdown }}</pre>
+      <!-- 源码：只读摊开（编辑器同一套视图）。改它要去改仓库里的帮助文件，再重新编译 -->
+      <SourceView v-if="props.source" :markdown="entry.markdown"/>
 
       <NoteContent
           v-else
@@ -153,20 +155,5 @@ function onAction() {
   border-color: var(--accent-soft);
   background: var(--accent-tint);
   color: var(--text);
-}
-
-/* 源码：原样摊开，与编辑器里看到的是同一份 */
-.help__source {
-  margin: 14px 0 0;
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--field-bg);
-  color: var(--text);
-  font-family: var(--mono-font);
-  font-size: 13px;
-  line-height: 1.75;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 </style>
