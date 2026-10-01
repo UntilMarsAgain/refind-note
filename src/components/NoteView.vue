@@ -27,6 +27,11 @@ const props = defineProps<{
 const emit = defineEmits<{
     /** 点了内部链接：算一次跳转 */
     (e: "navigate", title: string): void;
+    /**
+     * 上锁时改去 `@unlock`：走**替换**而不是压新记录 ——
+     * 否则从解锁页后退会回到这篇、又被重定向回来，来回打转。
+     */
+    (e: "redirect", input: string): void;
     /** Ctrl/Cmd+点击内部链接：在新标签页打开 */
     (e: "navigate-new-tab", title: string): void;
     /** 点了页内锚点：章节交给上层叠进地址 */
@@ -55,7 +60,7 @@ async function load() {
         if (reading.state === "locked") {
             note.value = null;
             emit(
-                "navigate",
+                "redirect",
                 props.reference === null
                     ? `${props.title}@unlock`
                     : `${props.title}@unlock-${props.reference}`,
@@ -89,9 +94,6 @@ watch(
     <template v-else-if="note">
       <p v-if="older()" class="note__older">
         这是第 {{ note.rev }} 版，不是最新版。
-        <button type="button" class="note__link" @click="emit('navigate', note.title)">
-          回到最新版
-        </button>
       </p>
 
       <header class="note__head">
@@ -99,6 +101,15 @@ watch(
           <h1 class="note__title">{{ note.title }}</h1>
 
           <div class="note__actions">
+            <button
+                v-if="props.reference !== null"
+                type="button"
+                class="note__action"
+                title="回到这一篇"
+                @click="emit('navigate', note.title)"
+            >
+              返回「{{ note.title }}」
+            </button>
             <button
                 v-if="props.reference === null"
                 type="button"
@@ -144,7 +155,7 @@ watch(
         <p class="note__meta">
           <span>第 {{ note.rev }} 版</span>
           <span>改于 {{ note.modified }}</span>
-          <StorageBadge :protection="note.protection"/>
+          <StorageBadge :protection="note.protection" :title="note.title" :reference="props.reference"/>
         </p>
         <p v-if="note.summary" class="note__summary">{{ note.summary }}</p>
       </header>
@@ -173,16 +184,6 @@ watch(
   background: var(--accent-tint);
   color: var(--text-dim);
   font-size: 13px;
-}
-
-.note__link {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--accent-soft);
-  font: inherit;
-  text-decoration: underline;
-  cursor: pointer;
 }
 
 .note__head {

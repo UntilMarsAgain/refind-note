@@ -61,43 +61,62 @@ function outcomeLabel(resolved: ResolvedAddress | null): string {
 }
 
 /**
- * 一行行的事实。
+ * 一段段的事实。
  *
  * **渲染与复制用的是同一份** —— 否则"看到的"和"抄走的"迟早对不上。
  */
-const facts = computed(() => {
+const sections = computed(() => {
   const tab = props.tab;
   return [
-    { label: "解析结果", value: outcomeLabel(route.value) },
-    { label: "地址模式", value: modeLabel(route.value?.address.mode ?? null) },
-    { label: "规范地址", value: canonicalOf(route.value) || "（无）" },
-    { label: "前端地址栏内容", value: tab?.address || "（空）" },
-    { label: "地址章节", value: sectionOf(route.value) || "（无）" },
     {
-      label: "本页历史",
-      value: tab?.history.length
-        ? `${tab.cursor + 1} / ${tab.history.length}`
-        : "（还没去过任何地方）",
+      title: "这一页",
+      rows: [
+        { label: "解析结果", value: outcomeLabel(route.value) },
+        { label: "地址模式", value: modeLabel(route.value?.address.mode ?? null) },
+        { label: "规范地址", value: canonicalOf(route.value) || "（无）" },
+        { label: "地址章节", value: sectionOf(route.value) || "（无）" },
+        {
+          label: "本页历史",
+          value: tab?.history.length
+            ? `${tab.cursor + 1} / ${tab.history.length}`
+            : "（还没去过任何地方）",
+        },
+      ],
     },
-    { label: "界面缩放", value: `${Math.round(preferences.value.zoom * 100)}%` },
     {
-      label: "深浅色 / 主题色",
-      value: `${preferences.value.theme} · ${preferences.value.accent}`,
+      title: "界面",
+      rows: [
+        { label: "地址栏内容", value: tab?.address || "（空）" },
+        { label: "界面缩放", value: `${Math.round(preferences.value.zoom * 100)}%` },
+        {
+          label: "深浅色 / 主题色",
+          value: `${preferences.value.theme} · ${preferences.value.accent}`,
+        },
+        { label: "宽度限制器", value: preferences.value.limit_width ? "开" : "关" },
+        { label: "标签栏（此刻）", value: railCollapsed.value ? "收起" : "展开" },
+        { label: "标签栏（默认）", value: preferences.value.rail_collapsed ? "收起" : "展开" },
+      ],
     },
-    { label: "宽度限制器", value: preferences.value.limit_width ? "开" : "关" },
-    { label: "标签栏（此刻）", value: railCollapsed.value ? "收起" : "展开" },
-    { label: "标签栏（默认）", value: preferences.value.rail_collapsed ? "收起" : "展开" },
-    { label: "仓库默认保护", value: policyLabel(protection.value) },
     {
-      label: "gpg",
-      value: gpgAvailable.value ? "可用" : "没有 gpg（签名 / 加密不可用）",
+      title: "仓库",
+      rows: [
+        { label: "默认保护", value: policyLabel(protection.value) },
+        {
+          label: "gpg",
+          value: gpgAvailable.value ? "可用" : "没有 gpg（签名 / 加密不可用）",
+        },
+      ],
     },
   ];
 });
 
-/** 抄成「标签：值」一行一条 —— 贴进别处时不用再整理 */
+/** 抄成「分组 / 标签：值」—— 贴进别处时不用再整理 */
 async function copyFacts() {
-  const text = facts.value.map((fact) => `${fact.label}：${fact.value}`).join("\n");
+  const text = sections.value
+    .map((section) =>
+      [`【${section.title}】`, ...section.rows.map((row) => `${row.label}：${row.value}`)].join("\n"),
+    )
+    .join("\n\n");
 
   try {
     await writeText(text);
@@ -114,21 +133,26 @@ async function copyFacts() {
     <header class="debug__head">
       <span class="debug__title">调试信息</span>
       <span class="debug__actions">
-        <button class="debug__icon" type="button" title="复制" aria-label="复制" @click="copyFacts">
-          <Copy :size="13" :stroke-width="2" />
+        <button class="debug__icon" type="button" title="复制全部" aria-label="复制全部" @click="copyFacts">
+          <Copy :size="13" :stroke-width="2"/>
         </button>
         <button class="debug__icon" type="button" title="关闭" aria-label="关闭" @click="$emit('close')">
-          <X :size="13" :stroke-width="2" />
+          <X :size="13" :stroke-width="2"/>
         </button>
       </span>
     </header>
 
-    <dl class="debug__facts">
-      <div v-for="fact in facts" :key="fact.label" class="debug__fact">
-        <dt>{{ fact.label }}</dt>
-        <dd>{{ fact.value }}</dd>
-      </div>
-    </dl>
+    <div class="debug__body">
+      <section v-for="section in sections" :key="section.title" class="debug__section">
+        <h2 class="debug__heading">{{ section.title }}</h2>
+        <dl class="debug__list">
+          <div v-for="row in section.rows" :key="row.label" class="debug__row">
+            <dt class="debug__label">{{ row.label }}</dt>
+            <dd class="debug__value">{{ row.value }}</dd>
+          </div>
+        </dl>
+      </section>
+    </div>
   </section>
 </template>
 
@@ -136,8 +160,8 @@ async function copyFacts() {
 .debug {
   display: flex;
   flex-direction: column;
-  max-width: min(420px, 72vw);
-  max-height: min(60vh, 460px);
+  width: min(420px, 72vw);
+  max-height: min(66vh, 520px);
   border: 1px solid var(--border);
   border-radius: 10px;
   /* 不透明：它压在渲染区上，半透明会让底下的字透上来 */
@@ -186,29 +210,57 @@ async function copyFacts() {
   color: var(--text);
 }
 
-.debug__facts {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 10px 18px;
-  margin: 0;
-  padding: 12px;
+.debug__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 4px 12px 12px;
   overflow-y: auto;
 }
 
-.debug__fact {
-  min-width: 0;
+.debug__section {
+  margin-top: 12px;
 }
 
-.debug__fact dt {
+.debug__heading {
+  margin: 0 0 6px;
   color: var(--text-dim);
   font-size: 11.5px;
+  font-weight: 600;
   letter-spacing: 0.02em;
 }
 
-.debug__fact dd {
-  margin: 2px 0 0;
+.debug__list {
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.debug__row {
+  display: grid;
+  grid-template-columns: minmax(78px, 0.34fr) 1fr;
+  gap: 10px;
+  padding: 5px 10px;
+  /* 偶数行淡淡分一下，一屏里才看得清哪一行配哪一行 */
+  background: var(--bg);
+}
+
+.debug__row:nth-child(even) {
+  background: var(--surface);
+}
+
+.debug__label {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+
+.debug__value {
+  margin: 0;
   color: var(--text);
-  font-size: 12.5px;
+  font-size: 12px;
+  /* 值里可能是长地址：允许换行，并让长串断开而不是撑破面板 */
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
   /* 这些值是要抄下来贴进别处的 */
   -webkit-user-select: text;

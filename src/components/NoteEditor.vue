@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { Check, Save, Trash2, X } from "@lucide/vue";
+import { Check, RotateCcw, Save, Trash2, X } from "@lucide/vue";
 import {
+    policyFrom,
     policyLabel,
     type Draft,
     type Note,
     type Policy,
-    type Protection,
     type Reading,
 } from "../bindings/note.ts";
 import { gpgAvailable, protection } from "../preferences.ts";
@@ -299,15 +299,13 @@ const passphraseDraft = ref("");
 
 const chosenLabel = computed(() => policyLabel(perCommit.value));
 
-/** 某一版是怎么存的 → 这一版默认照那样存 */
-function policyFrom(protection: Protection): Policy {
-    return {
-        compress: protection.compress,
-        gpg_sign: protection.sign,
-        gpg_encrypt: protection.encrypt,
-        symmetric: protection.symmetric,
-    };
-}
+/**
+ * 槽位里那份**还没决定要不要**的草稿。
+ *
+ * 打开编辑器默认看到的是已提交的那一版 —— 草稿是"上次写了一半"，要不要接着写
+ * 得人点头。在决定之前自动保存会让路，免得一敲键盘就把它盖掉。
+ */
+const pendingDraft = ref<Draft | null>(null);
 
 /** 自动保存：停手三秒后把缓冲区写进草稿槽位 */
 const AUTOSAVE_DELAY_MS = 3000;
@@ -444,6 +442,7 @@ async function load() {
     hasNote.value = false;
     locked.value = false;
     wrongPassphrase.value = false;
+    pendingDraft.value = null;
 
     try {
         const reading = await invoke<Reading>("read_note", {
@@ -481,16 +480,13 @@ async function load() {
         return;
     }
 
-    // 上次没提交的草稿要恢复出来，否则自动保存就白做了。
+    // 槽位里有草稿就摆出来问一声，**不直接盖上去**：默认打开的是已提交的那一版。
     // 草稿读不出来不该挡住编辑：它只是缓冲区，正文已经在手里。
     try {
         const draft = await invoke<Draft | null>("load_draft", { title: props.title });
-        if (draft) {
-            hasDraft.value = true;
-            if (draft.markdown !== markdown.value) {
-                markdown.value = draft.markdown;
-                status.value = `已恢复未提交的草稿（${draft.modified}）`;
-            }
+        hasDraft.value = draft !== null;
+        if (draft && draft.markdown !== markdown.value) {
+            pendingDraft.value = draft;
         }
     } catch (error) {
         console.debug("读取草稿失败:", error);
@@ -502,6 +498,10 @@ async function load() {
 /** 写草稿槽位。没改动就不写 —— 后端也挡得住，这里省一次往返 */
 async function saveDraft() {
     if (!hasNote.value || busy.value || loading.value) {
+        return;
+    }
+    // 有一份草稿还没决定要不要：这期间不动槽位，否则一敲键盘就把它盖掉了
+    if (pendingDraft.value) {
         return;
     }
     if (markdown.value === committedMarkdown.value) {
@@ -542,6 +542,23 @@ async function commit() {
     } finally {
         busy.value = false;
     }
+}
+
+/** 恢复槽位里那份草稿：把人写了一半的东西放回编辑器 */
+function restoreDraft() {
+    const draft = pendingDraft.value;
+    if (!draft) {
+        return;
+    }
+    pendingDraft.value = null;
+    markdown.value = draft.markdown;
+    status.value = `已恢复未提交的草稿（${draft.modified}）`;
+}
+
+/** 不要那份草稿：清掉槽位，编辑器留在已提交的这一版 */
+async function discardPending() {
+    pendingDraft.value = null;
+    await discard();
 }
 
 /** 放弃草稿：清掉槽位，回到上一次提交的内容 */
@@ -745,6 +762,21 @@ watch(markdown, (value) => {
           取消
         </button>
       </div>
+    </div>
+
+    <!-- 槽位里有草稿：要不要接着写，点一下说了算。这期间不动槽位 -->
+    <div v-if="pendingDraft" class="editor__draft">
+      <span class="editor__draft-text">
+        槽位里有一份没提交的草稿（{{ pendingDraft.modified }}）。
+        现在打开的是已提交的那一版。
+      </span>
+      <button class="ebtn" type="button" :disabled="busy || loading" @click="restoreDraft">
+        <RotateCcw :size="14" :stroke-width="1.9"/>
+        恢复草稿
+      </button>
+      <button class="ebtn" type="button" :disabled="busy || loading" @click="discardPending">
+        丢弃草稿
+      </button>
     </div>
 
     <p v-if="loading" class="editor__problem">正在读「{{ title }}」…</p>
@@ -1096,6 +1128,26 @@ watch(markdown, (value) => {
 .econf__hint {
   color: var(--text-dim);
   font-size: 11.5px;
+}
+
+/* 草稿待定条：贴在编辑区上面，把"要不要接着写"摆明 */
+.editor__draft {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--accent-soft);
+  border-radius: 6px;
+  background: var(--accent-tint);
+  color: var(--text-dim);
+  font-size: 12.5px;
+}
+
+.editor__draft-text {
+  flex: 1 1 240px;
+  min-width: 0;
 }
 
 /* 打不开时给两条路：去解锁，或者不看旧内容直接写新的一版 */

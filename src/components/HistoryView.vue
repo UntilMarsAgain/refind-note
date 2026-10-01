@@ -17,6 +17,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   /** 要去看某一版 */
   (e: "open-version", rev: number): void;
+  /** 返回这一篇的阅读页 */
+  (e: "cancel"): void;
 }>();
 
 const revisions = ref<RevisionSummary[]>([]);
@@ -51,7 +53,12 @@ const latestRev = computed(() => revisions.value[0]?.rev ?? 0);
 
 <template>
   <div class="history">
-    <h1 class="history__title">「{{ title }}」的历史</h1>
+    <div class="history__head">
+      <h1 class="history__title">「{{ title }}」的历史</h1>
+      <button type="button" class="history__back" @click="emit('cancel')">
+        返回「{{ title }}」
+      </button>
+    </div>
 
     <p v-if="loading" class="history__hint">正在读…</p>
 
@@ -72,7 +79,7 @@ const latestRev = computed(() => revisions.value[0]?.rev ?? 0);
           <span v-if="revision.rev === latestRev" class="history__latest">最新</span>
           <span class="history__at">{{ shortTime(revision.at) }}</span>
           <span class="history__bytes">{{ revision.bytes }} 字节</span>
-          <StorageBadge :protection="revision.protection" />
+          <StorageBadge :protection="revision.protection" :title="title" :reference="String(revision.rev)" />
         </button>
 
         <p v-if="revision.summary" class="history__summary">{{ revision.summary }}</p>
@@ -82,11 +89,38 @@ const latestRev = computed(() => revisions.value[0]?.rev ?? 0);
 </template>
 
 <style scoped>
-.history__title {
+.history__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: baseline;
+  justify-content: space-between;
   margin: 28px 0 12px;
+}
+
+.history__title {
+  margin: 0;
   font-size: 22px;
   font-weight: 600;
   overflow-wrap: anywhere;
+}
+
+.history__back {
+  padding: 5px 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.history__back:hover {
+  border-color: var(--accent-soft);
+  background: var(--accent-tint);
+  color: var(--text);
 }
 
 .history__list {

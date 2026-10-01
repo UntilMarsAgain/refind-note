@@ -73,6 +73,18 @@ export type Reading =
     wrong_passphrase: boolean;
 };
 
+/** 某一版的签名校验报告（没有签名层时后端给 null） */
+export interface SignatureReport {
+    /** 写这一版时指定的签名者（头里记的那个，不一定等于实际签名的那把） */
+    key: string;
+    /** 签名验过了没有 */
+    verified: boolean;
+    /** 本机对签名者公钥的信任程度（人话）；验签没跑起来时是 null */
+    trust: string | null;
+    /** 人话说明：通过时报指纹，没通过时报原因 */
+    detail: string;
+}
+
 /** 一份草稿 */
 export interface Draft {
     markdown: string;
@@ -80,6 +92,16 @@ export interface Draft {
     protection: Protection;
 }
 
+
+/** 某一版是怎么存的 → 照它写下一版（不显式改封装时就是它） */
+export function policyFrom(protection: Protection): Policy {
+    return {
+        compress: protection.compress,
+        gpg_sign: protection.sign,
+        gpg_encrypt: protection.encrypt,
+        symmetric: protection.symmetric,
+    };
+}
 
 /** 把一份策略说成一句话：压过的 / 签过的 / 加密的 / 口令 / 原样（编辑器"存储："那一栏用） */
 export function policyLabel(policy: Policy): string {

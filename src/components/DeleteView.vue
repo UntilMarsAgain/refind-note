@@ -15,7 +15,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   /** 删掉了：上层该换个地方待着 */
   (e: "deleted"): void;
-  /** 不删了 */
+  /** 不删了：回到这篇的阅读页 */
   (e: "cancel"): void;
 }>();
 
@@ -50,7 +50,7 @@ async function confirm() {
 
     <div class="delete__actions">
       <button type="button" class="delete__cancel" :disabled="busy" @click="emit('cancel')">
-        不删了
+        取消
       </button>
       <button type="button" class="delete__confirm" :disabled="busy" @click="confirm">
         {{ busy ? "正在删…" : "删除" }}

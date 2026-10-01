@@ -1,23 +1,52 @@
 <script setup lang="ts">
-import {logoSrc} from "../theme.ts";
-import {ArrowLeft, ArrowRight, Menu, Minus, Copy, Square, X} from "@lucide/vue";
-import {currentWindow} from "../window-api.ts";
-import {onMounted, onUnmounted, ref} from "vue";
+import {
+  computed,
+  onMounted,
+  onUnmounted,
+  ref,
+  type Component,
+} from "vue";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Copy,
+  Menu,
+  Minus,
+  Monitor,
+  Moon,
+  Square,
+  Sun,
+  X,
+} from "@lucide/vue";
+import { logoSrc } from "../theme.ts";
+import { currentWindow } from "../window-api.ts";
+import type { ThemeMode } from "../bindings/settings.ts";
+import { preferences } from "../preferences.ts";
 
+/**
+ * 自绘标题栏。
+ *
+ * 中间是一个「地址栏式」输入框：静止时看起来就是一行窗口标题，聚焦后可编辑。
+ * 依赖 tauri.conf.json 的 `decorations: false`，以及 capabilities 里的
+ * core:window:allow-{minimize,toggle-maximize,close,start-dragging}。
+ */
 const props = defineProps<{
   /** 规范地址（当前标签页解析结果里那一份）。失焦 / Esc 以它回显 */
   committed: string;
-  /** 启动跑完了没有：没跑完之前不显示地址栏与菜单键（那时界面还不是真东西） */
+  /** 启动跑完了没有：没跑完之前不显示地址栏、菜单与主题按钮（那时界面还不是真东西） */
   ready?: boolean;
   canBack?: boolean;
   canForward?: boolean;
 }>();
-const address = defineModel<string>({required: true});
+
+const address = defineModel<string>({ required: true });
 
 const emit = defineEmits<{
   (e: "back"): void;
   (e: "forward"): void;
   (e: "menu"): void;
+  /** 换到下一个深浅色；具体怎么换由上层决定 */
+  (e: "theme"): void;
   /** 用户按下回车：交给持有标签页的一方去解析、导航 */
   (e: "submit", value: string): void;
 }>();
@@ -30,12 +59,22 @@ onMounted(async () => {
     return;
   }
   isMaximized.value = await appWindow.isMaximized();
-  // 绑定系统的窗口最大化状态
+  // 最大化状态会被拖动、双击、系统快捷键改变，必须跟着事件走，
+  // 否则「最大化 / 还原」的图标会停在错误的那一个上
   unlistenResized = await appWindow.onResized(async () => {
     isMaximized.value = await appWindow.isMaximized();
   });
 });
 onUnmounted(() => unlistenResized?.());
+
+/** 循环切换按钮显示当前模式，点一下换到下一个 */
+const themeIcons: Record<ThemeMode, Component> = {
+  system: Monitor,
+  light: Sun,
+  dark: Moon,
+};
+
+const themeIcon = computed(() => themeIcons[preferences.value.theme] ?? Monitor);
 
 const fieldEl = ref<HTMLInputElement | null>(null);
 
@@ -65,10 +104,13 @@ function onBlur() {
 </script>
 
 <template>
-  <div class="titlebar" data-tauri-drag-region="deep">
-    <div class="titlebar-left">
+  <!-- "deep" = 子树内任意位置都能拖动。
+       输入框与按钮属于 Tauri 的 CLICKABLE_TAGS，会自动阻断拖动，所以不必逐个排除。 -->
+  <header class="titlebar" data-tauri-drag-region="deep">
+    <div class="titlebar__start">
       <img class="logo" :src="logoSrc" alt="重逢笔记" draggable="false"/>
       <span class="divider"/>
+
       <button
           class="tbtn"
           type="button"
@@ -78,6 +120,7 @@ function onBlur() {
       >
         <ArrowLeft :size="16" :stroke-width="1.75"/>
       </button>
+
       <button
           class="tbtn"
           type="button"
@@ -87,6 +130,7 @@ function onBlur() {
       >
         <ArrowRight :size="16" :stroke-width="1.75"/>
       </button>
+
       <button
           v-if="ready !== false"
           class="tbtn"
@@ -97,7 +141,8 @@ function onBlur() {
         <Menu :size="16" :stroke-width="1.75"/>
       </button>
     </div>
-    <div v-if="ready !== false" class="titlebar-middle">
+
+    <div v-if="ready !== false" class="titlebar__center">
       <input
           ref="fieldEl"
           v-model="address"
@@ -107,12 +152,29 @@ function onBlur() {
           placeholder="请输入地址"
           :title="address"
           @focus="onFocus"
-          @blur="onBlur"
           @keydown="onKeydown"
+          @blur="onBlur"
       />
     </div>
-    <div class="titlebar-right">
-      <button class="wbtn" type="button" aria-label="最小化" @click="appWindow?.minimize()">
+    <div v-else class="titlebar__center"/>
+
+    <button
+        v-if="ready !== false"
+        class="tbtn tbtn--theme"
+        type="button"
+        aria-label="切换主题"
+        @click="emit('theme')"
+    >
+      <component :is="themeIcon" :size="16" :stroke-width="1.75"/>
+    </button>
+
+    <div class="titlebar__controls">
+      <button
+          class="wbtn"
+          type="button"
+          aria-label="最小化"
+          @click="appWindow?.minimize()"
+      >
         <Minus :size="14"/>
       </button>
       <button
@@ -133,11 +195,10 @@ function onBlur() {
         <X :size="14"/>
       </button>
     </div>
-  </div>
+  </header>
 </template>
 
 <style scoped>
-/* ============ 标题栏基础布局 ============ */
 .titlebar {
   display: flex;
   align-items: center;
@@ -149,111 +210,39 @@ function onBlur() {
   color: var(--text);
   user-select: none;
   -webkit-user-select: none;
-  box-sizing: border-box;
 }
 
-/* 左右两侧固定，中间自适应 */
-.titlebar-left,
-.titlebar-right {
-  display: flex;
-  align-items: stretch;
-  height: 100%;
-  flex-shrink: 0;
-}
-
-.titlebar-middle {
-  flex: 1 1 auto;
-  min-width: 0;
+.titlebar__start {
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 0 12px;
-}
-
-/* ============ 左侧：Logo / 分隔线 / 导航按钮 ============ */
-.titlebar-left {
-  gap: 4px;
+  gap: 2px;
   padding-left: 8px;
 }
 
 .logo {
-  width: 38px; /* 20 / (67/128) ≈ 38 */
-  height: 38px;
-  object-fit: contain;
-  align-self: center;
-  pointer-events: none;
-  margin: -9px 0; /* 抵消多出来的上下留白，避免撑高标题栏 */
+  display: block;
+  width: 20px;
+  height: 20px;
+  margin: 0 2px;
+  -webkit-user-drag: none;
 }
 
 .divider {
   width: 1px;
-  height: 16px;
-  align-self: center;
-  margin: 0 6px;
-  background-color: var(--divider);
-  flex-shrink: 0;
+  height: 18px;
+  margin: 0 8px;
+  background: var(--divider);
 }
 
-/* ============ 通用按钮 ============ */
-.tbtn,
-.wbtn {
-  display: inline-flex;
+.titlebar__center {
+  display: flex;
+  flex: 1 1 auto;
   align-items: center;
   justify-content: center;
-  border: none;
-  background-color: transparent;
-  color: var(--text-dim);
-  cursor: default;
-  padding: 0;
-  height: 100%;
-  border-radius: 0;
-  position: relative;
-  transition: background-color 0.18s ease,
-  color 0.18s ease,
-  transform 0.08s ease;
-  -webkit-app-region: no-drag;
-  will-change: background-color, color;
+  min-width: 0;
+  padding: 0 10px;
 }
 
-/* 图标本身也跟随过渡 */
-.tbtn :deep(svg),
-.wbtn :deep(svg) {
-  transition: color 0.18s ease, transform 0.18s ease;
-}
-
-.tbtn:focus-visible,
-.wbtn:focus-visible {
-  outline: 2px solid var(--border);
-  outline-offset: -2px;
-}
-
-/* ============ 左侧工具按钮 ============ */
-.tbtn {
-  width: 34px;
-}
-
-.tbtn:hover {
-  background-color: var(--hover);
-  color: var(--text);
-}
-
-.tbtn:hover :deep(svg) {
-  transform: scale(1.08);
-}
-
-.tbtn:active {
-  background-color: var(--press);
-  transform: scale(0.96);
-}
-
-.tbtn:disabled {
-  opacity: 0.35;
-  cursor: default;
-  background-color: transparent;
-  transform: none;
-}
-
-/* ============ 中间：地址 / 搜索输入框 ============ */
 /* 静止时看起来就是一行窗口标题；聚焦后才显出输入框的样子。
    尺寸对齐 Chrome：栏高 40px / 地址栏 28px / 文字 14px */
 .field {
@@ -270,8 +259,7 @@ function onBlur() {
   text-overflow: ellipsis;
   outline: none;
   cursor: default;
-  transition: background-color 120ms ease,
-  border-color 120ms ease;
+  transition: background-color 120ms ease, border-color 120ms ease;
 }
 
 .field::placeholder {
@@ -288,49 +276,78 @@ function onBlur() {
   cursor: text;
 }
 
-/* ============ 右侧：窗口控制按钮 ============ */
-.titlebar-right {
-  gap: 0;
+.titlebar__controls {
+  display: flex;
+  align-self: stretch;
+}
+
+.tbtn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--icon);
+  cursor: default;
+}
+
+.tbtn:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.tbtn:active:not(:disabled) {
+  background: var(--press);
+}
+
+.tbtn:disabled {
+  opacity: 0.35;
+}
+
+/* 循环切换按钮紧挨着窗口按钮，但要留一条缝，
+   免得被误认成最小化/最大化那一组 */
+.tbtn--theme {
+  margin-right: 6px;
 }
 
 .wbtn {
-  width: 46px;
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--icon);
+  cursor: default;
+  transition: background-color 120ms ease;
 }
 
 .wbtn:hover {
-  background-color: var(--hover);
-  color: var(--text);
-}
-
-.wbtn:hover :deep(svg) {
-  transform: scale(1.08);
+  background: var(--hover);
 }
 
 .wbtn:active {
-  background-color: var(--press);
-  transform: scale(0.96);
+  background: var(--press);
 }
 
-/* 关闭按钮：悬浮变红，红色也带过渡 */
-.wbtn--close:hover {
-  background-color: var(--accent);
-  color: #fff;
-}
-
+.wbtn--close:hover,
 .wbtn--close:active {
-  background-color: var(--accent-soft);
+  background: var(--accent);
   color: #fff;
 }
 
-/* ============ 减小动画偏好 ============ */
 @media (prefers-reduced-motion: reduce) {
-  .tbtn,
-  .wbtn,
-  .tbtn :deep(svg),
-  .wbtn :deep(svg),
-  .field {
+  .titlebar,
+  .field,
+  .wbtn {
     transition: none;
-    transform: none;
   }
 }
 </style>

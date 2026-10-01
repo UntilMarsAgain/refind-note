@@ -485,6 +485,15 @@ watch(
 }
 
 .row__id {
+  /*
+   * 定宽：锚点标签的长短不一样（`#theme` 短、`#code-line-numbers` 长），
+   * 随内容撑开就会把后面的控件推到不同的位置、整页看着错位。
+   */
+  flex: 0 0 auto;
+  width: 152px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   /* 标签本身就是给人复制用的，别被选中规则拦住 */
   -webkit-user-select: text;
   user-select: text;

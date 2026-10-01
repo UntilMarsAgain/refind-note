@@ -15,6 +15,9 @@ import {
 
 /**
  * 诊断页（`special:debug`）：工作目录、数据库与当前偏好的现状。
+ *
+ * 报告分成几段摊开：段是"哪一块"，行是"哪一项"。**显示与整段复制用的是同一份**，
+ * 否则"看到的"和"抄走的"迟早对不上。
  */
 
 /** 没打开时统一用这个占位 */
@@ -24,6 +27,9 @@ const root = computed(() => workspaceRoot.value || NOT_OPEN);
 const dbDir = computed(() => databaseRoot.value || NOT_OPEN);
 const preferencesFile = computed(() =>
   workspaceRoot.value ? `${workspaceRoot.value}/settings/preferences.json` : NOT_OPEN,
+);
+const configFile = computed(() =>
+  workspaceRoot.value ? `${workspaceRoot.value}/settings/config.json` : NOT_OPEN,
 );
 
 /** 深浅色的显示名 */
@@ -37,11 +43,7 @@ function yesNo(value: boolean): string {
   return value ? "是" : "否";
 }
 
-/**
- * 一份事实，按分组摆好。
- *
- * **渲染与整段复制用的是同一份** —— 否则"看到的"和"抄走的"迟早对不上。
- */
+/** 一份事实，按分组摆好 */
 const sections = computed(() => {
   const meta = databaseMeta.value;
   const prefs = preferences.value;
@@ -50,7 +52,11 @@ const sections = computed(() => {
   return [
     {
       title: "工作目录",
-      rows: [{ label: "位置", value: root.value }],
+      rows: [
+        { label: "位置", value: root.value },
+        { label: "偏好文件", value: preferencesFile.value },
+        { label: "仓库配置", value: configFile.value },
+      ],
     },
     {
       title: "数据库",
@@ -64,7 +70,6 @@ const sections = computed(() => {
     {
       title: "当前偏好",
       rows: [
-        { label: "文件", value: preferencesFile.value },
         { label: "界面缩放", value: `${Math.round(prefs.zoom * 100)}%` },
         { label: "主题色", value: prefs.accent },
         { label: "深浅色", value: THEME_LABELS[prefs.theme] },
@@ -108,111 +113,125 @@ async function copyFacts() {
 </script>
 
 <template>
-  <section class="diag">
-    <div class="diag__head">
-      <h1 class="diag__title">诊断</h1>
-      <button
-        class="diag__copy"
-        type="button"
-        title="整段复制诊断信息"
-        aria-label="整段复制"
-        @click="copyFacts"
-      >
-        <Copy :size="14" :stroke-width="2" />
-        <span>整段复制</span>
+  <section class="debug">
+    <h1 class="debug__title">诊断</h1>
+
+    <p class="debug__lead">
+      这一页把工作目录、数据库、当前偏好与仓库默认保护摊开。报告由内置的信息拼成，
+      复制出去即可整段贴给别人看。
+    </p>
+
+    <div class="debug__actions">
+      <button class="debug__btn debug__btn--primary" type="button" @click="copyFacts">
+        <Copy :size="14" :stroke-width="2"/>
+        复制全部
       </button>
     </div>
 
-    <p class="diag__where">工作目录、数据库与当前偏好的现状</p>
-
-    <template v-for="section in sections" :key="section.title">
-      <h2 class="diag__section">{{ section.title }}</h2>
-      <div v-for="row in section.rows" :key="row.label" class="row">
-        <span class="row__label">{{ row.label }}</span>
-        <code class="row__value">{{ row.value }}</code>
-      </div>
-    </template>
+    <section v-for="section in sections" :key="section.title" class="debug__section">
+      <h2 class="debug__heading">{{ section.title }}</h2>
+      <dl class="debug__list">
+        <div v-for="row in section.rows" :key="row.label" class="debug__row">
+          <dt class="debug__label">{{ row.label }}</dt>
+          <dd class="debug__value">{{ row.value }}</dd>
+        </div>
+      </dl>
+    </section>
   </section>
 </template>
 
 <style scoped>
-.diag {
-  padding: 28px 0 64px;
+.debug {
+  padding-top: 18px;
 }
 
-.diag__head {
+.debug__title {
+  margin: 0;
+  font-size: 1.7em;
+}
+
+.debug__lead {
+  margin: 10px 0 0;
+  color: var(--text-dim);
+  font-size: 0.95em;
+  line-height: 1.7;
+}
+
+.debug__actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 6px;
+  gap: 8px;
+  margin: 14px 0 0;
 }
 
-.diag__title {
-  margin: 0;
-  font-size: 22px;
-}
-
-.diag__copy {
+.debug__btn {
   appearance: none;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 28px;
-  padding: 0 12px;
+  padding: 5px 12px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: transparent;
-  color: var(--text-dim);
-  font-size: 13px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
   cursor: pointer;
 }
 
-.diag__copy:hover {
-  border-color: var(--accent-soft);
+.debug__btn:hover {
   background: var(--hover);
-  color: var(--text);
 }
 
-.diag__where {
-  margin: 0 0 24px;
+.debug__btn--primary {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.debug__section {
+  margin-top: 26px;
+}
+
+.debug__heading {
+  margin: 0 0 8px;
   color: var(--text-dim);
-  font-size: 13px;
+  font-size: 1.05em;
+  font-weight: 600;
 }
 
-.diag__section {
-  margin: 26px 0 12px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--border);
+.debug__list {
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.debug__row {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.32fr) 1fr;
+  gap: 14px;
+  padding: 8px 12px;
+  /* 偶数行淡淡分一下，长报告才看得清哪一行配哪一行 */
+  background: var(--surface);
+}
+
+.debug__row:nth-child(even) {
+  background: var(--bg);
+}
+
+.debug__label {
+  margin: 0;
   color: var(--text-dim);
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 0.92em;
 }
 
-.row {
-  display: flex;
-  align-items: baseline;
-  /* 窄窗口下让"标签 + 值"换行，而不是被裁掉 */
-  flex-wrap: wrap;
-  gap: 12px;
-  margin: 10px 0;
-}
-
-.row__label {
-  min-width: 132px;
-  font-size: 13px;
-}
-
-.row__value {
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--hover);
-  color: var(--text);
+.debug__value {
+  margin: 0;
   font-family: var(--mono-font);
-  font-size: 12px;
+  font-size: 0.92em;
+  /* 值里可能是路径或长串：允许换行，并让长串断开而不是撑破版心 */
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
-  /* 这些路径是要抄下来贴进别处的 */
-  -webkit-user-select: text;
   user-select: text;
+  -webkit-user-select: text;
 }
 </style>

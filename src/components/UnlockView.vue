@@ -23,6 +23,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   /** 口令已交给后端：上层去重读 */
   (e: "unlocked"): void;
+  /** 不解了：回到这一篇的阅读页（它会照旧说"需要口令"） */
+  (e: "cancel"): void;
 }>();
 
 const passphrase = ref("");
@@ -93,6 +95,10 @@ async function submit() {
 
     <p v-if="wrong" class="unlock__error">口令不对，再试一次。</p>
     <p v-if="error" class="unlock__error">{{ error }}</p>
+
+    <button class="unlock__back" type="button" @click="emit('cancel')">
+      返回「{{ title }}」
+    </button>
   </section>
 </template>
 
@@ -172,5 +178,24 @@ async function submit() {
   border-radius: 8px;
   color: var(--text);
   font-size: 13.5px;
+}
+
+/* 不解了就走：回到这一篇（读不出来这件事已经写在标题里了） */
+.unlock__back {
+  margin: 18px 0 0;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.unlock__back:hover {
+  border-color: var(--accent-soft);
+  background: var(--accent-tint);
+  color: var(--text);
 }
 </style>

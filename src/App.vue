@@ -136,6 +136,16 @@ function openNote(title: string) {
   void navigate(title, "push");
 }
 
+/**
+ * 页面上锁时改去 `@unlock`。
+ *
+ * 走**替换**而不是压新记录：从解锁页后退回来会又落到这一页、又被送去解锁，
+ * 来回打转。换掉脚下这条之后，后退回到的还是进来之前那一页。
+ */
+function redirectNote(input: string) {
+  void navigate(input, "replace");
+}
+
 /** 正文里的内部链接被 Ctrl/Cmd 点击：在新标签页打开 */
 function openNoteInNewTab(title: string) {
   void newTabWith(title);
@@ -207,6 +217,21 @@ function afterUnlock() {
   if (title) {
     void navigate(title, "push");
   }
+}
+
+/**
+ * 从解锁页退出来。
+ *
+ * 进这一页时那条记录已经被**替换**掉了（原来那一页读不出来，留着它只会再被送回来），
+ * 所以"退一步"就是后退：回到进来之前待的地方。一整个标签页都是从 `@unlock` 开局的，
+ * 没处可退，就摆到全部页面上让人挑。
+ */
+function leaveUnlock() {
+  if (canGoBack.value) {
+    void goBack();
+    return;
+  }
+  void navigate("special:all", "push");
 }
 
 /**
@@ -301,6 +326,7 @@ onBeforeUnmount(() => {
         @back="goBack"
         @forward="goForward"
         @menu="onMenu"
+        @theme="cycleTheme"
         @submit="onSubmit"
     />
 
@@ -329,6 +355,7 @@ onBeforeUnmount(() => {
             ref="renderPane"
             :tab="active"
             @navigate="openNote"
+            @redirect="redirectNote"
             @navigate-new-tab="openNoteInNewTab"
             @section="openSection"
             @edit-navigate="leaveEditor"
@@ -337,6 +364,7 @@ onBeforeUnmount(() => {
             @create-note="createNote"
             @rolled-back="afterRollback"
             @unlocked="afterUnlock"
+            @unlock-cancel="leaveUnlock"
         />
       </template>
     </div>

@@ -1,6 +1,13 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import {
+  policyFrom,
+  policyLabel,
+  type Policy,
+  type RevisionSummary,
+} from "../bindings/note.ts";
+import { gpgAvailable, protection as repoProtection } from "../preferences.ts";
 
 /**
  * 回退的二次确认页。
@@ -8,6 +15,10 @@ import { invoke } from "@tauri-apps/api/core";
  * 回退**不丢历史** —— 它是把那一版的内容当一个**新提交**写上去，旧记录一条不改。
  * 但它确实会往上写一版，所以不直接执行：与删除一样先落到一页确认上，
  * 而这一页本身也是一个地址（`名称@rollback-版本`）。
+ *
+ * 两条路：
+ * - 重写（默认）：解锁那一版、读出内容、按**这一页选的封装**写新的一版；
+ * - 复制：把那一版的字节原样复制过来，不解锁、不改封装。
  */
 const props = defineProps<{
   title: string;
@@ -18,7 +29,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   /** 回退完成：带上后端刚写下的新版本号，上层据此重读 / 跳转 */
   (e: "rolled-back", rev: number): void;
-  /** 不退了：回到"查看那一版"（本来就是从那里点过来的） */
+  /** 取消：回到"查看那一版"（本来就是从那里点过来的） */
   (e: "cancel"): void;
 }>();
 
@@ -27,6 +38,42 @@ const error = ref("");
 
 /** 复制那一版的封装：新提交指向同一个 blob，不需要解锁 */
 const copy = ref(false);
+
+/**
+ * 新的一版怎么存。
+ *
+ * 默认照这篇**当前**（最新一版）的保护 —— 与编辑页同一条规矩：回退不该顺手换掉封装。
+ * 想换就在这儿显式改，从新这一版起粘住。
+ */
+const perCommit = ref<Policy>({ ...repoProtection.value });
+/** 这一版要套对称层时的口令；交给后端会话后就不再留着 */
+const passphraseDraft = ref("");
+
+const chosenLabel = computed(() => policyLabel(perCommit.value));
+
+/**
+ * 默认值取这篇最新一版的保护。
+ *
+ * 历史清单报得出每一版的封装，**不需要解锁** —— 所以就算当前这一版读不出来，
+ * 也照样说得清"回退时默认照什么存"。
+ */
+async function loadPolicy() {
+  try {
+    const revisions = await invoke<RevisionSummary[]>("list_revisions", {
+      title: props.title,
+    });
+    // 清单是**新的在前**
+    const latest = revisions[0];
+    if (latest) {
+      perCommit.value = policyFrom(latest.protection);
+    }
+  } catch (reason) {
+    // 取不到就照仓库默认；这不该成为"退不回去"的理由
+    console.debug("取这篇的保护失败：", reason);
+  }
+}
+
+onMounted(() => void loadPolicy());
 
 async function confirm() {
   busy.value = true;
@@ -38,6 +85,9 @@ async function confirm() {
       reference: props.reference,
       summary: null,
       copy: copy.value,
+      // 复制那一支整个封装跟着旧版，保护与口令都轮不到它说话
+      protection: copy.value ? null : perCommit.value,
+      passphrase: !copy.value && perCommit.value.symmetric ? passphraseDraft.value || null : null,
     });
     emit("rolled-back", newRev);
   } catch (reason) {
@@ -58,21 +108,68 @@ async function confirm() {
     </p>
 
     <label class="rollback__copy">
-      <input v-model="copy" type="checkbox" />
+      <input v-model="copy" type="checkbox"/>
       <span>
         复制那一版的封装（不解锁）
         <span class="rollback__copy-hint">
           勾选：把那一版的字节原样复制成新的一版，不需要口令；这一篇往后的保护也跟着
-          变成那一版的。不勾选：解锁那一版、读出内容，照这篇当前的保护重写。
+          变成那一版的。不勾选：解锁那一版、读出内容，照下面选的封装重写。
         </span>
       </span>
     </label>
+
+    <p v-if="copy" class="rollback__frozen">
+      封装跟着第 {{ reference }} 版原样走，不用另选。
+    </p>
+
+    <details v-else class="rconf">
+      <summary class="rconf__cap">新封装的存法：{{ chosenLabel }}</summary>
+
+      <div class="rconf__body">
+        <label class="rconf__check">
+          <input v-model="perCommit.compress" type="checkbox"/>
+          压缩
+        </label>
+
+        <label class="rconf__field">
+          签名密钥
+          <input
+              v-model="perCommit.gpg_sign"
+              type="text"
+              placeholder="留空 = 不签"
+              :disabled="!gpgAvailable"
+          />
+        </label>
+
+        <label class="rconf__field">
+          加密密钥
+          <input
+              v-model="perCommit.gpg_encrypt"
+              type="text"
+              placeholder="留空 = 不加密"
+              :disabled="!gpgAvailable"
+          />
+        </label>
+        <p v-if="!gpgAvailable" class="rconf__hint">这台计算机上没有 gpg，签名与加密用不了。</p>
+
+        <label class="rconf__check">
+          <input v-model="perCommit.symmetric" type="checkbox"/>
+          口令加密
+          <span class="rconf__hint">口令只在这次会话里，不落盘</span>
+        </label>
+
+        <label v-if="perCommit.symmetric" class="rconf__field">
+          这一篇的口令
+          <input v-model="passphraseDraft" type="password" placeholder="回退时交给这次会话"/>
+        </label>
+      </div>
+    </details>
 
     <p v-if="error" class="rollback__error">{{ error }}</p>
 
     <div class="rollback__actions">
       <button type="button" class="rollback__cancel" :disabled="busy" @click="emit('cancel')">
-        不退了
+        取消
       </button>
       <button type="button" class="rollback__confirm" :disabled="busy" @click="confirm">
         {{ busy ? "正在回退…" : "回退到这一版" }}
@@ -120,6 +217,70 @@ async function confirm() {
   color: var(--text-dim);
   font-size: 12.5px;
   line-height: 1.7;
+}
+
+.rollback__frozen {
+  margin: 12px 0 0;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+/* 「新封装」这一栏：默认照这篇当前的保护，改了就从新这一版起粘住 */
+.rconf {
+  margin: 16px 0 0;
+}
+
+.rconf__cap {
+  display: inline-block;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.rconf[open] .rconf__cap {
+  border-color: var(--accent-soft);
+  color: var(--text);
+}
+
+.rconf__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 420px;
+  margin: 10px 0 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 12.5px;
+}
+
+.rconf__check,
+.rconf__field {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--text-dim);
+}
+
+.rconf__field input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.rconf__hint {
+  color: var(--text-dim);
+  font-size: 11.5px;
 }
 
 .rollback__error {

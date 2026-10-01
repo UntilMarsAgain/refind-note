@@ -6,6 +6,8 @@ import type { ResolvedAddress } from "./bindings/address.ts";
 export type Movement =
   /** 内部链接、标签栏入口、地址栏回车：都算一次跳转，往历史里推一条 */
   | "push"
+  /** 把**脚下这条**历史记录换掉（重定向走它）：不新增记录，后退仍回得来处 */
+  | "replace"
   /** 后退 / 前进：地址已在历史里，只挪游标 */
   | "history";
 
@@ -242,6 +244,15 @@ export function useTabs() {
       tab.history = tab.history.slice(0, tab.cursor + 1);
       tab.history.push(route.canonical);
       tab.cursor = tab.history.length - 1;
+    } else if (movement === "replace") {
+      // 替换：脚下这条记录改成新地址；长度与游标都不动，
+      // 于是"后退"回到的还是进来之前那一页（上锁重定向正是为了这个）
+      if (tab.cursor < 0) {
+        tab.history = [route.canonical];
+        tab.cursor = 0;
+      } else {
+        tab.history[tab.cursor] = route.canonical;
+      }
     }
 
     return true;

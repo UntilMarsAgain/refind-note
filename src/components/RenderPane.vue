@@ -29,6 +29,8 @@ const props = defineProps<{
 // 正文里的内部链接要换地址，而地址归上层管 —— 渲染区只把意图交出去
 const emit = defineEmits<{
     (e: "navigate", input: string): void;
+    /** 上锁的页面改去 `@unlock`：这是**替换**当前这条记录，不是压新的一条 */
+    (e: "redirect", input: string): void;
     (e: "navigate-new-tab", input: string): void;
     /** 点了正文里的锚点：把章节叠进地址（上层拼输入） */
     (e: "section", section: string): void;
@@ -44,6 +46,8 @@ const emit = defineEmits<{
     (e: "rolled-back", rev: number): void;
     /** 某一页解开了锁：上层把地址换回去 */
     (e: "unlocked"): void;
+    /** 从解锁页退出来：它换掉的那条记录已经不在历史里了，交给上层决定去哪 */
+    (e: "unlock-cancel"): void;
 }>();
 
 /** 权威副本：渲染区的一切都从这里派生 */
@@ -127,6 +131,7 @@ defineExpose({
             :title="noteTitle"
             :reference="mode.ref"
             @navigate="emit('navigate', $event)"
+            @redirect="emit('redirect', $event)"
             @navigate-new-tab="emit('navigate-new-tab', $event)"
             @section="emit('section', $event)"
         />
@@ -142,6 +147,7 @@ defineExpose({
             v-else-if="mode.kind === 'history'"
             :title="noteTitle"
             @open-version="emit('open-version', { title: noteTitle, rev: $event })"
+            @cancel="emit('navigate', noteTitle)"
         />
 
         <DeleteView
@@ -163,7 +169,7 @@ defineExpose({
             v-else-if="mode.kind === 'unlock'"
             :title="noteTitle"
             :reference="mode.ref"
-            @cancel="emit('navigate', noteTitle)"
+            @cancel="emit('unlock-cancel')"
             @unlocked="emit('unlocked')"
         />
       </template>
