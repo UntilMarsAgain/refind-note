@@ -1,20 +1,20 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { Check, ImagePlus, RotateCcw, Save, Trash2, X } from "@lucide/vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
     policyFrom,
-    policyLabel,
     type Draft,
     type Note,
     type Policy,
     type Reading,
 } from "../../bindings/note.ts";
 import type { Uploaded } from "../../bindings/files.ts";
+import StoragePicker from "../StoragePicker.vue";
 import { fileReferenceOf } from "../../view/file-links.ts";
 import { clipboardFiles, uploadPasted } from "../../view/paste-files.ts";
-import { gpgAvailable, protection } from "../../core/preferences.ts";
+import { protection } from "../../core/preferences.ts";
 import { applyLineNumbers, codeLineNumbers, highlightCode } from "../../view/code-blocks.ts";
 import { decorateNoteHtml } from "../../view/note-html.ts";
 // `codemirror` 是元包（提供 basicSetup 等），EditorState 由 @codemirror/state 提供 ——
@@ -78,8 +78,6 @@ const perCommit = ref<Policy>({ ...protection.value });
 
 /** 这一篇的口令。只在这次提交要套对称层时用得上；交给后端会话后就不再留着。 */
 const passphraseDraft = ref("");
-
-const chosenLabel = computed(() => policyLabel(perCommit.value));
 
 /**
  * 槽位里那份**还没决定要不要**的草稿。
@@ -530,50 +528,7 @@ watch(markdown, (value) => {
       />
 
       <div class="editor__actions">
-        <details class="econf">
-          <summary class="ecap" title="本版的存储方式；修改后此笔记将沿用新的方式">
-            存储：{{ chosenLabel }}
-          </summary>
-
-          <div class="econf__body">
-            <label class="econf__check">
-              <input v-model="perCommit.compress" type="checkbox"/>
-              压缩
-            </label>
-
-            <label class="econf__field">
-              签名密钥
-              <input
-                  v-model="perCommit.gpg_sign"
-                  type="text"
-                  placeholder="留空表示不签名"
-                  :disabled="!gpgAvailable"
-              />
-            </label>
-
-            <label class="econf__field">
-              加密密钥
-              <input
-                  v-model="perCommit.gpg_encrypt"
-                  type="text"
-                  placeholder="留空表示不加密"
-                  :disabled="!gpgAvailable"
-              />
-            </label>
-            <p v-if="!gpgAvailable" class="econf__hint">本机未安装 gpg，签名与加密不可用。</p>
-
-            <label class="econf__check">
-              <input v-model="perCommit.symmetric" type="checkbox"/>
-              口令加密
-              <span class="econf__hint">口令仅用于本次会话，不写入磁盘</span>
-            </label>
-
-            <label v-if="perCommit.symmetric" class="econf__field">
-              口令
-              <input v-model="passphraseDraft" type="password" placeholder="本次会话中使用"/>
-            </label>
-          </div>
-        </details>
+        <StoragePicker v-model:policy="perCommit" v-model:passphrase="passphraseDraft"/>
 
         <button
             class="ebtn"
@@ -946,77 +901,6 @@ watch(markdown, (value) => {
   font-size: 13px;
 }
 
-/* 「存储」这一项：折叠起来的完整配置。默认值来自这篇当前的保护，这里改只影响这一版起 */
-.econf {
-  position: relative;
-}
-
-.ecap {
-  list-style: none;
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  padding: 5px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text-dim);
-  font-size: 12.5px;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.ecap::-webkit-details-marker {
-  display: none;
-}
-
-.econf[open] .ecap {
-  border-color: var(--accent-soft);
-  color: var(--text);
-}
-
-.econf__body {
-  position: absolute;
-  z-index: 5;
-  top: calc(100% + 6px);
-  right: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 300px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
-  font-size: 12.5px;
-}
-
-.econf__check,
-.econf__field {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  color: var(--text-dim);
-}
-
-.econf__field input {
-  flex: 1;
-  min-width: 0;
-  padding: 5px 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--text);
-  font: inherit;
-  font-size: 12.5px;
-}
-
-.econf__hint {
-  color: var(--text-dim);
-  font-size: 11.5px;
-}
-
-/* 草稿待定条：贴在编辑区上面，把"要不要接着写"摆明 */
 .editor__draft {
   display: flex;
   flex-wrap: wrap;

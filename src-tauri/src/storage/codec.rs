@@ -132,6 +132,10 @@ pub struct Inspection {
 pub struct SignatureReport {
     /// 签名者密钥标识（**写这一版时指定的**那一把，记在头里）
     pub key: String,
+    /// 这一把在钥匙串里的主用户标识（`姓名 <邮箱>`）；本机没有这把钥匙就是 `None`
+    ///
+    /// 指纹是**唯一**的标识，但人认不出它 —— 界面上要写得出"这是谁签的"。
+    pub uid: Option<String>,
     /// 签名验过了没有
     pub verified: bool,
     /// 本地钥匙串对签名者公钥的信任程度（人话）。
@@ -148,6 +152,8 @@ pub struct SignatureReport {
 pub struct EncryptionReport {
     /// 写这一版时指定的加密密钥（头里记的那个）
     pub key: String,
+    /// 这一把在钥匙串里的主用户标识（`姓名 <邮箱>`）；本机没有这把钥匙就是 `None`
+    pub uid: Option<String>,
     /// 本机有没有对应的**私钥** —— 有才解得开
     pub secret: bool,
     /// 人话说明
@@ -371,6 +377,7 @@ pub fn signature_report(file: &[u8], secrets: &Secrets<'_>) -> Result<Option<Sig
                 return Ok(Some(match gpg_verify(&payload, &raw) {
                     Ok(outcome) => SignatureReport {
                         key: key.clone(),
+                        uid: key_uid(key),
                         verified: outcome.verified,
                         trust: Some(outcome.trust),
                         detail: outcome.detail,
@@ -378,6 +385,7 @@ pub fn signature_report(file: &[u8], secrets: &Secrets<'_>) -> Result<Option<Sig
                     // 验签这步自己就没跑起来（没有 gpg、钥匙串读不动）：如实说，不当成"签名不对"
                     Err(error) => SignatureReport {
                         key: key.clone(),
+                        uid: key_uid(key),
                         verified: false,
                         trust: None,
                         detail: error.to_string(),
@@ -412,6 +420,7 @@ pub fn encryption_report(key: &str) -> Result<EncryptionReport> {
 
     Ok(EncryptionReport {
         key: key.to_string(),
+        uid: key_uid(key),
         secret,
         detail,
     })
@@ -765,6 +774,30 @@ fn gpg_verify(content: &[u8], signature: &[u8]) -> Result<VerifyOutcome> {
 }
 
 /// 本地对签名者公钥的信任程度 → 人话
+/// 一条用户标识 → `姓名 <邮箱>`：缺哪一半就给另一半，两样都没有就不算一条。
+///
+/// 放在这里是因为两个地方都要用：密钥列表（`features::keys`）与"这一版是谁签的"
+/// （签名 / 加密报告）—— 同一条标识在两处必须长得一样。
+pub fn uid_text(uid: gpgme::UserId<'_>) -> Option<String> {
+    let name = uid.name().ok().unwrap_or_default();
+    let email = uid.email().ok().unwrap_or_default();
+    match (name.is_empty(), email.is_empty()) {
+        (false, false) => Some(format!("{name} <{email}>")),
+        (false, true) => Some(name.to_string()),
+        (true, false) => Some(format!("<{email}>")),
+        (true, true) => None,
+    }
+}
+
+/// 钥匙串里这一把的**主**用户标识；查不到（没装 gpg、钥匙串里没有它）就是 `None`。
+///
+/// 只读公开信息，不解锁、不动私钥。
+pub fn key_uid(key_id: &str) -> Option<String> {
+    let mut context = gpg_context().ok()?;
+    let key = context.get_key(key_id).ok()?;
+    key.user_ids().find_map(uid_text)
+}
+
 pub(crate) fn trust_label(validity: gpgme::Validity) -> String {
     match validity {
         gpgme::Validity::Unknown => "本机没有这把公钥".to_string(),

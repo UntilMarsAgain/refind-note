@@ -62,13 +62,7 @@ pub fn list() -> Result<Vec<GpgKey>, String> {
 
         let uids: Vec<String> = key
             .user_ids()
-            .filter_map(|uid| {
-                Some(match (uid.name().ok(), uid.email().ok()) {
-                    (Some(name), Some(email)) if !email.is_empty() => format!("{name} <{email}>"),
-                    (Some(name), _) if !name.is_empty() => name.to_string(),
-                    _ => return None,
-                })
-            })
+            .filter_map(crate::storage::codec::uid_text)
             .collect();
 
         // 创建与过期记在**主钥匙**上（`Key` 自己不直接给这两个时间）

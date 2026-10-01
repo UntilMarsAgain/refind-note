@@ -64,6 +64,24 @@ const label = computed(() =>
 const openedKey = ref<string | null>(null);
 
 /** 封装细节。点开才去问，问过一次就留着 —— 同一版的事实不会变 */
+/** 指纹太长，一行里只留首尾 */
+function short(fingerprint: string): string {
+  return fingerprint.length > 16
+    ? `${fingerprint.slice(0, 8)}…${fingerprint.slice(-8)}`
+    : fingerprint;
+}
+
+/**
+ * "这是谁"那一栏怎么写。
+ *
+ * 指纹是唯一的标识，可人认不出来 —— 本机钥匙串里有这一把就写**姓名 <邮箱>**，
+ * 指纹缩成首尾跟在后面（要完整的那一份去密钥页抄）；本机没有就只剩指纹，
+ * 那时它确实是唯一能说的东西。
+ */
+function whoOf(uid: string | null, key: string): string {
+  return uid ? `${uid}（${short(key)}）` : key;
+}
+
 const report = ref<ProtectionReport | null>(null);
 const problem = ref("");
 const asking = ref(false);
@@ -175,7 +193,7 @@ const rows = computed<{ label: string; value: string }[]>(() => {
         return [
           { label: "校验", value: found.signature.verified ? "签名有效" : "签名无效" },
           { label: "信任", value: found.signature.trust ?? "未查明" },
-          { label: "签名者", value: found.signature.key },
+          { label: "签名者", value: whoOf(found.signature.uid, found.signature.key) },
           { label: "说明", value: found.signature.detail },
         ];
       }
@@ -189,7 +207,7 @@ const rows = computed<{ label: string; value: string }[]>(() => {
         return [{ label: "校验", value: "这一版没有加密" }];
       }
       return [
-        { label: "加密到", value: found.encryption.key },
+        { label: "加密到", value: whoOf(found.encryption.uid, found.encryption.key) },
         { label: "本机", value: found.encryption.detail },
       ];
     }

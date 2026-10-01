@@ -91,6 +91,8 @@ export type Reading =
 export interface SignatureReport {
     /** 写这一版时指定的签名者（头里记的那个，不一定等于实际签名的那把） */
     key: string;
+    /** 这一把在本机钥匙串里的姓名 <邮箱>；本机没有这把钥匙时是 null */
+    uid: string | null;
     /** 签名验过了没有 */
     verified: boolean;
     /** 本机对签名者公钥的信任程度（人话）；验签没跑起来时是 null */
@@ -103,6 +105,8 @@ export interface SignatureReport {
 export interface EncryptionReport {
     /** 写这一版时指定的加密密钥（头里记的那个） */
     key: string;
+    /** 这一把在本机钥匙串里的姓名 <邮箱>；本机没有这把钥匙时是 null */
+    uid: string | null;
     /** 本机有没有对应的私钥 —— 有才解得开 */
     secret: boolean;
     /** 人话说明 */

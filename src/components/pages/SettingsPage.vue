@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { flash } from "../../core/notice.ts";
 import type { Policy } from "../../bindings/note.ts";
+import KeyChooser from "../KeyChooser.vue";
 import NamespaceManager from "./NamespaceManager.vue";
 import type { ThemeMode } from "../../bindings/settings.ts";
 import {
@@ -162,24 +163,14 @@ function toggleSymmetric(event: Event) {
   });
 }
 
-/** 空串 = 不用这一层，所以统一成 null */
-function keyOrNothing(value: string): string | null {
-  const trimmed = value.trim();
-  return trimmed === "" ? null : trimmed;
+/** 挑了签名密钥（`null` = 不签名）。默认策略跟着仓库走，改完立刻写盘 */
+function setSign(value: string | null) {
+  void setProtection({ ...protection.value, gpg_sign: value });
 }
 
-function setSign(event: Event) {
-  void setProtection({
-    ...protection.value,
-    gpg_sign: keyOrNothing((event.target as HTMLInputElement).value),
-  });
-}
-
-function setEncrypt(event: Event) {
-  void setProtection({
-    ...protection.value,
-    gpg_encrypt: keyOrNothing((event.target as HTMLInputElement).value),
-  });
+/** 挑了加密密钥（`null` = 不加密） */
+function setEncrypt(value: string | null) {
+  void setProtection({ ...protection.value, gpg_encrypt: value });
 }
 
 /** 从内到外说清这份策略会怎么存；什么都没做就是"原样" */
@@ -469,13 +460,12 @@ watch(
     >
       <span class="row__label">GPG 签名</span>
       <code class="row__id">#storage-sign</code>
-      <input
+      <KeyChooser
         class="row__text"
-        type="text"
-        placeholder="签名密钥（留空表示不签名），如 me@example.com"
-        :value="protection.gpg_sign ?? ''"
+        :model-value="protection.gpg_sign"
+        empty-label="不签名"
         :disabled="!gpgAvailable"
-        @change="setSign"
+        @update:model-value="setSign"
       />
       <span v-if="!gpgAvailable" class="row__hint">本机未安装 gpg，签名不可用</span>
     </div>
@@ -487,13 +477,12 @@ watch(
     >
       <span class="row__label">GPG 加密</span>
       <code class="row__id">#storage-encrypt</code>
-      <input
+      <KeyChooser
         class="row__text"
-        type="text"
-        placeholder="加密使用的密钥（留空表示不加密）"
-        :value="protection.gpg_encrypt ?? ''"
+        :model-value="protection.gpg_encrypt"
+        empty-label="不加密"
         :disabled="!gpgAvailable"
-        @change="setEncrypt"
+        @update:model-value="setEncrypt"
       />
       <span v-if="!gpgAvailable" class="row__hint">本机未安装 gpg，加密不可用</span>
     </div>

@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { KeyRound, Upload } from "@lucide/vue";
 import { flash } from "../../core/notice.ts";
+import { shortFingerprint, type GpgKey } from "../../bindings/keys.ts";
 import { gpgAvailable, protection, setProtection } from "../../core/preferences.ts";
 
 /**
@@ -15,18 +16,6 @@ import { gpgAvailable, protection, setProtection } from "../../core/preferences.
  *
  * 私钥不会离开密钥环：本页只读公开信息，也不生成密钥。
  */
-interface GpgKey {
-  fingerprint: string;
-  uids: string[];
-  trust: string;
-  secret: boolean;
-  can_sign: boolean;
-  can_encrypt: boolean;
-  created: string;
-  expires: string;
-  expired: boolean;
-}
-
 const keys = ref<GpgKey[]>([]);
 const loading = ref(false);
 const busy = ref(false);
@@ -157,12 +146,8 @@ async function remove(key: GpgKey) {
   }
 }
 
-/** 指纹太长，界面上只显示首尾；要整条就复制 */
-function short(fingerprint: string): string {
-  return fingerprint.length > 16
-    ? `${fingerprint.slice(0, 8)}…${fingerprint.slice(-8)}`
-    : fingerprint;
-}
+/* 指纹太长，界面上只显示首尾；要整条就复制（那一行本身是可选的文字） */
+const short = shortFingerprint;
 
 function when(at: string): string {
   if (!at) {
