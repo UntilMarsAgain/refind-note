@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { ClockArrowDown, Pencil, RotateCcw, Trash } from "@lucide/vue";
+import { ArrowLeft, History, RotateCcw } from "@lucide/vue";
 import type { Note, Reading } from "../bindings/note.ts";
+import { parentOf } from "../title.ts";
 import NoteContent from "./NoteContent.vue";
+import PageHeader, { type PageAction } from "./PageHeader.vue";
 import StorageBadge from "./StorageBadge.vue";
 
 /**
@@ -22,6 +24,8 @@ const props = defineProps<{
     title: string;
     /** 读哪一版（地址里的版本 token）；null 就是最新一版 */
     reference: string | null;
+    /** 正文滚下去了：页头收起成一条细栏 */
+    collapsed: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -44,6 +48,49 @@ const loading = ref(false);
 
 /** 看的是不是一个旧版本（用来决定要不要提示"这不是最新版"） */
 const older = () => props.reference !== null && Number(props.reference) !== note.value?.rev;
+
+/**
+ * 页头的动作。
+ *
+ * 看最新版时用页头自带那三个（编辑 / 版本历史 / 删除）；看旧版本时是**另一套** ——
+ * 那一版是只读的，能做的只有"回去""把这一版重新提上去""看看历史"。
+ */
+const headerActions = computed<PageAction[] | undefined>(() => {
+    const found = note.value;
+    if (!found || props.reference === null) {
+        return undefined;
+    }
+    return [
+        { name: "back", label: `返回「${found.title}」`, icon: ArrowLeft },
+        { name: "rollback", label: "回退到这一版", icon: RotateCcw },
+        { name: "history", label: "版本历史", icon: History },
+    ];
+});
+
+/** 页头按下的动作名 → 地址（拼输入；规范地址仍由后端解析出来） */
+function onAction(name: string) {
+    const found = note.value;
+    if (!found) {
+        return;
+    }
+    switch (name) {
+        case "edit":
+            emit("navigate", `${found.title}@edit`);
+            break;
+        case "history":
+            emit("navigate", `${found.title}@history`);
+            break;
+        case "delete":
+            emit("navigate", `${found.title}@delete`);
+            break;
+        case "back":
+            emit("navigate", found.title);
+            break;
+        case "rollback":
+            emit("navigate", `${found.title}@rollback-${props.reference}`);
+            break;
+    }
+}
 
 async function load() {
     loading.value = true;
@@ -92,66 +139,20 @@ watch(
     <p v-else-if="error" class="note__error">{{ error }}</p>
 
     <template v-else-if="note">
+      <PageHeader
+          :title="note.title"
+          :parent="parentOf(note.title)"
+          :collapsed="props.collapsed"
+          :actions="headerActions"
+          @action="onAction"
+          @open-parent="emit('navigate', $event)"
+      />
+
       <p v-if="older()" class="note__older">
         这是第 {{ note.rev }} 版，不是最新版。
       </p>
 
       <header class="note__head">
-        <div class="note__line">
-          <h1 class="note__title">{{ note.title }}</h1>
-
-          <div class="note__actions">
-            <button
-                v-if="props.reference !== null"
-                type="button"
-                class="note__action"
-                title="回到这一篇"
-                @click="emit('navigate', note.title)"
-            >
-              返回「{{ note.title }}」
-            </button>
-            <button
-                v-if="props.reference === null"
-                type="button"
-                class="note__action"
-                title="编辑这一篇"
-                @click="emit('navigate', `${note.title}@edit`)"
-            >
-              <Pencil :size="14" :stroke-width="1.9"/>
-              编辑
-            </button>
-            <button
-                type="button"
-                class="note__action"
-                title="看这一篇的所有版本"
-                @click="emit('navigate', `${note.title}@history`)"
-            >
-              <ClockArrowDown :size="14" :stroke-width="1.9"/>
-              历史
-            </button>
-            <button
-                v-if="props.reference === null"
-                type="button"
-                class="note__action note__action--danger"
-                title="删除这一篇（日志会挪进回收站，还能捞回来）"
-                @click="emit('navigate', `${note.title}@delete`)"
-            >
-              <Trash :size="14" :stroke-width="1.9"/>
-              删除
-            </button>
-            <button
-                v-if="props.reference !== null"
-                type="button"
-                class="note__action"
-                title="把这一版的内容作为新的一版写上去"
-                @click="emit('navigate', `${note.title}@rollback-${props.reference}`)"
-            >
-              <RotateCcw :size="14" :stroke-width="1.9"/>
-              回退到这一版
-            </button>
-          </div>
-        </div>
-
         <p class="note__meta">
           <span>第 {{ note.rev }} 版</span>
           <span>改于 {{ note.modified }}</span>
@@ -177,7 +178,7 @@ watch(
   flex-wrap: wrap;
   gap: 0 6px;
   align-items: center;
-  margin: 20px 0 0;
+  margin: 12px 0 0;
   padding: 8px 12px;
   border-left: 3px solid var(--accent-soft);
   border-radius: 6px;
@@ -186,63 +187,9 @@ watch(
   font-size: 13px;
 }
 
+/* 页头（标题与动作）现在归 PageHeader；这里只剩标题下面那几行事实 */
 .note__head {
-  padding: 28px 0 8px;
-}
-
-/* 标题占满剩下的宽度，动作按钮靠右 —— 长标题换行时按钮不会被挤走 */
-.note__line {
-  display: flex;
-  gap: 12px;
-  align-items: baseline;
-  justify-content: space-between;
-}
-
-.note__actions {
-  display: flex;
-  flex: none;
-  gap: 6px;
-}
-
-.note__action {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  padding: 5px 11px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--text-dim);
-  font: inherit;
-  font-size: 12.5px;
-  line-height: 1.3;
-  white-space: nowrap;
-  cursor: pointer;
-  transition:
-      background-color 120ms ease,
-      color 120ms ease,
-      border-color 120ms ease;
-}
-
-.note__action:hover {
-  border-color: var(--accent-soft);
-  background: var(--accent-tint);
-  color: var(--text);
-}
-
-/* 只有"删除"用危险色，免得一串按钮里看不出哪个是破坏性的 */
-.note__action--danger:hover {
-  border-color: var(--danger);
-  background: transparent;
-  color: var(--danger);
-}
-
-.note__title {
-  margin: 0;
-  font-size: 26px;
-  font-weight: 600;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
+  padding: 4px 0 8px;
 }
 
 .note__meta {

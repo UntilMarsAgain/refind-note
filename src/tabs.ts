@@ -32,6 +32,14 @@ export interface TabState {
 
 const NEW_TAB_TITLE = "新标签页";
 
+/**
+ * 新标签页落到哪儿。
+ *
+ * 它本身就是一个地址（`special:newtab`），不是"没有地址" —— 所以地址栏一开就有东西，
+ * 后退也回得到一个真实的地方。
+ */
+const NEW_TAB_ADDRESS = "special:newtab";
+
 /** 关掉的标签页最多记这么多个，够 Ctrl+Shift+T 退回来就行 */
 const CLOSED_LIMIT = 24;
 
@@ -44,10 +52,11 @@ function nextId(): string {
 }
 
 /**
- * 创建一个新标签页，与浏览器一致，光标停在地址栏里等输入。
+ * 创建一个新标签页的**空壳**，与浏览器一致，光标停在地址栏里等输入。
  *
  * 历史是空的、游标是 `-1`：这个标签页还没去过任何地方。
  * 不能拿空串占一条 —— 空串不是地址，能按的后退按不动。
+ * 落到新标签页那一页是 [`useTabs::newTab`] 的事：那要问后端，是导航。
  */
 export function createTab(): TabState {
   return {
@@ -104,14 +113,15 @@ export function useTabs() {
     }
   }
 
-  function newTab(): void {
+  async function newTab(): Promise<void> {
     tabs.value.push(createTab());
     activeIndex.value = tabs.value.length - 1;
+    await navigate(NEW_TAB_ADDRESS, "push");
   }
 
   /** 在新标签页里打开某个地址：先建一个空标签页，再让它导航过去 */
   async function newTabWith(address: string): Promise<void> {
-    newTab();
+    await newTab();
     await navigate(address, "push");
   }
 
@@ -129,7 +139,7 @@ export function useTabs() {
    * 新建那一个要抖一下：关闭**是**生效了，只是又开了一个；
    * 不抖的话，点了关闭、界面看着没什么变化，用户会以为没反应。
    */
-  function close(index: number): void {
+  async function close(index: number): Promise<void> {
     const closing = tabs.value[index];
     if (closing) {
       remember(closing);
@@ -139,6 +149,7 @@ export function useTabs() {
       tabs.value = [createTab()];
       activeIndex.value = 0;
       shakeTick.value += 1;
+      await navigate(NEW_TAB_ADDRESS, "push");
       return;
     }
 

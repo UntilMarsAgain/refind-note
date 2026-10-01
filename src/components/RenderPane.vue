@@ -38,6 +38,8 @@ const emit = defineEmits<{
     (e: "edit-navigate", input: string): void;
     /** 要看历史里的某一版。地址由上层拼 —— 渲染区不自己拼地址 */
     (e: "open-version", payload: { title: string; rev: number }): void;
+    /** 要回退到历史里的某一版（同样是让上层拼地址） */
+    (e: "rollback-version", payload: { title: string; rev: number }): void;
     /** 删掉了：上层该换个地方待着 */
     (e: "deleted"): void;
     /** 请求建立某一篇笔记（"还不存在"那一页上的按钮） */
@@ -83,12 +85,26 @@ const limited = computed(() => preferences.value.limit_width);
 /** 滚动容器。滚动位置也属于"这个标签页的浏览状态"，所以存进标签页自己 */
 const scroller = ref<HTMLElement | null>(null);
 
+/**
+ * 页头收起没有：正文滚过一点就收成一条细栏。
+ *
+ * 两个阈值（收起 32 / 展开 12）是**迟滞**：收起后页头变矮、正文跟着上移，
+ * 用一个阈值就会在边界上抖个不停。
+ */
+const collapsed = ref(false);
+
+function syncCollapsed(top: number) {
+    collapsed.value = collapsed.value ? top > 12 : top > 32;
+}
+
 // 切标签页：还原它上次停下的位置。状态在标签页里，这里只是"读出来用"。
 watch(
     () => props.tab?.id,
     async () => {
         await nextTick();
-        scroller.value?.scrollTo(0, props.tab?.scroll ?? 0);
+        const top = props.tab?.scroll ?? 0;
+        scroller.value?.scrollTo(0, top);
+        collapsed.value = top > 32;
     },
     { immediate: true },
 );
@@ -97,6 +113,7 @@ function onScroll() {
     if (props.tab && scroller.value) {
         props.tab.scroll = scroller.value.scrollTop;
     }
+    syncCollapsed(scroller.value?.scrollTop ?? 0);
 }
 
 /** 右下角那组按钮要能滚动渲染区，而滚动容器在这里 */
@@ -130,6 +147,7 @@ defineExpose({
             :key="`${noteTitle}@${mode.ref ?? ''}`"
             :title="noteTitle"
             :reference="mode.ref"
+            :collapsed="collapsed"
             @navigate="emit('navigate', $event)"
             @redirect="emit('redirect', $event)"
             @navigate-new-tab="emit('navigate-new-tab', $event)"
@@ -147,6 +165,7 @@ defineExpose({
             v-else-if="mode.kind === 'history'"
             :title="noteTitle"
             @open-version="emit('open-version', { title: noteTitle, rev: $event })"
+            @rollback="emit('rollback-version', { title: noteTitle, rev: $event })"
             @cancel="emit('navigate', noteTitle)"
         />
 
@@ -169,6 +188,7 @@ defineExpose({
             v-else-if="mode.kind === 'unlock'"
             :title="noteTitle"
             :reference="mode.ref"
+            @navigate="emit('navigate', $event)"
             @cancel="emit('unlock-cancel')"
             @unlocked="emit('unlocked')"
         />

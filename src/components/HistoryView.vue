@@ -17,6 +17,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   /** 要去看某一版 */
   (e: "open-version", rev: number): void;
+  /** 把某一版重新提上去（回退页） */
+  (e: "rollback", rev: number): void;
   /** 返回这一篇的阅读页 */
   (e: "cancel"): void;
 }>();
@@ -70,17 +72,31 @@ const latestRev = computed(() => revisions.value[0]?.rev ?? 0);
 
     <ol v-else class="history__list">
       <li v-for="revision in revisions" :key="revision.rev" class="history__item">
-        <button
-          type="button"
-          class="history__open"
-          @click="emit('open-version', revision.rev)"
-        >
-          <span class="history__rev">第 {{ revision.rev }} 版</span>
-          <span v-if="revision.rev === latestRev" class="history__latest">最新</span>
-          <span class="history__at">{{ shortTime(revision.at) }}</span>
-          <span class="history__bytes">{{ revision.bytes }} 字节</span>
-          <StorageBadge :protection="revision.protection" :title="title" :reference="String(revision.rev)" />
-        </button>
+        <div class="history__row">
+          <button
+            type="button"
+            class="history__open"
+            @click="emit('open-version', revision.rev)"
+          >
+            <span class="history__rev">第 {{ revision.rev }} 版</span>
+            <span v-if="revision.rev === latestRev" class="history__latest">最新</span>
+            <span class="history__at">{{ shortTime(revision.at) }}</span>
+            <span class="history__bytes">{{ revision.bytes }} 字节</span>
+            <StorageBadge :protection="revision.protection" :title="title" :reference="String(revision.rev)" />
+          </button>
+
+          <!-- 回退到最新版没有意义，所以那一行不给这个出口。
+               这一条路**不用先读得懂这一版**：回退页自己会解锁（或整份复制） -->
+          <button
+            v-if="revision.rev !== latestRev"
+            type="button"
+            class="history__rollback"
+            title="把这一版的内容当成新的一版写上去"
+            @click="emit('rollback', revision.rev)"
+          >
+            回退
+          </button>
+        </div>
 
         <p v-if="revision.summary" class="history__summary">{{ revision.summary }}</p>
       </li>
@@ -133,8 +149,16 @@ const latestRev = computed(() => revisions.value[0]?.rev ?? 0);
   border-bottom: 1px solid var(--border);
 }
 
+.history__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .history__open {
   display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
   flex-wrap: wrap;
   gap: 4px 12px;
   align-items: center;
@@ -156,6 +180,27 @@ const latestRev = computed(() => revisions.value[0]?.rev ?? 0);
 
 .history__rev {
   font-weight: 600;
+}
+
+/* 「回退」贴着行尾：它与"打开这一版"是两件事，做成两枚按钮免得点错 */
+.history__rollback {
+  flex: 0 0 auto;
+  margin-right: 8px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.history__rollback:hover {
+  border-color: var(--accent-soft);
+  background: var(--accent-tint);
+  color: var(--text);
 }
 
 .history__latest {

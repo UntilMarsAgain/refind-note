@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { Check, ShieldAlert, TriangleAlert } from "@lucide/vue";
-import type { Protection, SignatureReport } from "../bindings/note.ts";
+import type { Protection, ProtectionReport } from "../bindings/note.ts";
 
 /**
  * 这一页在磁盘上是怎么存的。
@@ -10,25 +9,25 @@ import type { Protection, SignatureReport } from "../bindings/note.ts";
  * 值全部来自 blob 的**明文头**，所以不解锁就能显示 —— "这一页是加密的"这件事
  * 不该等人输了口令才知道。
  *
- * 每一层各给一枚徽章，从内到外排开；带 gpg 加密或口令时标出"封"的样子：
- * 扫一眼就知道这页的字节不是明文。
- *
- * 签名那一枚还回答"这个签名还算不算数"：给了 `title` 就问后端验一次，
- * 结论（过没过、本机信不信那把公钥）直接写在徽章上，点开才展开细节。
+ * 徽章只说"有什么层"（已压缩 / 已签名 / 已加密 / 口令加密），一句话一枚；
+ * 细节（谁签的、验过没有、本机解不解得开）**点开才问后端** —— 那是要花时间的活，
+ * 不该在列一张历史清单时替每一行都做一遍。
  */
 const props = defineProps<{
   protection: Protection;
-  /** 哪一篇：给了才问得动后端"这个签名还算不算数" */
+  /** 哪一篇：给了才问得动后端那些细节 */
   title?: string;
   /** 哪一版（地址里的版本 token）；不给或 null = 最新版 */
   reference?: string | null;
 }>();
 
 interface Layer {
-  key: string;
+  key: "compress" | "sign" | "encrypt" | "symmetric";
   label: string;
   /** 这一层让字节不再是明文 */
   sealed: boolean;
+  /** 点开有细节可看（压缩没有） */
+  reportable: boolean;
 }
 
 const layers = computed<Layer[]>(() => {
@@ -36,17 +35,16 @@ const layers = computed<Layer[]>(() => {
   const found: Layer[] = [];
 
   if (protection.compress) {
-    found.push({ key: "compress", label: "压缩", sealed: false });
+    found.push({ key: "compress", label: "已压缩", sealed: false, reportable: false });
   }
   if (protection.sign) {
-    // 把密钥标识写出来：只说"有签名"等于没说，得知道是谁签的
-    found.push({ key: "sign", label: `GPG 签名 ${protection.sign}`, sealed: false });
+    found.push({ key: "sign", label: "已签名", sealed: false, reportable: true });
   }
   if (protection.encrypt) {
-    found.push({ key: "encrypt", label: `GPG 加密 ${protection.encrypt}`, sealed: true });
+    found.push({ key: "encrypt", label: "已加密", sealed: true, reportable: true });
   }
   if (protection.symmetric) {
-    found.push({ key: "symmetric", label: "口令加密", sealed: true });
+    found.push({ key: "symmetric", label: "口令加密", sealed: true, reportable: true });
   }
 
   return found;
@@ -57,110 +55,116 @@ const label = computed(() =>
   layers.value.length > 0 ? layers.value.map((layer) => layer.label).join(" · ") : "原样",
 );
 
-/** 有签名层、又知道是哪一篇 —— 这样的徽章才验得了 */
-const verifiable = computed(() => props.protection.sign !== null && Boolean(props.title));
+/** 哪一枚徽章点开了；一次只开一个 */
+const openedKey = ref<string | null>(null);
 
-/** 验签的结论；`null` = 还没查出来（或压根没有签名层） */
-const report = ref<SignatureReport | null>(null);
-/** 验签这步自己没跑起来的原因（没有 gpg、这一版的口令没给……） */
+/** 封装细节。点开才去问，问过一次就留着 —— 同一版的事实不会变 */
+const report = ref<ProtectionReport | null>(null);
 const problem = ref("");
-const checking = ref(false);
-const opened = ref(false);
+const asking = ref(false);
 
-async function check() {
-  if (!verifiable.value) {
+async function ask() {
+  if (report.value || asking.value || !props.title) {
     return;
   }
-  checking.value = true;
+  asking.value = true;
   problem.value = "";
   try {
-    report.value = await invoke<SignatureReport | null>("signature_report", {
+    report.value = await invoke<ProtectionReport>("protection_report", {
       title: props.title,
       reference: props.reference ?? null,
     });
   } catch (error) {
-    report.value = null;
     problem.value = String(error);
   } finally {
-    checking.value = false;
+    asking.value = false;
   }
 }
 
-/** 换了一篇或换了一版就重新验；签名层没了就没什么可验的 */
+function toggle(key: string) {
+  openedKey.value = openedKey.value === key ? null : key;
+  if (openedKey.value) {
+    void ask();
+  }
+}
+
+/** 换了一篇或换了一版：结论作废，重新问 */
 watch(
-  () => `${props.title ?? ""}|${props.reference ?? ""}|${props.protection.sign ?? ""}`,
+  () => `${props.title ?? ""}|${props.reference ?? ""}`,
   () => {
     report.value = null;
     problem.value = "";
-    void check();
   },
-  { immediate: true },
 );
 
-/** 徽章上那半个字：过没过、信不信 */
-const verdict = computed(() => {
-  if (checking.value) {
-    return "验签中…";
+/** 弹窗里那几行，按点开的是哪一层来 */
+const rows = computed<{ label: string; value: string }[]>(() => {
+  if (asking.value) {
+    return [{ label: "正在查", value: "……" }];
   }
   if (problem.value) {
-    return "验不了";
+    return [{ label: "查不动", value: problem.value }];
   }
+
   const found = report.value;
   if (!found) {
-    return "没有结论";
+    return [];
   }
-  if (!found.verified) {
-    return "没通过";
-  }
-  return found.trust ?? "通过";
-});
 
-/** 结论的语气（颜色）：通过、没通过、还没结论 */
-const tone = computed(() => {
-  if (checking.value || problem.value || !report.value) {
-    return "wait";
+  switch (openedKey.value) {
+    case "sign": {
+      if (found.signature) {
+        return [
+          { label: "结果", value: found.signature.verified ? "通过" : "没通过" },
+          { label: "信任", value: found.signature.trust ?? "（没查到）" },
+          { label: "签名者", value: found.signature.key },
+          { label: "说明", value: found.signature.detail },
+        ];
+      }
+      return [
+        { label: "结果", value: "验不了" },
+        { label: "原因", value: found.signature_problem ?? "这一版没有签名层" },
+      ];
+    }
+    case "encrypt": {
+      if (!found.encryption) {
+        return [{ label: "结果", value: "这一版没有 gpg 加密层" }];
+      }
+      return [
+        { label: "加密到", value: found.encryption.key },
+        { label: "本机", value: found.encryption.detail },
+      ];
+    }
+    case "symmetric":
+      return [
+        {
+          label: "这次会话",
+          value:
+            found.passphrase_ready === true
+              ? "已经有这一版的口令：读得动"
+              : "还没输过这一版的口令：读之前要先解锁",
+        },
+      ];
+    default:
+      return [];
   }
-  return report.value.verified ? "pass" : "fail";
 });
-
-/** 弹窗里那几行 —— 与复制出去的是同一份 */
-const details = computed(() => {
-  const rows: { label: string; value: string }[] = [
-    { label: "头里记的签名者", value: props.protection.sign ?? "（没有）" },
-  ];
-  if (report.value) {
-    rows.push({ label: "结果", value: report.value.verified ? "通过" : "没通过" });
-    rows.push({ label: "信任", value: report.value.trust ?? "（验签没跑到给出信任的那一步）" });
-    rows.push({ label: "说明", value: report.value.detail });
-  }
-  if (problem.value) {
-    rows.push({ label: "没法验", value: problem.value });
-  }
-  if (checking.value) {
-    rows.push({ label: "结果", value: "正在验…" });
-  }
-  return rows;
-});
-
-function toggle() {
-  opened.value = !opened.value;
-}
 
 /** 点到别处就收起：弹窗是看细节用的，不该占着屏幕 */
+const rootEl = ref<HTMLElement | null>(null);
+
 function onDocumentClick(event: MouseEvent) {
   const root = rootEl.value;
   if (root && !root.contains(event.target as Node)) {
-    opened.value = false;
+    openedKey.value = null;
   }
 }
 
 function onKeydown(event: KeyboardEvent) {
   if (event.key === "Escape") {
-    opened.value = false;
+    openedKey.value = null;
   }
 }
-
-const rootEl = ref<HTMLElement | null>(null);
 
 onMounted(() => {
   document.addEventListener("click", onDocumentClick);
@@ -178,26 +182,20 @@ onBeforeUnmount(() => {
     <span v-if="layers.length === 0" class="storage__badge">原样</span>
 
     <template v-for="layer in layers" :key="layer.key">
-      <!-- 用 span 装的按钮：这枚徽章会出现在**历史列表的行按钮里面**，
+      <!-- 用 span 装的按钮：这些徽章会出现在**历史列表的行按钮里面**，
            里面再套一个 <button> 是非法结构，点击也会一并触发行本身 -->
       <span
-          v-if="layer.key === 'sign' && verifiable"
-          class="storage__badge storage__badge--check"
+          v-if="layer.reportable && title"
+          class="storage__badge storage__badge--ask"
           role="button"
           tabindex="0"
-          :aria-expanded="opened"
-          title="点开看这次验签的细节"
-          @click.stop="toggle"
-          @keydown.enter.stop.prevent="toggle"
-          @keydown.space.stop.prevent="toggle"
+          :aria-expanded="openedKey === layer.key"
+          title="点开看这一层的细节"
+          @click.stop="toggle(layer.key)"
+          @keydown.enter.stop.prevent="toggle(layer.key)"
+          @keydown.space.stop.prevent="toggle(layer.key)"
       >
         {{ layer.label }}
-        <span class="storage__verdict" :class="`storage__verdict--${tone}`">
-          <Check v-if="tone === 'pass'" :size="11" :stroke-width="2.6"/>
-          <ShieldAlert v-else-if="tone === 'fail'" :size="11" :stroke-width="2.2"/>
-          <TriangleAlert v-else :size="11" :stroke-width="2.2"/>
-          {{ verdict }}
-        </span>
       </span>
 
       <span
@@ -209,9 +207,9 @@ onBeforeUnmount(() => {
       </span>
     </template>
 
-    <!-- 点开才展开的细节。它挂在徽章底下，不挡正文 -->
-    <span v-if="opened" class="report" @click.stop>
-      <span v-for="row in details" :key="row.label" class="report__row">
+    <!-- 点开才展开的细节。它挂在这行徽章底下，不挡正文 -->
+    <span v-if="openedKey" class="report" @click.stop>
+      <span v-for="row in rows" :key="row.label" class="report__row">
         <span class="report__label">{{ row.label }}</span>
         <span class="report__value">{{ row.value }}</span>
       </span>
@@ -249,38 +247,16 @@ onBeforeUnmount(() => {
   color: var(--accent-soft);
 }
 
-/* 验得了的签名徽章是可点的：点开看细节 */
-.storage__badge--check {
+/* 点得开的徽章：悬停给一点提示，免得人不知道这里能点 */
+.storage__badge--ask {
   cursor: pointer;
 }
 
-.storage__badge--check:focus-visible {
+.storage__badge--ask:hover,
+.storage__badge--ask:focus-visible {
   outline: none;
   border-color: var(--accent-soft);
   color: var(--text);
-}
-
-.storage__badge--check:hover {
-  border-color: var(--accent-soft);
-  color: var(--text);
-}
-
-.storage__verdict {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-
-.storage__verdict--pass {
-  color: var(--link-green);
-}
-
-.storage__verdict--fail {
-  color: var(--link-missing);
-}
-
-.storage__verdict--wait {
-  color: var(--text-dim);
 }
 
 /* 细节卡：贴在这行徽章底下 */
@@ -307,7 +283,7 @@ onBeforeUnmount(() => {
 
 .report__row {
   display: grid;
-  grid-template-columns: minmax(88px, auto) 1fr;
+  grid-template-columns: minmax(64px, auto) 1fr;
   gap: 10px;
   align-items: baseline;
 }

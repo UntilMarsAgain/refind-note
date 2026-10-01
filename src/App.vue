@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import AppMenu from "./components/AppMenu.vue";
 import ContextMenu from "./components/ContextMenu.vue";
@@ -175,6 +175,11 @@ function openVersion(payload: { title: string; rev: number }) {
   void navigate(`${payload.title}@view-${payload.rev}`, "push");
 }
 
+/** 从历史清单直接去回退页 —— 这条路不用先读得懂那一版 */
+function rollbackVersion(payload: { title: string; rev: number }) {
+  void navigate(`${payload.title}@rollback-${payload.rev}`, "push");
+}
+
 /** 删除完成：这篇已经没了，改去全部页面 */
 function afterDelete() {
   void navigate("special:all", "push");
@@ -300,6 +305,23 @@ function onKeydown(event: KeyboardEvent) {
   }
 }
 
+/**
+ * 开局的标签页也要有地址。
+ *
+ * 它在启动跑完之前只是一只空壳（解析要问后端，那时后端还没准备好）；
+ * 一旦准备好了就落到 `special:newtab` —— 于是地址栏一开始就写着自己在哪。
+ */
+watch(
+  startupPhase,
+  (phase) => {
+    const tab = active.value;
+    if (phase === "ready" && tab && !tab.address && !tab.route) {
+      void navigate("special:newtab", "push");
+    }
+  },
+  { immediate: true },
+);
+
 onMounted(() => {
   window.addEventListener("keydown", onKeydown);
   window.addEventListener("beforeunload", flushOnUnload);
@@ -360,6 +382,7 @@ onBeforeUnmount(() => {
             @section="openSection"
             @edit-navigate="leaveEditor"
             @open-version="openVersion"
+            @rollback-version="rollbackVersion"
             @deleted="afterDelete"
             @create-note="createNote"
             @rolled-back="afterRollback"

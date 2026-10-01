@@ -23,6 +23,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   /** 口令已交给后端：上层去重读 */
   (e: "unlocked"): void;
+  /** 去别的地方（历史 / 删除……）：地址归上层管 */
+  (e: "navigate", input: string): void;
   /** 不解了：回到这一篇的阅读页（它会照旧说"需要口令"） */
   (e: "cancel"): void;
 }>();
@@ -96,9 +98,22 @@ async function submit() {
     <p v-if="wrong" class="unlock__error">口令不对，再试一次。</p>
     <p v-if="error" class="unlock__error">{{ error }}</p>
 
-    <button class="unlock__back" type="button" @click="emit('cancel')">
-      返回「{{ title }}」
-    </button>
+    <!--
+      想不起口令、或者这台机器上根本没有 gpg 时，得留几条不用解锁也走得通的路：
+      历史版本、回退与删除都只看事件链与明文头，读不出正文照样能做。
+    -->
+    <p class="unlock__escape-hint">这一版读不出来，但下面这些不用先解开它：</p>
+    <div class="unlock__escapes">
+      <button type="button" class="unlock__escape" @click="emit('navigate', title + '@history')">
+        版本历史
+      </button>
+      <button type="button" class="unlock__escape" @click="emit('navigate', title + '@delete')">
+        删除这一篇
+      </button>
+      <button class="unlock__back" type="button" @click="emit('cancel')">
+        返回「{{ title }}」
+      </button>
+    </div>
   </section>
 </template>
 
@@ -180,9 +195,38 @@ async function submit() {
   font-size: 13.5px;
 }
 
+.unlock__escape-hint {
+  margin: 22px 0 8px;
+  color: var(--text-dim);
+  font-size: 12.5px;
+}
+
+.unlock__escapes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.unlock__escape {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.unlock__escape:hover {
+  border-color: var(--accent-soft);
+  background: var(--accent-tint);
+  color: var(--text);
+}
+
 /* 不解了就走：回到这一篇（读不出来这件事已经写在标题里了） */
 .unlock__back {
-  margin: 18px 0 0;
   padding: 6px 12px;
   border: 1px solid var(--border);
   border-radius: 6px;

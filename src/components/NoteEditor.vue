@@ -792,6 +792,21 @@ watch(markdown, (value) => {
           去解锁
         </button>
         <button type="button" class="ebtn" @click="writeAnyway">直接写新的一版</button>
+        <!-- 口令想不起来时，这几件事都不用先解开这一版 -->
+        <button
+            type="button"
+            class="ebtn"
+            @click="emit('navigate', `${props.title}@history`)"
+        >
+          版本历史
+        </button>
+        <button
+            type="button"
+            class="ebtn ebtn--danger"
+            @click="emit('navigate', `${props.title}@delete`)"
+        >
+          删除这一篇
+        </button>
       </div>
     </div>
 

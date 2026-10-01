@@ -85,6 +85,33 @@ export interface SignatureReport {
     detail: string;
 }
 
+/** 加密层的现状：加密到谁，本机对付不对付得了 */
+export interface EncryptionReport {
+    /** 写这一版时指定的加密密钥（头里记的那个） */
+    key: string;
+    /** 本机有没有对应的私钥 —— 有才解得开 */
+    secret: boolean;
+    /** 人话说明 */
+    detail: string;
+}
+
+/**
+ * 某一版落盘封装的细节。
+ *
+ * 三项各自独立：查不动的那项空着（`signature_problem` 说明为什么），其余照报 ——
+ * 想知道"这一版能不能解开"的时候，不该因为验不了签名就什么都看不到。
+ */
+export interface ProtectionReport {
+    /** 签名层的校验结论；没有签名层、或验签这步没跑起来时是 null */
+    signature: SignatureReport | null;
+    /** 签名没报出来的原因（没有 gpg、外层口令没给） */
+    signature_problem: string | null;
+    /** 加密层：加密到谁、本机有没有那把私钥 */
+    encryption: EncryptionReport | null;
+    /** 口令层：这次会话里有没有这一版的口令（没套口令层就是 null） */
+    passphrase_ready: boolean | null;
+}
+
 /** 一份草稿 */
 export interface Draft {
     markdown: string;
