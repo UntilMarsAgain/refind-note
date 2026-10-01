@@ -6,11 +6,14 @@ import { flash } from "../../core/notice.ts";
 import { CIPHER_NOTES, COMPRESSION_NOTES, type Cipher, type Compression, type Policy } from "../../ipc/note.ts";
 import {
   describeReport,
-  type SyncReport,
   type SyncSettings,
   type SyncSettingsPatch,
 } from "../../ipc/sync.ts";
-import { refreshSyncAvailability } from "../../core/sync.ts";
+import {
+  refreshSyncAvailability,
+  syncBusy,
+  syncNow as requestSync,
+} from "../../core/sync.ts";
 import KeyChooser from "../common/KeyChooser.vue";
 import NamespaceManager from "./NamespaceManager.vue";
 import type { ThemeMode } from "../../ipc/settings.ts";
@@ -218,7 +221,6 @@ const sync = ref<SyncSettings>({
 });
 /** 改这一栏时：新填的 S3 私钥。**留空就是不改**（界面本来就拿不到原来那一把） */
 const secretDraft = ref("");
-const syncBusy = ref(false);
 /** 上一次同步的结果（就在这一页上再说一遍，不必去翻浮条） */
 const lastSync = ref("");
 const syncProblem = ref("");
@@ -264,18 +266,20 @@ async function saveSync() {
  *
  * 会跑一会儿（要遍历本地文件、列云端清单、挨个传），所以按钮上写着"正在同步…"，
  * 进度另外由浮条那一路说 —— 这一页只管结果。
+ *
+ * `force` 是"不等了"：云端那把锁还热着也**直接抢过来**，不干等它超时。
+ * 另一边崩在半路、或者你确定它没在同步时用；它要真在同步，两边就撞上了。
  */
-async function syncNow() {
-  syncBusy.value = true;
+async function syncNow(force = false) {
   syncProblem.value = "";
   try {
-    const report = await invoke<SyncReport>("sync_now");
-    lastSync.value = describeReport(report);
-    syncSettingsDirty.value = false;
+    const report = await requestSync({ force });
+    if (report) {
+      lastSync.value = describeReport(report);
+      syncSettingsDirty.value = false;
+    }
   } catch (error) {
     syncProblem.value = String(error);
-  } finally {
-    syncBusy.value = false;
   }
 }
 
@@ -818,8 +822,17 @@ watch(
     <div id="sync-run" class="row" :class="{ 'row--target': isFocused('sync-run') }">
       <span class="row__label">同步</span>
       <code class="row__id">#sync-run</code>
-      <button class="row__go" type="button" :disabled="syncBusy" @click="syncNow">
+      <button class="row__go" type="button" :disabled="syncBusy" @click="syncNow()">
         {{ syncBusy ? "正在同步…" : "立即同步" }}
+      </button>
+      <button
+        class="row__go row__go--force"
+        type="button"
+        :disabled="syncBusy"
+        title="不等云端那把锁：另一边崩在半路、或者你确定它没在同步时用 —— 它要真在同步，两边会撞上"
+        @click="syncNow(true)"
+      >
+        强制同步
       </button>
       <span v-if="lastSync" class="row__hint">{{ lastSync }}</span>
     </div>
@@ -830,6 +843,9 @@ watch(
       密钥只写在<strong>这台机器</strong>的 <code>settings/sync.json</code>（权限只给本人）。
       两台机器同时改同一份仓库时，靠云端一把自旋锁排队；真撞上了，按修改时间取新的那一版，
       并在同步报告里说一声。
+      锁被另一边拿着时，「立即同步」就不动手了 —— 它要是崩了，5 分钟没动静就算过期，到时候
+      自己拿得过来；<strong>不想等就点「强制同步」</strong>，直接抢（那一边要真在同步，两边会撞上，
+      所以是给"对面已经死了"这种时候用的）。
     </p>
   </section>
 </template>
@@ -968,6 +984,19 @@ watch(
 .row__go:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* 「强制同步」：带代价的那一颗 —— 平时安静，悬上去才露出它是"硬来"的那条路 */
+.row__go--force {
+  border-style: dashed;
+  border-color: var(--divider);
+  color: var(--text-dim);
+}
+
+.row__go--force:hover:not(:disabled) {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--text);
 }
 
 .row {

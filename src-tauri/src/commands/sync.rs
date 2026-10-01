@@ -97,8 +97,11 @@ pub fn sync_export_key(target: String) -> Result<(), String> {
 /// **`(async)` 是必须的**：不加的话这个命令在**主线程**上跑（Tauri 的默认），
 /// 一趟同步几秒钟里窗口是冻的 —— 进度不刷新，"不等了"那颗按钮点了也没用
 /// （它要回主线程才能把窗口关掉）。加了之后它在线程池里跑，界面照常活动。
+///
+/// `force` 是设置页那颗「强制同步」：云端那把锁还热着也**不等**，直接抢过来。
+/// 另一台机器要真在同步，两边就撞上了 —— 所以默认是 `false`，那条路得人按下去。
 #[tauri::command(async)]
-pub fn sync_now(app: AppHandle) -> Result<SyncReport, String> {
+pub fn sync_now(app: AppHandle, force: bool) -> Result<SyncReport, String> {
     let workspace = open_workspace()?;
     let settings = sync::settings(&workspace);
 
@@ -107,7 +110,7 @@ pub fn sync_now(app: AppHandle) -> Result<SyncReport, String> {
         let _ = emitter.emit("sync-progress", step);
     };
 
-    let report = sync::run(&workspace, &settings, &progress)?;
+    let report = sync::run(&workspace, &settings, &progress, force)?;
     let _ = app.emit("sync-finished", &report);
     Ok(report)
 }

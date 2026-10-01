@@ -5,7 +5,7 @@
  *
  * - **启动时**：`syncAtStartup`，排在打开数据库之前（理由见 `preferences.ts`）；
  * - **提交之后**：`requestSyncAfterCommit`，攒一会儿再跑 —— 连着提交几次只同步一次；
- * - **手动**：`syncNow`，设置页那颗按钮；
+ * - **手动**：`syncNow`，设置页那两颗按钮（「立即同步」，以及不等云端那把锁的「强制同步」）；
  * - **关窗之前**：`syncBeforeClose`，把这一趟的改动送出去再走。
  *
  * 草稿**不参与**：它是"写了一半的本机缓冲"，每篇一个槽位、随时会被覆盖 ——
@@ -89,8 +89,13 @@ export function syncReady(): boolean {
  *
  * 同一时刻只有一趟：正在跑的时候再叫，就在跑完之后**再补一趟**（不是丢掉——
  * 那期间可能正好提交了新东西）。
+ *
+ * `force` = 不等云端那把锁（见 [`syncNow`]）。
+ *
+ * 跑不成会**抛出来**：谁叫的谁负责说给人听 —— 自动那几条路（启动、提交后、关窗前）
+ * 自己兜住，设置页写在自己那一栏里，标题栏那颗按钮弹浮条。
  */
-async function run(): Promise<SyncReport | null> {
+async function run(force: boolean): Promise<SyncReport | null> {
     if (busy.value) {
         queued = true;
         return null;
@@ -103,30 +108,31 @@ async function run(): Promise<SyncReport | null> {
     });
 
     try {
-        return await invoke<SyncReport>("sync_now");
-    } catch (error) {
-        // 同步失败不是"操作失败"：先说清，再让人该干嘛干嘛
-        flash(`同步没成功：${error}`);
-        return null;
+        return await invoke<SyncReport>("sync_now", { force });
     } finally {
         unlisten();
         busy.value = false;
         progress.value = null;
         if (queued) {
             queued = false;
-            void run();
+            // 补的那一趟是自动那一路来的（提交后攒下的）：没人守着看，失败就说一句
+            void run(false).catch((error) => flash(`同步没成功：${error}`));
         }
     }
 }
 
 /**
- * 现在同步一次（设置页那颗按钮）。
+ * 现在同步一次（设置页那颗按钮、标题栏那颗云）。
+ *
+ * `force` 是"不等了"：云端那把锁还热着也**直接抢过来**。另一台机器崩在半路时，
+ * 普通同步会让你干等它超时 —— 这条路是给那种时候用的，代价写在设置页上
+ * （另一边要真在同步，两边就撞上了）。
  *
  * 刚下载回来的东西，**当前打开着的页面看不见** —— 那几页还拿着旧内容。
  * 所以取回来之后说一句，让人知道该把页面重新打开。
  */
-export async function syncNow(): Promise<SyncReport | null> {
-    return run();
+export async function syncNow(options: { force?: boolean } = {}): Promise<SyncReport | null> {
+    return run(options.force === true);
 }
 
 /**
@@ -165,10 +171,14 @@ async function runWhenFree(): Promise<void> {
     if (!(await refreshSyncAvailability())) {
         return;
     }
-    const report = await run();
-    cooldownUntil = Date.now() + COOLDOWN_MS;
+    // 这条路没人守着看（是提交之后自己叫的），失败就说一句
+    try {
+        await run(false);
+    } catch (error) {
+        flash(`同步没成功：${error}`);
+    }
     // 冷却期间攒下的改动（如果有）上面那个定时器会接手
-    void report;
+    cooldownUntil = Date.now() + COOLDOWN_MS;
 }
 
 /**
@@ -189,9 +199,9 @@ export async function syncAtStartup(): Promise<void> {
     });
 
     try {
-        const report = await invoke<SyncReport>("sync_now");
+        const report = await run(false);
         // 一路顺风就不打扰；有合并过的东西才说一句（那是**动过你的东西**）
-        if (report.conflicts.length > 0) {
+        if (report && report.conflicts.length > 0) {
             flash(
                 `同步完成：有 ${report.conflicts.length} 个文件两边都改过，已按时间取了新的那版`,
             );
@@ -215,11 +225,14 @@ export async function syncBeforeClose(): Promise<void> {
     }
     closing.value = true;
     try {
-        const report = await run();
+        const report = await run(false);
         if (report && report.uploaded + report.downloaded > 0) {
             // 来不及让人看浮条了（窗口马上就没），所以只写日志
             console.info("关窗前同步完成：", report);
         }
+    } catch (error) {
+        // 窗口这就没了，浮条没人看得见；东西在本机，下次同步接着来
+        console.warn("关窗前同步没成功：", error);
     } finally {
         closing.value = false;
     }

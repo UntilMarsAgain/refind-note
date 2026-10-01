@@ -39,9 +39,11 @@
 //! 原子操作）。锁里写着机器名与时间；超过 [`LOCK_TTL`] 没续的算过期，别人可以抢 ——
 //! 机器崩了不该把同步永久锁死。
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -51,6 +53,13 @@ use crate::storage::workspace::{read_json, write_json, Workspace};
 
 /// 锁多久没动静算过期（秒）
 const LOCK_TTL: i64 = 300;
+
+/// 干活期间每隔这么久续一次锁。
+///
+/// [`LOCK_TTL`] 的意思是"**多久没动静**就当它死了"，不是"一趟最多干多久"。
+/// 不续的话，一趟超过 5 分钟的大同步会被别的机器当成过期抢走 —— 那正是这把锁要防
+/// 的事。所以每 [`LOCK_REFRESH`] 就把时间戳写成现在（见 [`Lock::touch`]）。
+const LOCK_REFRESH: Duration = Duration::from_secs(60);
 
 /// 每走这么多步就把索引落一次盘。
 ///
@@ -560,6 +569,7 @@ pub fn run(
     workspace: &Workspace,
     settings: &SyncSettings,
     progress: &dyn Fn(Progress),
+    force: bool,
 ) -> Result<SyncReport, String> {
     if !settings.is_ready() {
         return Err("同步没开着，或者 S3 的配置还没填全".to_string());
@@ -579,9 +589,23 @@ pub fn run(
         phase: "lock".to_string(),
         done: 0,
         total: 1,
-        text: "正在取得云端同步锁…".to_string(),
+        text: if force {
+            "正在抢云端同步锁…".to_string()
+        } else {
+            "正在取得云端同步锁…".to_string()
+        },
     });
-    let lock = acquire(&s3)?;
+    let lock = acquire(&s3, force)?;
+
+    // 干活期间续锁 —— 顺便搭在进度回调上，不必另开线程（见 [`LOCK_REFRESH`]）
+    let last_touch = Cell::new(Instant::now());
+    let beating = |step: Progress| {
+        if last_touch.get().elapsed() >= LOCK_REFRESH {
+            last_touch.set(Instant::now());
+            let _ = lock.touch(&s3);
+        }
+        progress(step);
+    };
 
     let outcome = reconcile(
         &s3,
@@ -590,7 +614,7 @@ pub fn run(
         &mut index,
         transform.as_ref(),
         settings.reupload,
-        progress,
+        &beating,
     );
 
     // 不管成没成，锁都要放掉：留着它，别的机器要等过期才能动
@@ -917,6 +941,25 @@ impl Lock {
     fn release(self, s3: &S3) -> Result<(), String> {
         s3.delete(&self.key)
     }
+
+    /// 续一下：把时间戳写成现在（长活儿跑到一半用，见 [`LOCK_REFRESH`]）。
+    ///
+    /// 别的机器据此知道这边还活着 —— 一趟大同步不至于被当成"崩了"抢走。
+    fn touch(&self, s3: &S3) -> Result<(), String> {
+        let body = lock_body()?;
+        s3.put(&self.key, &body, false)?;
+        Ok(())
+    }
+}
+
+/// 锁里写的是什么（拿锁与续锁写的是同一份东西）
+fn lock_body() -> Result<Vec<u8>, String> {
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    serde_json::to_vec(&LockBody {
+        host: hostname(),
+        at: now,
+    })
+    .map_err(|error| format!("锁序列化失败：{error}"))
 }
 
 /// 锁里写着什么（过期判断要读它）
@@ -932,13 +975,20 @@ struct LockBody {
 ///
 /// 已经有人拿着、而且没超过 [`LOCK_TTL`]：报错让这次同步别跑 —— 两台机器同时改
 /// 会互相盖掉。过期了就抢过来（机器崩了不该把同步永久锁死）。
-fn acquire(s3: &S3) -> Result<Lock, String> {
+///
+/// `force` 是**人**按下去的"不等了"（界面上那颗「强制同步」）：锁还热着也照样盖成
+/// 自己的。另一台机器要是真在同步，两边就撞上了 —— 所以默认不走这条路，界面上也
+/// 写着代价（宁可等它超时）。
+fn acquire(s3: &S3, force: bool) -> Result<Lock, String> {
     let key = s3.config().key_of(LOCK_KEY);
-    let host = hostname();
-    let now = OffsetDateTime::now_utc().unix_timestamp();
-    let body = serde_json::to_vec(&LockBody { host, at: now })
-        .map_err(|error| format!("锁序列化失败：{error}"))?;
+    let body = lock_body()?;
 
+    if force {
+        s3.put(&key, &body, false)?;
+        return Ok(Lock { key });
+    }
+
+    let now = OffsetDateTime::now_utc().unix_timestamp();
     match s3.put(&key, &body, true)? {
         crate::storage::s3::PutOutcome::Written => Ok(Lock { key }),
         crate::storage::s3::PutOutcome::AlreadyExists | crate::storage::s3::PutOutcome::Changed => {
@@ -957,7 +1007,8 @@ fn acquire(s3: &S3) -> Result<Lock, String> {
                 .unwrap_or_else(|| "另一台机器".to_string());
             if !stale {
                 return Err(format!(
-                    "云端同步锁正被「{who}」拿着，过一会儿再试（或者等它超时）"
+                    "云端同步锁正被「{who}」拿着（它要是崩了，{LOCK_TTL} 秒后自动过期）；\
+                     不想等就在设置页点「强制同步」抢过来"
                 ));
             }
 
@@ -1516,14 +1567,14 @@ mod end_to_end {
         std::fs::write(first.root().join("settings/repository.json"), b"{\"x\":1}").unwrap();
 
         let settings = settings_for(&address, &key);
-        let report = run(&first, &settings, &|_| {}).unwrap();
+        let report = run(&first, &settings, &|_| {}, false).unwrap();
         assert_eq!(report.uploaded, 3, "三份都该传上去：{report:?}");
         assert_eq!(report.downloaded, 0);
 
         // 本机自己的东西不该上去
         std::fs::write(first.root().join("settings/preferences.json"), b"{}").unwrap();
         std::fs::write(first.root().join("db/drafts/1"), "写了一半".as_bytes()).unwrap();
-        let report = run(&first, &settings, &|_| {}).unwrap();
+        let report = run(&first, &settings, &|_| {}, false).unwrap();
         assert_eq!(report.uploaded, 0, "没改过就什么都不传：{report:?}");
 
         // ---- 把本机删干净（等于换台机器） ----
@@ -1531,7 +1582,7 @@ mod end_to_end {
         assert!(!second.root().join("db/objects/0/1.log").exists());
 
         // ---- 乙机器：配置同一个桶、同一把钥匙，同步一次 ----
-        let report = run(&second, &settings, &|_| {}).unwrap();
+        let report = run(&second, &settings, &|_| {}, false).unwrap();
         assert_eq!(report.downloaded, 3, "三份都该拿回来：{report:?}");
         assert_eq!(
             std::fs::read_to_string(second.root().join("db/objects/0/1.log")).unwrap(),
@@ -1547,7 +1598,7 @@ mod end_to_end {
         );
 
         // 乙机器上没配同步时写下的本机专属文件，不该被传上去
-        let report = run(&second, &settings, &|_| {}).unwrap();
+        let report = run(&second, &settings, &|_| {}, false).unwrap();
         assert_eq!(
             report.uploaded + report.downloaded,
             0,
@@ -1566,12 +1617,12 @@ mod end_to_end {
         let first = workspace("key-a");
         std::fs::write(first.root().join("db/objects/0/1.log"), b"secret").unwrap();
         let settings = settings_for(&address, &generate_key().unwrap());
-        run(&first, &settings, &|_| {}).unwrap();
+        run(&first, &settings, &|_| {}, false).unwrap();
 
         // 换台机器、抄错了钥匙
         let second = workspace("key-b");
         let wrong = settings_for(&address, &generate_key().unwrap());
-        let error = run(&second, &wrong, &|_| {}).unwrap_err();
+        let error = run(&second, &wrong, &|_| {}, false).unwrap_err();
         assert!(error.contains("密钥"), "{error}");
         assert!(!second.root().join("db/objects/0/1.log").exists());
 
@@ -1588,25 +1639,64 @@ mod end_to_end {
         let first = workspace("conflict-a");
         std::fs::write(first.root().join("db/titles.json"), b"{\"from\":\"a\"}").unwrap();
         let settings = settings_for(&address, &key);
-        run(&first, &settings, &|_| {}).unwrap();
+        run(&first, &settings, &|_| {}, false).unwrap();
 
         let second = workspace("conflict-b");
-        run(&second, &settings, &|_| {}).unwrap();
+        run(&second, &settings, &|_| {}, false).unwrap();
 
         // 乙机器改成"本机这份不旧"的样子（时间往后挪一点，甲机器那份会更旧）
         std::fs::write(second.root().join("db/titles.json"), b"{\"from\":\"b\"}").unwrap();
         // 同时让云端那份也变（拿"本地改过、云端改过"这条分支）
         let third = workspace("conflict-c");
-        run(&third, &settings, &|_| {}).unwrap();
+        run(&third, &settings, &|_| {}, false).unwrap();
         std::fs::write(third.root().join("db/titles.json"), b"{\"from\":\"c\"}").unwrap();
-        run(&third, &settings, &|_| {}).unwrap();
+        run(&third, &settings, &|_| {}, false).unwrap();
 
-        let report = run(&second, &settings, &|_| {}).unwrap();
+        let report = run(&second, &settings, &|_| {}, false).unwrap();
         assert_eq!(report.conflicts.len(), 1, "两边都改过要报出来：{report:?}");
         assert_eq!(report.conflicts[0].path, "db/titles.json");
 
         let _ = std::fs::remove_dir_all(first.root());
         let _ = std::fs::remove_dir_all(second.root());
         let _ = std::fs::remove_dir_all(third.root());
+    }
+
+    /// 云端那把锁还热着：普通同步让你等着，**强制同步**现在就抢过来。
+    ///
+    /// 对应界面上那颗「强制同步」—— 另一边崩在半路时，不必干等它超时。
+    #[test]
+    fn a_forced_sync_takes_a_lock_that_is_still_warm() {
+        let (address, bucket) = start_fake_s3();
+        let settings = settings_for(&address, "");
+        let s3 = S3::new(settings.s3.clone()).unwrap();
+        let key = s3.config().key_of(LOCK_KEY);
+
+        // 另一台机器刚拿的锁：时间戳是现在，离过期还早
+        let held = serde_json::to_vec(&LockBody {
+            host: "另一台机器".to_string(),
+            at: OffsetDateTime::now_utc().unix_timestamp(),
+        })
+        .unwrap();
+        bucket
+            .lock()
+            .unwrap()
+            .insert(key.clone(), (held, "held".to_string()));
+
+        // 普通同步：不动手，并且说清是锁挡着
+        let polite = match acquire(&s3, false) {
+            Ok(_) => panic!("锁还热着的时候不该动手"),
+            Err(message) => message,
+        };
+        assert!(polite.contains("锁"), "该说清是锁挡着：{polite}");
+        assert!(bucket.lock().unwrap().contains_key(&key), "锁还该在原处");
+
+        // 强制：抢过来，锁里换成我们的名字
+        let lock = acquire(&s3, true).expect("强制同步应当拿到锁");
+        let holder: LockBody = serde_json::from_slice(&bucket.lock().unwrap()[&key].0).unwrap();
+        assert_ne!(holder.host, "另一台机器", "锁该换成我们拿着了");
+
+        // 放掉之后云端不留锁，下一次谁都能同步
+        lock.release(&s3).unwrap();
+        assert!(!bucket.lock().unwrap().contains_key(&key));
     }
 }

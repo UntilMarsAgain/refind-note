@@ -93,9 +93,14 @@ const syncTitle = computed(() => {
 
 /** 点一下：立刻同步一次（不等冷却也不等落定），完事说一句做了什么 */
 async function runSync() {
-  const report = await syncNow();
-  if (report) {
-    flash(`同步完成：${describeReport(report)}`);
+  try {
+    const report = await syncNow();
+    if (report) {
+      flash(`同步完成：${describeReport(report)}`);
+    }
+  } catch (error) {
+    // 锁被别的机器拿着之类：说清楚，别让人对着没反应的按钮猜
+    flash(`同步没成功：${error}`);
   }
 }
 
