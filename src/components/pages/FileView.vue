@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { confirm, open, save } from "@tauri-apps/plugin-dialog";
+import { open } from "@tauri-apps/plugin-dialog";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { Download, ExternalLink, History, Pencil, Trash2, Upload } from "@lucide/vue";
 import type { FileEntry, FileInfo, Uploaded } from "../../ipc/files.ts";
@@ -42,6 +42,14 @@ const info = ref<FileInfo | null>(null);
 /** 原位输入的口令：只有口令层才用得上 */
 const passphrase = ref("");
 
+/** 正在改名：页内输入框摆出来没有 */
+const renaming = ref(false);
+const renameText = ref("");
+const renameEl = ref<HTMLInputElement | null>(null);
+
+/** "用系统应用打开"的明文提示已经摆出来了吗（两步确认，不用系统对话框） */
+const confirmingOpen = ref(false);
+
 /** 传新版时这一版怎么存（与上传页、编辑器同一套选择器） */
 const uploadPolicy = ref<Policy>({ ...protection.value });
 const uploadPassphrase = ref("");
@@ -75,6 +83,11 @@ async function load() {
   } finally {
     loading.value = false;
   }
+}
+
+/** 这一份在仓库里是**加密存的**吗（口令层或 gpg 加密层） */
+function sealed(file: FileInfo): boolean {
+  return file.protection.symmetric || file.protection.encrypt !== null;
 }
 
 /** 这一份现在读得动吗 */
@@ -149,7 +162,7 @@ function onAction(name: string) {
       emit("navigate", `${file.title}@history`);
       break;
     case "rename":
-      rename(file);
+      startRename(file);
       break;
     case "delete":
       emit("navigate", `${file.title}@delete`);
@@ -195,28 +208,33 @@ async function saveAs(file: FileEntry) {
 /**
  * 改名：文件名就是页面名，所以要问一句新名字。
  *
- * 用**系统的保存对话框**问 —— 系统给应用的就只有这一种"带输入框的窗口"。
- * 只看它返回的文件名那一栏：选在哪个目录无所谓，仓库里的文件本来就不住在目录里。
+ * 就在这一页上问（一个输入框 + 确认/取消），**不借系统的文件对话框** ——
+ * 系统给应用的那种窗口只有"打开/保存文件"，拿它当改名的输入框，
+ * 看上去就像要把文件存到哪儿去，答非所问。
  */
-async function rename(file: FileEntry) {
-  const picked = await save({
-    title: "改名为…",
-    defaultPath: file.name,
-  });
-  if (!picked) {
-    return;
-  }
-  const name = picked.split(/[\\/]/).pop()?.trim() ?? "";
+function startRename(file: FileEntry) {
+  renaming.value = true;
+  renameText.value = file.name;
+  void nextTick(() => renameEl.value?.select());
+}
+
+async function saveRename(file: FileEntry) {
+  const name = renameText.value.trim();
   if (!name || name === file.name) {
+    renaming.value = false;
     return;
   }
 
+  busy.value = true;
   try {
     const display = await invoke<string>("rename_file", { title: file.title, name });
     flash(`已改名为「${name}」；笔记里已写下的旧名称不会随之更改`);
+    renaming.value = false;
     emit("navigate", display);
   } catch (reason) {
     problem.value = String(reason);
+  } finally {
+    busy.value = false;
   }
 }
 
@@ -228,17 +246,12 @@ async function rename(file: FileEntry) {
  * 加密存的那几种，这一步等于在临时目录里留下一份**明文**：先把这件事说清楚再开。
  */
 async function openWithSystem(file: FileInfo) {
-  const sealed = file.protection.symmetric || file.protection.encrypt !== null;
-  if (sealed) {
-    const go = await confirm(
-      `「${file.name}」在仓库里是加密存的。用系统应用打开会先解开，把一份**明文**写到临时目录，` +
-        `再交给外部程序 —— 那一份不受本程序保护。\n\n继续打开吗？`,
-      { title: "会写出明文副本", kind: "warning" },
-    );
-    if (!go) {
-      return;
-    }
+  // 加密存的要先问一句：这一步会在临时目录里留下一份**明文**
+  if (sealed(file) && !confirmingOpen.value) {
+    confirmingOpen.value = true;
+    return;
   }
+  confirmingOpen.value = false;
 
   busy.value = true;
   try {
@@ -294,6 +307,23 @@ async function copyReference() {
         改于 {{ formatTime(entry.modified) }}
       </p>
 
+      <!-- 改名：就在这一页上问（系统那种"打开/保存文件"的窗口拿来做改名答非所问） -->
+      <div v-if="renaming" class="file__rename">
+        <input
+            ref="renameEl"
+            v-model="renameText"
+            class="file__rename-input"
+            type="text"
+            @keydown.enter.prevent="saveRename(entry)"
+            @keydown.esc="renaming = false"
+        />
+        <button type="button" class="file__btn file__btn--go" :disabled="busy" @click="saveRename(entry)">
+          确认改名
+        </button>
+        <button type="button" class="file__btn" @click="renaming = false">取消</button>
+        <span class="file__rename-hint">笔记里已写下的旧名称不会随之更改。</span>
+      </div>
+
       <!-- 看的是历史里的一版：说清楚，并给一条回最新版的路 -->
       <p v-if="older" class="file__older">
         正在看第 {{ entry.rev }} 版，不是最新版。
@@ -348,7 +378,17 @@ async function copyReference() {
           <Upload :size="14" :stroke-width="1.9"/>
           传新版
         </button>
-        <button type="button" class="file__btn" :disabled="busy" @click="openWithSystem(entry)">
+        <template v-if="confirmingOpen">
+          <span class="file__warn">
+            「{{ entry.name }}」在仓库里是<strong>加密存的</strong>：打开会先解开，
+            把一份<strong>明文</strong>写到临时目录再交给外部程序，那一份不受本程序保护。
+          </span>
+          <button type="button" class="file__btn file__btn--go" :disabled="busy" @click="openWithSystem(entry)">
+            确认打开
+          </button>
+          <button type="button" class="file__btn" @click="confirmingOpen = false">取消</button>
+        </template>
+        <button v-else type="button" class="file__btn" :disabled="busy" @click="openWithSystem(entry)">
           <ExternalLink :size="14" :stroke-width="1.9"/>
           用系统应用打开
         </button>
@@ -372,6 +412,54 @@ async function copyReference() {
 <style scoped>
 .file {
   padding-top: 4px;
+}
+
+/* 改名：输入框与两个按钮并排，提示跟在后面 */
+.file__rename {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.file__rename-input {
+  flex: 1 1 240px;
+  min-width: 0;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--field-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.file__rename-input:focus {
+  outline: none;
+  border-color: var(--accent-soft);
+}
+
+.file__rename-hint {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+/* "会写出明文副本"那一句：说清楚再放行 */
+.file__warn {
+  flex: 1 1 260px;
+  min-width: 0;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.file__warn strong {
+  color: var(--text);
 }
 
 .file__older {
