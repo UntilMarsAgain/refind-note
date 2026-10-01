@@ -35,7 +35,10 @@ export function setOpenInNewTab(handler: (title: string) => void) {
  * 读者要知道的是"这张图不在了"，而不是盯着一个加载失败的方框猜。
  */
 function markMissing(image: HTMLImageElement) {
-    if (image.dataset.missing) {
+    // 本仓库的文件还在**问后端**"这一份是怎么回事"（加密？不存在？可读？）：
+    // 这段时间里取不到字节是正常的，不能就此判它"不存在" ——
+    // 加密的那些本来就取不到，而它们该看到的是解锁框（见 `attachVaultFile`）
+    if (image.dataset.missing || image.dataset.vault === "pending") {
         return;
     }
     image.dataset.missing = "yes";
@@ -209,11 +212,16 @@ export function decorateNoteHtml(root: HTMLElement): void {
             continue;
         }
         image.dataset.imageReady = "yes";
+
+        // 本仓库里的文件：可能**加密存的**（那就不该直接去拉），
+        // 也可能压根不是图（`![](片子.mp4)` —— markdown 一律渲染成 <img>，这里换成播放器）。
+        // 先挂上"待判"的牌子：问明白之前，取不到字节不算"图片不存在"
+        const name = fileTargetOf(image.getAttribute("src") ?? "");
+        if (name) {
+            image.dataset.vault = "pending";
+        }
         attachImage(image);
 
-        // 本仓库里的文件：可能是加密存的（那就不该直接去拉），
-        // 也可能压根不是图（`![](片子.mp4)` —— markdown 一律渲染成 <img>，这里换成播放器）
-        const name = fileTargetOf(image.getAttribute("src") ?? "");
         if (name) {
             void attachVaultFile(image, name);
         }
@@ -235,7 +243,12 @@ export function decorateNoteHtml(root: HTMLElement): void {
  */
 async function attachVaultFile(image: HTMLImageElement, name: string) {
     const info = await fileInfo(name);
+    // 问明白了：往后取不到就是真取不到（图坏了、被删了），照常提示"不存在"
+    delete image.dataset.vault;
+
     if (!info) {
+        // 仓库里没有这一份 —— 照实说
+        markMissing(image);
         return;
     }
 
