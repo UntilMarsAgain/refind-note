@@ -16,10 +16,14 @@
 //! - **meta 只是声明**（内容的 mime），认不得的字段忽略；它进头就进地址，
 //!   所以同内容、不同 meta 会落成两个对象（与"签过名的不去重"同一条规则）。
 //!
+//! gpg 是**可选的**：机器上没有 gpg 时，签名、加密、验签这些功能不可用（用到时给一句
+//! 说得清的错），其余（明文、压缩、口令对称）一切照常。
+//!
 //! 压缩为什么在最内层：加密之后信息熵已经拉满，再压只会让体积略微变大还多烧一遍 CPU。
 
 use std::fmt;
 use std::io::Write;
+use std::process::Command;
 
 use argon2::{Algorithm, Argon2, Params, Version};
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -177,6 +181,8 @@ pub enum CodecError {
     WrongPassphrase,
     /// 系统 gpg 那边出的问题
     Gpg(String),
+    /// 这台计算机上没有 gpg（签名 / 加密 / 验签都用不了）
+    GpgUnavailable,
     /// 载荷本身不成形
     Corrupt(String),
 }
@@ -189,6 +195,9 @@ impl fmt::Display for CodecError {
             Self::PassphraseNeeded => write!(f, "这一份是加密的，需要输入口令"),
             Self::WrongPassphrase => write!(f, "{WRONG_PASSPHRASE_MESSAGE}"),
             Self::Gpg(reason) => write!(f, "gpg 那边出错了：{reason}"),
+            Self::GpgUnavailable => {
+                write!(f, "这台计算机上没有 gpg：签名、加密与验签都用不了")
+            }
             Self::Corrupt(reason) => write!(f, "文件不成形：{reason}"),
         }
     }
@@ -505,6 +514,32 @@ fn random_into(buffer: &mut [u8]) -> Result<()> {
 
 // ---------------------------------------------------------------- 系统 gpg
 
+/// 这台计算机上有没有可用的 gpg。
+///
+/// 探测 PATH 里的 `gpg`（或 `gpg2`）命令。没有 gpg 时，签名 / 加密 / 验签这些功能
+/// **不可用**：用到它们的地方给一句说得清的错，其余功能一切照常。
+///
+/// 每次调用都真去探一遍 —— gpg 的操作本来就要起进程，多这一次无妨；
+/// 好处是用户中途装上 gpg，不用重启程序。
+pub fn gpg_available() -> bool {
+    #[cfg(test)]
+    if FORCE_NO_GPG.load(std::sync::atomic::Ordering::Relaxed) {
+        return false;
+    }
+
+    ["gpg", "gpg2"].into_iter().any(|program| {
+        Command::new(program)
+            .arg("--version")
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    })
+}
+
+/// 测试用：假装这台机器上没有 gpg（不假装就真去探）。
+#[cfg(test)]
+static FORCE_NO_GPG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// 测试用的 gpg 家目录。生产里不设它，就跟着系统配置走。
 #[cfg(test)]
 static TEST_GPG_HOME: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
@@ -516,6 +551,10 @@ pub fn set_gpg_home(dir: std::path::PathBuf) {
 }
 
 fn gpg_context() -> Result<gpgme::Context> {
+    if !gpg_available() {
+        return Err(CodecError::GpgUnavailable);
+    }
+
     let mut context = gpgme::Context::from_protocol(gpgme::Protocol::OpenPgp)
         .map_err(|error| CodecError::Gpg(error.to_string()))?;
 
@@ -600,6 +639,12 @@ fn gpg_decrypt(content: &[u8]) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// gpg 的可用性是进程级开关，碰它的用例要串行。
+    fn gpg_guard() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     #[test]
     fn no_layers_is_wrapped_but_readable() {
@@ -766,6 +811,13 @@ mod tests {
     /// 需要一个能生成密钥的 gpg：测试用**临时家目录**，不去动用户自己的钥匙串。
     #[test]
     fn gpg_layers_round_trip() {
+        let _guard = gpg_guard();
+        // 没有 gpg 的机器上，这些功能本来就不可用（那条路径另有用例钉住）
+        if !gpg_available() {
+            eprintln!("跳过 gpg 测试：这台计算机上没有 gpg");
+            return;
+        }
+
         let home = std::env::temp_dir().join(format!("refind-note-gpg-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         std::fs::create_dir_all(&home).unwrap();
@@ -823,6 +875,39 @@ mod tests {
         assert_eq!(decode(&whole, &Secrets::default()).unwrap(), content);
 
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// 没有 gpg 时：这些功能**不可用**，给一句说得清的错，而不是底层报错。
+    #[test]
+    fn without_gpg_the_gpg_features_report_unavailable() {
+        let _guard = gpg_guard();
+
+        FORCE_NO_GPG.store(true, std::sync::atomic::Ordering::Relaxed);
+        let signed = encode(
+            b"x",
+            &Meta::default(),
+            &Policy {
+                gpg_sign: Some("谁".to_string()),
+                ..Default::default()
+            },
+            None,
+        );
+        let sealed = encode(
+            b"x",
+            &Meta::default(),
+            &Policy {
+                gpg_encrypt: Some("谁".to_string()),
+                ..Default::default()
+            },
+            None,
+        );
+        FORCE_NO_GPG.store(false, std::sync::atomic::Ordering::Relaxed);
+
+        for result in [signed, sealed] {
+            let error = result.unwrap_err();
+            assert_eq!(error, CodecError::GpgUnavailable);
+            assert!(error.to_string().contains("没有 gpg"), "{error}");
+        }
     }
 
     /// 建一个临时的 gpg 家目录，并生成一把**无口令**的测试密钥。

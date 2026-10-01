@@ -162,6 +162,14 @@ impl Database {
     pub fn protection(&self) -> Policy {
         self.config().protection
     }
+
+    /// 这台计算机上有没有可用的 gpg。
+    ///
+    /// 没有的话，签名 / 加密这类功能不可用：用到它们时（提交、草稿、读 gpg 封装过的
+    /// 内容）会得到一句说得清的错；其余功能照常。调用方可以据此提前把这些选项收起来。
+    pub fn gpg_available(&self) -> bool {
+        crate::codec::gpg_available()
+    }
 }
 
 /// 读元数据；目录里没有就当新建，落一份进去。
