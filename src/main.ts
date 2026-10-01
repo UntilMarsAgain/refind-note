@@ -1,3 +1,19 @@
+/**
+ * 前端入口。
+ *
+ * ## 目录怎么分
+ *
+ * 按"这一层**认识什么**"分，改的时候别把边界搅乱：
+ *
+ * - `ipc/` —— 与后端一一对应的**类型**：这些形状由 Rust 说了算，前端照着用；
+ * - `core/` —— 状态与纯逻辑：不认识 DOM，也不认识组件（`core/markdown/` 是解析口径）；
+ * - `dom/` —— HTML 注入 DOM 之后的收尾与交互：高亮、右键、播放器、编辑器配置……
+ * - `components/` —— 组件：`shell/` 外壳、`note/` 笔记、`pages/` 特殊页面、`common/` 共用小件；
+ * - `styles/` —— 全部样式。
+ *
+ * 后端那边的分法写在 `src-tauri/src/lib.rs` 的抬头里，两边的层次是对着的。
+ */
+
 import { createApp } from "vue";
 import App from "./App.vue";
 import { openWorkspace } from "./core/preferences.ts";
