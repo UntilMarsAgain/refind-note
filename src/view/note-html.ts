@@ -113,6 +113,29 @@ function attachContextMenu(root: HTMLElement) {
 }
 
 /**
+ * 协议相对的地址（`//player.bilibili.com/…`）补齐成 `https://`。
+ *
+ * 这种写法的意思是"跟当前页面用同一个协议"，在普通网页里没问题；可**这一页的协议
+ * 是应用自己的**（`tauri://`），照这条规则会去访问 `tauri://player.bilibili.com/…`，
+ * 于是嵌进来的播放器、图床图片、外部脚本一律取不到东西。
+ *
+ * 网站上"分享 → 嵌入代码"给的基本都是这种写法（B 站、YouTube 都是），
+ * 所以粘进来的东西能不能用，全看这一步补没补。
+ */
+function resolveProtocolRelative(root: HTMLElement) {
+    const attributes = ["src", "href", "poster"];
+    const selector = attributes.map((name) => `[${name}^="//"]`).join(", ");
+    for (const element of root.querySelectorAll<HTMLElement>(selector)) {
+        for (const name of attributes) {
+            const value = element.getAttribute(name);
+            if (value?.startsWith("//")) {
+                element.setAttribute(name, `https:${value}`);
+            }
+        }
+    }
+}
+
+/**
  * 相对地址 → 附件地址。
  *
  * 笔记里写的是名字（`![桥](桥.png)`），而 webview 取字节要有地址。认的只有
@@ -177,6 +200,7 @@ function runScripts(root: HTMLElement) {
 /** 笔记 HTML 注入之后的收尾 */
 export function decorateNoteHtml(root: HTMLElement): void {
     attachContextMenu(root);
+    resolveProtocolRelative(root);
     resolveFileTargets(root);
     for (const image of root.querySelectorAll<HTMLImageElement>("img")) {
         // 反复注入（预览重渲染、开关来回切）时不要重复处理

@@ -608,6 +608,22 @@
   border-radius: 0;
 }
 
+/* 正文里的外部嵌入（视频播放器、地图…）。
+   分享代码给的多半不带尺寸，默认是 300×150 的一个小框，塞在正文里又小又别扭；
+   没写尺寸的给一个 16:9 的位置，作者写了 width/height 就照作者的来。 */
+.note-body iframe {
+  display: block;
+  max-width: 100%;
+  margin: 1.2em auto;
+  border: 0;
+  border-radius: 6px;
+}
+
+.note-body iframe:not([width]):not([height]) {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+}
+
 /* `::title` 居中大标题（没有背景） */
 .note-body .title-block {
   margin: 1.4em 0 0.8em;
