@@ -122,6 +122,13 @@ impl Database {
             settings,
             meta,
         };
+
+        // 默认的跨站命名空间只在新仓库上播一次（见 `sow_defaults`）
+        let mut table = database.namespaces();
+        if table.sow_defaults() {
+            database.save_namespaces(&table)?;
+        }
+
         database.ensure_namespace_dirs()?;
         Ok(database)
     }

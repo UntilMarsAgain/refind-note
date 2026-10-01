@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { ArrowLeft, History, RotateCcw } from "@lucide/vue";
+import type { Via } from "../../bindings/address.ts";
 import type { Note, Reading } from "../../bindings/note.ts";
 import { parentOf } from "../../core/title.ts";
 import NoteContent from "./NoteContent.vue";
@@ -26,6 +27,8 @@ const props = defineProps<{
     reference: string | null;
     /** 正文滚下去了：页头收起成一条细栏 */
     collapsed: boolean;
+    /** 被指令带过来时的"从哪儿来" */
+    via?: Via | null;
 }>();
 
 const emit = defineEmits<{
@@ -157,9 +160,30 @@ watch(
           :parent="parentOf(note.title)"
           :collapsed="props.collapsed"
           :actions="headerActions"
+          :via="props.via ?? null"
           @action="onAction"
           @open-parent="emit('navigate', $event)"
+          @open-via="emit('navigate', $event)"
       />
+
+      <!--
+        指令页面（正文第一行是 `$$COMMAND$$`）：它是**程序做的事**，不是给人读的正文。
+        所以这里说清它会干什么，并给一条"照它跳一次"的路 —— 跟跳走的是地址，
+        与打开这一页时发生的事完全一样。
+      -->
+      <div v-if="note.command" class="command" :class="{ 'command--bad': note.command.kind === 'unrecognized' }">
+        <span class="command__label">{{ note.command.label }}</span>
+        <span class="command__detail">{{ note.command.detail }}</span>
+        <button
+            v-if="note.command.argument"
+            type="button"
+            class="command__go"
+            title="按这条指令跳过去"
+            @click="emit('navigate', note.command.argument)"
+        >
+          {{ note.command.argument }}
+        </button>
+      </div>
 
       <p v-if="older()" class="note__older">
         这是第 {{ note.rev }} 版，不是最新版。
@@ -203,6 +227,57 @@ watch(
 /* 页头（标题与动作）现在归 PageHeader；这里只剩标题下面那几行事实 */
 .note__head {
   padding: 4px 0 8px;
+}
+
+/* 指令页的提示条：这一页是给程序的，不是给人读的 */
+.command {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: baseline;
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--accent-soft);
+  border-radius: 6px;
+  background: var(--accent-tint);
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+/* 指令写坏了：那是错误，不是提示 */
+.command--bad {
+  border-left-color: var(--danger);
+  background: transparent;
+  border-top: 1px solid var(--danger);
+  border-right: 1px solid var(--danger);
+  border-bottom: 1px solid var(--danger);
+}
+
+.command__label {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.command__detail {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.command__go {
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--accent-soft);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.command__go:hover {
+  border-color: var(--accent-soft);
+  background: var(--accent-soft);
+  color: var(--bg);
 }
 
 .note__meta {

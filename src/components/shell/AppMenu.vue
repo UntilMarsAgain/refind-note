@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { BookOpen } from "@lucide/vue";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openMenu } from "../../view/context-menu.ts";
+import type { HelpPage } from "../../bindings/help.ts";
 import { FALLBACK_GROUP, metaOf, SPECIAL_GROUPS } from "../../core/special.ts";
 import { logoSrc } from "../../core/theme.ts";
 
@@ -18,6 +20,8 @@ import { logoSrc } from "../../core/theme.ts";
 const props = defineProps<{
   /** 后端给出的、当前存在的特殊页面名 */
   pages: string[];
+  /** 帮助页（随程序发布）：单独一组摆在最前面 */
+  help: HelpPage[];
   /** 站点名（面板顶上那一行） */
   title: string;
   /**
@@ -96,6 +100,20 @@ function onBeforeEnter() {
   measureLeft();
 }
 
+/**
+ * 打开一条帮助页。
+ *
+ * 帮助不走 `special:` —— 它是**自己的命名空间**（`Help:首页`），所以这里直拼地址。
+ */
+function openHelp(event: MouseEvent, page: HelpPage) {
+  const address = `Help:${page.slug}`;
+  if (event.ctrlKey || event.metaKey) {
+    emit("open-new-tab", address);
+    return;
+  }
+  emit("open", address);
+}
+
 /** 按分组归拢；顺序由 SPECIAL_GROUPS 决定，空分组不显示 */
 const groups = computed(() =>
   [...SPECIAL_GROUPS, FALLBACK_GROUP]
@@ -119,6 +137,22 @@ const groups = computed(() =>
         </header>
 
         <div class="menu__columns">
+          <!-- 帮助摆在第一组：它是"怎么用这个程序"，比任何一个系统页面都靠前 -->
+          <nav v-if="help.length > 0" class="menu__group">
+            <h2 class="menu__group-title">帮助</h2>
+            <button
+              v-for="page in help"
+              :key="page.slug"
+              class="menu__item"
+              type="button"
+              :title="page.display"
+              @click="openHelp($event, page)"
+            >
+              <BookOpen :size="16" :stroke-width="1.75" />
+              <span>{{ page.title }}</span>
+            </button>
+          </nav>
+
           <nav v-for="group in groups" :key="group.title" class="menu__group">
             <h2 class="menu__group-title">{{ group.title }}</h2>
             <button

@@ -40,6 +40,7 @@ export function titleOf(route: ResolvedAddress): string {
         case "note":
         case "missing":
         case "help":
+        case "cross-site":
             return route.outcome.title;
         case "special":
             return labelOf(route.outcome.page);

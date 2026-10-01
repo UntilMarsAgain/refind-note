@@ -17,6 +17,7 @@ import type { Namespace } from "../../bindings/namespace.ts";
 const MAIN = "0";
 const SPECIAL = "special";
 const TEMPLATE = "template";
+const HELP = "help";
 
 const items = ref<Namespace[]>([]);
 const busy = ref(false);
@@ -47,7 +48,13 @@ const canCreate = computed(
 );
 
 const reserved = (item: Namespace) =>
-  item.id === MAIN || item.id === SPECIAL || item.id === TEMPLATE;
+  item.id === MAIN || item.id === SPECIAL || item.id === TEMPLATE || item.id === HELP;
+
+/**
+ * 「清空」对帮助页没有意义：它的正文**随程序发布**，仓库里根本没有可清的页面。
+ * 特殊页面同理（它连页面都没有）。于是这两个不给清空按钮。
+ */
+const clearable = (item: Namespace) => item.id !== SPECIAL && item.id !== HELP;
 
 function of(item: Namespace): string {
   return item.name || "（主）";
@@ -62,6 +69,9 @@ function kindOf(item: Namespace): string {
   }
   if (item.site) {
     return "跨站命名空间";
+  }
+  if (item.id === HELP) {
+    return "帮助（随程序发布）";
   }
   return item.id === TEMPLATE ? "保留命名空间（模板与样式）" : "内容命名空间";
 }
@@ -292,7 +302,7 @@ function create() {
             改名
           </button>
           <button
-              v-if="item.id !== SPECIAL"
+              v-if="clearable(item)"
               type="button"
               class="ns__btn"
               :disabled="busy"

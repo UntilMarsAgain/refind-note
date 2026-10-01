@@ -40,6 +40,8 @@ function modeLabel(mode: Mode | null): string {
       return `rollback-${mode.ref}`;
     case "unlock":
       return mode.ref ? `unlock-${mode.ref}` : "unlock";
+    case "no-command":
+      return "no-command";
     default:
       return mode.kind;
   }
@@ -59,6 +61,8 @@ function outcomeLabel(resolved: ResolvedAddress | null): string {
       return `特殊页面「${labelOf(resolved.outcome.page)}」`;
     case "help":
       return `帮助页「${resolved.outcome.title}」`;
+    case "cross-site":
+      return `跨站页面「${resolved.outcome.title}」（本仓库没有它）`;
   }
 }
 

@@ -13,6 +13,7 @@ import TabRail from "./components/shell/TabRail.vue";
 import WindowResizeHandles from "./components/shell/WindowResizeHandles.vue";
 import WindowTitleBar from "./components/shell/WindowTitleBar.vue";
 import { withSection } from "./core/address.ts";
+import type { HelpPage } from "./bindings/help.ts";
 import { loadBrowsing } from "./core/browsing.ts";
 import { dismissNotice, flash, notice } from "./core/notice.ts";
 import { setOpenInNewTab } from "./view/note-html.ts";
@@ -105,8 +106,12 @@ const APP_NAME = "重逢笔记";
 /** 顶栏菜单是否展开 */
 const menuOpen = ref(false);
 
-/** 菜单要列的页面：**每次打开都问后端**，所以后端加了页面不必重启前端 */
+/**
+ * 菜单要列的页面：**每次打开都问后端**，所以后端加了页面不必重启前端。
+ * 特殊页面与帮助页各问一次（帮助是另一个命名空间）。
+ */
 const specialPages = ref<string[]>([]);
+const helpPages = ref<HelpPage[]>([]);
 
 async function onMenu() {
   menuOpen.value = !menuOpen.value;
@@ -120,6 +125,13 @@ async function onMenu() {
     console.warn("取特殊页面清单失败：", error);
     flash(`无法获取页面列表：${error}`);
     specialPages.value = [];
+  }
+
+  try {
+    helpPages.value = await invoke<HelpPage[]>("help_pages");
+  } catch (error) {
+    console.warn("取帮助页清单失败：", error);
+    helpPages.value = [];
   }
 }
 
@@ -491,6 +503,7 @@ onBeforeUnmount(() => {
   <AppMenu
       :open="menuOpen"
       :pages="specialPages"
+      :help="helpPages"
       :title="APP_NAME"
       @open="openFromMenu"
       @open-new-tab="openTabWith"

@@ -5,6 +5,7 @@ import { preferences } from "../core/preferences.ts";
 import type { TabState } from "../core/tabs.ts";
 import AllPages from "./pages/AllPages.vue";
 import ChangesPage from "./pages/ChangesPage.vue";
+import CrossSiteView from "./pages/CrossSiteView.vue";
 import DebugPage from "./pages/DebugPage.vue";
 import FilesPage from "./pages/FilesPage.vue";
 import GcPage from "./pages/GcPage.vue";
@@ -75,6 +76,8 @@ const specialPage = computed(() =>
 );
 /** 帮助页（虚拟命名空间 `Help`）：页面随程序发布 */
 const helpPage = computed(() => (outcome.value?.kind === "help" ? outcome.value : null));
+/** 跨站命名空间里的页面：本仓库没有它，交给浏览器 */
+const crossSite = computed(() => (outcome.value?.kind === "cross-site" ? outcome.value : null));
 
 /** 「什么状态」：浏览状态在语法层，落到仓库上之后照样有效 */
 const mode = computed(() => route.value?.address.mode ?? null);
@@ -165,6 +168,13 @@ defineExpose({
 
       <AllPages v-else-if="specialPage === 'all'" @navigate="emit('navigate', $event)"/>
 
+      <CrossSiteView
+          v-else-if="crossSite"
+          :key="crossSite.url"
+          :title="crossSite.title"
+          :url="crossSite.url"
+      />
+
       <HelpView
           v-else-if="helpPage"
           :key="`${helpPage.page}@${mode?.kind ?? ''}`"
@@ -185,6 +195,7 @@ defineExpose({
             :title="noteTitle"
             :reference="mode.ref"
             :collapsed="collapsed"
+            :via="route?.via ?? null"
             @navigate="emit('navigate', $event)"
             @redirect="emit('redirect', $event)"
             @leave="emit('leave')"

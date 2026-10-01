@@ -22,7 +22,9 @@ export type Mode =
     | { kind: "history" }
     | { kind: "delete" }
     | { kind: "rollback"; ref: string }
-    | { kind: "unlock"; ref: string | null };
+    | { kind: "unlock"; ref: string | null }
+    /** `@no-command`：这一页是指令页，但不跟跳，照原文看 */
+    | { kind: "no-command" };
 
 export interface Address {
     namespace: NamespaceRef;
@@ -46,11 +48,23 @@ export type Outcome =
     | { kind: "missing"; title: string }
     | { kind: "special"; page: string }
     /** 帮助页（虚拟命名空间 `Help`）：页面随程序发布，不在仓库里 */
-    | { kind: "help"; page: string; title: string };
+    | { kind: "help"; page: string; title: string }
+    /** 跨站命名空间里的页面：本仓库没有它，交给浏览器打开 */
+    | { kind: "cross-site"; title: string; url: string };
+
+/** 这一页是被哪条指令带过来的（`$$COMMAND$$` 那一页） */
+export interface Via {
+    /** 发起跳转的那一页（显示标题） */
+    from: string;
+    /** 是随机跳转（提示语不写具体名字） */
+    random: boolean;
+}
 
 /** 地址 + 它落到仓库上的结论（`resolve_address` 的产物） */
 export interface ResolvedAddress {
     address: Address;
     canonical: string;
     outcome: Outcome;
+    /** 被指令带过来时才有的"从哪儿来" */
+    via: Via | null;
 }

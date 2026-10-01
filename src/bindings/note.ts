@@ -23,9 +23,23 @@ export interface Policy {
     symmetric: boolean;
 }
 
+/** 一页指令的信息（`$$COMMAND$$` 那一页；界面据此提示它会跳到哪） */
+export interface CommandInfo {
+    /** 短名：`redirect` / `random-redirect` / `unrecognized` */
+    kind: string;
+    /** 中文名 */
+    label: string;
+    /** 一句说明 */
+    detail: string;
+    /** 原文参数（重定向的目标 / 随机的命名空间）；没有参数时为空串 */
+    argument: string;
+}
+
 export interface Note {
     /** 规范键，形如 `0:标题` */
     key: string;
+    /** 这一页是指令页时的指令信息 */
+    command: CommandInfo | null;
     title: string;
     /** 原样源码 */
     markdown: string;

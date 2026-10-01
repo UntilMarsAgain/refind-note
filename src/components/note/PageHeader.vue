@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { History, Pencil, Trash2, type LucideIcon } from "@lucide/vue";
 import { computed } from "vue";
+import type { Via } from "../../bindings/address.ts";
+import ViaHint from "./ViaHint.vue";
 
 /**
  * 页面标题栏：**这一页的主标题**与它的动作。
@@ -19,12 +21,16 @@ const props = defineProps<{
   collapsed: boolean;
   /** 动作按钮；不给就用标准那三个（编辑 / 版本历史 / 删除） */
   actions?: PageAction[];
+  /** 被指令带过来时的"从哪儿来"（`$$COMMAND$$` 那一页） */
+  via?: Via | null;
 }>();
 
 const emit = defineEmits<{
   (e: "action", name: string): void;
   /** 点了「返回上一级」 */
   (e: "open-parent", title: string): void;
+  /** 点了"从哪儿来"那一行里的来源 */
+  (e: "open-via", input: string): void;
 }>();
 
 export interface PageAction {
@@ -49,6 +55,9 @@ const shown = computed(() => props.actions ?? STANDARD);
   <div class="page-header" :class="{ 'page-header--collapsed': collapsed }">
     <div class="page-heading">
       <h1 class="page-title selectable" :title="title">{{ title }}</h1>
+
+      <!-- 被指令带过来的：说清"你点的不是这一页" -->
+      <ViaHint :via="via ?? null" @open="emit('open-via', $event)"/>
 
       <!-- 子页面给一个回上一级的出口：斜杠就是父子关系 -->
       <button

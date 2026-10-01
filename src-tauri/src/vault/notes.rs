@@ -103,6 +103,8 @@ pub struct NoteState {
 pub struct Note {
     /// 规范键，形如 `0:标题`
     pub key: String,
+    /// 这一页是指令页时，它的指令信息（界面据此提示"这一页会跳到哪"）
+    pub command: Option<crate::vault::command::CommandInfo>,
     pub title: String,
     /// 原样源码
     pub markdown: String,
@@ -147,6 +149,9 @@ pub struct RevisionSummary {
 /// 那一页去，而不是丢一个看不懂的错误。
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "state", rename_all = "kebab-case")]
+// 两个分支的大小差得远（`Note` 本来就大：正文 + HTML）。每次读只造一个，
+// 为它套一层 Box 只是把这份代价挪到别处，不如就这么放着。
+#[allow(clippy::large_enum_variant)]
 pub enum Reading {
     /// 读到了
     Ready { note: Note },
@@ -654,10 +659,20 @@ impl Database {
             (markdown, self.blobs().protection(&blob)?)
         };
 
-        let html = self.render_html(&markdown, &display)?;
+        // 指令页面（`$$COMMAND$$` 打头）**按原文看**：包成代码块再渲染，
+        // 于是"这一页是指令"一眼看得出来，而不是被当成正文读了过去
+        let parsed = crate::vault::command::parse(&markdown);
+        let command = crate::vault::command::CommandInfo::from_parsed(&parsed);
+        let html = if command.is_some() {
+            let resolver = self.resolver_for(&display);
+            crate::markdown::render_with(&crate::markdown::fence_code(&markdown), Some(&resolver))
+        } else {
+            self.render_html(&markdown, &display)?
+        };
 
         Ok(Note {
             key: format!("{}:{}", state.ns, state.title),
+            command,
             title: display,
             markdown,
             html,
@@ -678,12 +693,16 @@ impl Database {
     /// 阅读页与编辑器预览都走这里：**渲染只有一处**，所以"预览里是什么样"
     /// 与"存下来再读是什么样"不会分家。
     pub fn render_html(&self, markdown: &str, title: &str) -> Result<String, String> {
+        let resolver = self.resolver_for(title);
+        Ok(crate::markdown::render_with(markdown, Some(&resolver)))
+    }
+
+    /// 给"当前页是某一页"的一次渲染装配解析器（红蓝链、`[[/子页]]` 都靠它）
+    fn resolver_for(&self, title: &str) -> Resolver {
         let table = Arc::new(self.namespaces());
-        // 当前页：`[[/子页]]` 要拼在它的页面名后面，命名空间不变
         let from = crate::vault::title::parse(title, &table).ok();
         let index = Arc::new(PageIndex::of(self));
-        let resolver = Resolver::new(table, index, from);
-        Ok(crate::markdown::render_with(markdown, Some(&resolver)))
+        Resolver::new(table, index, from)
     }
 
     /// 这一篇的全部提交，**新的在前**。

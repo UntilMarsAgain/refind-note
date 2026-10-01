@@ -52,6 +52,8 @@ pub enum Mode {
         #[serde(rename = "ref")]
         reference: Option<String>,
     },
+    /// `@no-command`：这一页是指令页，但**不跟跳**，照原文看
+    NoCommand,
 }
 
 /// 一个地址：`命名空间:页面名称@浏览状态#段落`。
@@ -120,6 +122,21 @@ pub fn parse(input: &str, table: &NamespaceTable) -> Result<Option<ParsedAddress
         if found.id == SPECIAL_ID {
             return special(rest.trim(), section, table).map(Some);
         }
+        // 跨站命名空间：页面在别人家，但它**是个地址** —— 写成地址就得解析得出来，
+        // 落到仓库上会得到"交给浏览器打开"那个结论（见 resolve）
+        if found.is_cross_site() {
+            let address = Address {
+                namespace: NamespaceRef {
+                    id: found.id.clone(),
+                    spelling: prefix.to_string(),
+                },
+                page: title::check_page(rest.trim())?,
+                mode: mode_of(state.as_deref().unwrap_or(""))?,
+                section: section.unwrap_or_default(),
+            };
+            let canonical = compose(&address);
+            return Ok(Some(ParsedAddress { address, canonical }));
+        }
         if found.id == HELP_ID {
             // 帮助页：页面名在**编译进来的那张表**里，这里只做词法检查，
             // 在不在由 resolve 那一层回答（它才拿得到仓库）
@@ -135,10 +152,9 @@ pub fn parse(input: &str, table: &NamespaceTable) -> Result<Option<ParsedAddress
             let canonical = compose(&address);
             return Ok(Some(ParsedAddress { address, canonical }));
         }
-        return Err(format!(
-            "「{}」是跨站命名空间，里面的页面不在本仓库",
-            found.name
-        ));
+        // 剩下的只可能是"不可存储、又不是特殊/帮助/跨站"的命名空间 ——
+        // 内建的三个都不落这一支，留着是给以后新加的命名空间一个说得清的错
+        return Err(format!("「{}」不是能写成地址的命名空间", found.name));
     }
 
     let address = Address {
@@ -194,6 +210,11 @@ fn mode_of(state: &str) -> Result<Mode, String> {
     let raw = state.trim();
     if raw.is_empty() {
         return Ok(Mode::View { reference: None });
+    }
+
+    // `no-command` 自己带一个连字符，必须在拆 `词-参数` 之前认出来
+    if raw.eq_ignore_ascii_case("no-command") {
+        return Ok(Mode::NoCommand);
     }
 
     let (keyword, reference) = match raw.split_once('-') {
@@ -259,6 +280,7 @@ fn state_of(mode: &Mode) -> Option<String> {
             Some(token) => format!("unlock-{token}"),
             None => "unlock".to_string(),
         }),
+        Mode::NoCommand => Some("no-command".to_string()),
     }
 }
 

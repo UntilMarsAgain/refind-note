@@ -9,6 +9,7 @@ use serde::Serialize;
 use crate::storage::codec::{self, EncryptionReport, Policy, Secrets, SignatureReport};
 use crate::storage::session;
 use crate::vault::address::{self, Address, Mode, ParsedAddress};
+use crate::vault::command;
 use crate::vault::database::Database;
 use crate::vault::namespace::SPECIAL_ID;
 use crate::vault::notes::Reading;
@@ -26,7 +27,24 @@ pub enum Outcome {
     Special { page: String },
     /// 帮助页（虚拟命名空间 `Help`）：页面随程序发布，不在仓库里
     Help { page: String, title: String },
+    /// 跨站命名空间里的页面：本仓库没有它，地址在 `url`
+    CrossSite { title: String, url: String },
 }
+
+/// 这一页是**被哪条指令带过来的**（`$$COMMAND$$` 那一页）
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Via {
+    /// 发起跳转的那一页（显示标题）；随机跳转时也会给，界面可以选择不显示
+    pub from: String,
+    /// 是随机跳转（提示语不写具体名字）
+    pub random: bool,
+}
+
+/// 跟跳的上限。
+///
+/// 这是**仓库的跟跳策略**，不是指令语法（语法在 [`crate::vault::command`]）——
+/// 指令写成了环时，给一句能看懂的提示，总好过递归到栈溢出。
+const MAX_HOPS: usize = 8;
 
 /// 地址 + 它落到仓库上的结论
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -34,6 +52,8 @@ pub struct ResolvedAddress {
     pub address: Address,
     pub canonical: String,
     pub outcome: Outcome,
+    /// 被指令带过来时才有的"从哪儿来"
+    pub via: Option<Via>,
 }
 
 impl Database {
@@ -43,6 +63,16 @@ impl Database {
     /// - 还不存在的页：状态裁掉（`名称@edit` 与 `名称` 回显成同一个地址）——
     ///   状态只在"这一页存在"的那一支上有意义。
     pub fn resolve_address(&self, input: &str) -> Result<Option<ResolvedAddress>, String> {
+        self.resolve_address_at(input, 0, None)
+    }
+
+    /// 同上，但带上"已经跟了几跳"与"从哪儿来"（指令页跟跳时递归用）
+    fn resolve_address_at(
+        &self,
+        input: &str,
+        hops: usize,
+        via: Option<Via>,
+    ) -> Result<Option<ResolvedAddress>, String> {
         let table = self.namespaces();
         let Some(parsed) = address::parse(input, &table)? else {
             return Ok(None);
@@ -50,6 +80,33 @@ impl Database {
         let ParsedAddress { address, canonical } = parsed;
 
         let index = crate::vault::target::PageIndex::of(self);
+
+        // 跨站命名空间：本仓库没有这一页，地址由命名空间的模板拼出来 ——
+        // 与正文里 `[[zhwiki:条目]]` 那条绿链走的是同一处规则（`target::resolve`）
+        if let Some(found) = table
+            .get(&address.namespace.id)
+            .filter(|item| item.is_cross_site())
+        {
+            let page = address.page.clone();
+            let Some(url) = found.url_for(&page) else {
+                return Err(format!("「{}」没有配站点地址", found.name));
+            };
+            // 状态与章节在别人家的页面上没有意义：裁掉，回显出来的就是那个地址
+            let address = Address {
+                mode: Mode::View { reference: None },
+                ..address
+            };
+            let canonical = address::compose(&address);
+            return Ok(Some(ResolvedAddress {
+                address,
+                canonical,
+                outcome: Outcome::CrossSite {
+                    title: format!("{}:{page}", found.name),
+                    url,
+                },
+                via,
+            }));
+        }
 
         if address.namespace.id == crate::vault::namespace::HELP_ID {
             let wanted = address.page.trim();
@@ -76,17 +133,19 @@ impl Database {
                     page: found.slug.clone(),
                     title: found.display.clone(),
                 },
+                via,
             }));
         }
 
         if address.namespace.id == SPECIAL_ID {
             if address.page.eq_ignore_ascii_case("random") {
-                return self.resolve_random();
+                return self.resolve_random(hops, via);
             }
             let page = address.page.to_lowercase();
             return Ok(Some(ResolvedAddress {
                 address,
                 canonical,
+                via,
                 outcome: Outcome::Special { page },
             }));
         }
@@ -101,10 +160,26 @@ impl Database {
 
         // "在不在"问的就是链接解析那张索引：一处回答，两处一样
         if index.contains(&address.namespace.id, &address.page) {
+            // 指令页面：**只有"看最新版"这一路跟跳**。
+            // 编辑 / 历史 / 删除 / 看旧版操作的都是这一页本身，跟着跳走会让人改错页面。
+            if matches!(address.mode, Mode::View { reference: None }) {
+                if let Some((target, random)) = self.command_target(&title, hops)? {
+                    return self.resolve_address_at(
+                        &target,
+                        hops + 1,
+                        Some(Via {
+                            from: title,
+                            random,
+                        }),
+                    );
+                }
+            }
+
             return Ok(Some(ResolvedAddress {
                 address,
                 canonical,
                 outcome: Outcome::Note { title },
+                via,
             }));
         }
 
@@ -118,16 +193,97 @@ impl Database {
             address: cropped,
             canonical,
             outcome: Outcome::Missing { title },
+            via,
         }))
     }
 
+    /// 这一页是不是指令页；是的话跳到哪
+    ///
+    /// 读不动（上了锁、内容坏了）就当不是 —— 那两种情况本来就有各自的页面要显示。
+    fn command_target(&self, title: &str, hops: usize) -> Result<Option<(String, bool)>, String> {
+        let markdown = match self.read_note(title, None) {
+            Ok(Reading::Ready { note }) => note.markdown,
+            _ => return Ok(None),
+        };
+
+        match command::parse(&markdown) {
+            // 不是指令页面：照常阅读
+            command::Parsed::None => Ok(None),
+            command::Parsed::Command(found) => {
+                if hops >= MAX_HOPS {
+                    return Err(format!(
+                        "「{title}」的跳转绕成了环（跟了 {MAX_HOPS} 跳还没到头）"
+                    ));
+                }
+                let random = found.spec.kind == "random-redirect";
+                match found
+                    .chase(self, title)
+                    .map_err(|message| format!("「{title}」：{message}"))?
+                {
+                    Some(target) => Ok(Some((target, random))),
+                    // 表里标明"不跳"的指令：当普通页面读
+                    None => Ok(None),
+                }
+            }
+            // 是指令页面，但指令本身有问题 —— **不能当普通页面读**：
+            // 那样一条写坏的指令会静静显示成正文，谁也不知道它没生效
+            command::Parsed::Empty => Err(format!(
+                "「{title}」是指令页面，但没写指令（第二行应写成 {}）",
+                command::supported()
+            )),
+            command::Parsed::Unrecognized(line) => Err(format!(
+                "「{title}」的指令认不出来：「{}」；目前支持 {}",
+                line.trim(),
+                command::supported()
+            )),
+        }
+    }
+
     /// `special:random`：挑一篇笔记，落到它身上
-    fn resolve_random(&self) -> Result<Option<ResolvedAddress>, String> {
-        let titles: Vec<String> = self.titles()?.notes.values().cloned().collect();
-        let Some(title) = pick_one(&titles)? else {
+    fn resolve_random(
+        &self,
+        hops: usize,
+        via: Option<Via>,
+    ) -> Result<Option<ResolvedAddress>, String> {
+        let Some(title) = self.pick_title(None, None)? else {
             return Err("仓库里还没有笔记，随机跳转没地方去".to_string());
         };
-        self.resolve_address(title)
+        let via = via.or(Some(Via {
+            from: "special:random".to_string(),
+            random: true,
+        }));
+        self.resolve_address_at(&title, hops + 1, via)
+    }
+
+    /// 在某个命名空间里随机挑一篇的显示标题。
+    ///
+    /// `namespace` 是**命名空间的名字或别名**（`None` 或空串 = 主命名空间）；
+    /// `exclude` 是要排除的那一篇（随机跳转不该跳回自己）。
+    pub fn pick_title(
+        &self,
+        namespace: Option<&str>,
+        exclude: Option<&str>,
+    ) -> Result<Option<String>, String> {
+        let table = self.namespaces();
+        let wanted = match namespace.map(str::trim).filter(|name| !name.is_empty()) {
+            None => crate::vault::namespace::MAIN_ID.to_string(),
+            Some(name) => table
+                .lookup(name)
+                .map(|item| item.id.clone())
+                .ok_or_else(|| format!("没有这个命名空间：{name}"))?,
+        };
+
+        let mut titles: Vec<String> = self
+            .list()?
+            .into_iter()
+            .filter(|note| note.key.starts_with(&format!("{wanted}:")))
+            .map(|note| note.title)
+            .collect();
+        if let Some(exclude) = exclude {
+            titles.retain(|title| title != exclude);
+        }
+
+        Ok(pick_one(&titles)?.cloned())
     }
 
     /// 读某一版：`reference` 是地址里的 token，`None` = 最新版
@@ -260,6 +416,14 @@ pub struct ProtectionReport {
     pub passphrase_ready: Option<bool>,
 }
 
+/// 把仓库的随机能力交给指令表：指令只知道"要随机挑一篇"，怎么挑是这里的事。
+impl command::CommandEnv for Database {
+    fn random_title(&self, namespace: Option<&str>, from: &str) -> Result<String, String> {
+        self.pick_title(namespace, Some(from))?
+            .ok_or_else(|| "那个命名空间里没有别的页面可跳".to_string())
+    }
+}
+
 /// 版本 token → 版本号（现在只认数字；收 token 是语法层的事，解释 token 是这里的事）
 fn token_to_rev(token: &str) -> Result<u64, String> {
     token
@@ -298,6 +462,141 @@ mod tests {
         if let Some(root) = database.root().parent() {
             let _ = std::fs::remove_dir_all(root);
         }
+    }
+
+    /// 写一篇指令页
+    fn command_page(database: &Database, title: &str, body: &str) {
+        database.create(title).unwrap();
+        database
+            .commit(title, &format!("$$COMMAND$$\n{body}\n"), None)
+            .unwrap();
+    }
+
+    /// 打开指令页 → 落到它指向的那一页，并且记得"从哪儿来"
+    #[test]
+    fn a_command_page_chases_to_its_target() {
+        let database = scratch("chase");
+        database.create("目标").unwrap();
+        database.commit("目标", "正文", None).unwrap();
+        command_page(&database, "跳板", "REDIRECT: 目标");
+
+        let resolved = database.resolve_address("跳板").unwrap().unwrap();
+        assert_eq!(
+            resolved.outcome,
+            Outcome::Note {
+                title: "目标".to_string()
+            }
+        );
+        assert_eq!(
+            resolved.via,
+            Some(Via {
+                from: "跳板".to_string(),
+                random: false
+            })
+        );
+
+        // `@no-command`：不跟跳，看这一页自己
+        let kept = database
+            .resolve_address("跳板@no-command")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            kept.outcome,
+            Outcome::Note {
+                title: "跳板".to_string()
+            }
+        );
+        assert_eq!(kept.via, None);
+
+        // 编辑、看历史这些状态也不跟跳 —— 否则会改错页面
+        for state in ["跳板@edit", "跳板@history", "跳板@delete"] {
+            let resolved = database.resolve_address(state).unwrap().unwrap();
+            assert_eq!(
+                resolved.outcome,
+                Outcome::Note {
+                    title: "跳板".to_string()
+                },
+                "{state} 不该跟着跳"
+            );
+        }
+
+        cleanup(&database);
+    }
+
+    /// 读指令页：正文按**代码块**看，并带上指令信息
+    #[test]
+    fn a_command_page_reads_as_a_code_block_with_its_info() {
+        let database = scratch("command-read");
+        command_page(&database, "跳板", "REDIRECT: 别处");
+
+        let Reading::Ready { note } = database
+            .read_note("跳板@no-command".trim_end_matches("@no-command"), None)
+            .unwrap()
+        else {
+            panic!("应当读得到");
+        };
+        let info = note.command.as_ref().expect("应当有指令信息");
+        assert_eq!(info.kind, "redirect");
+        assert_eq!(info.label, "重定向");
+        assert_eq!(info.argument, "别处");
+        assert!(
+            note.html.contains("<pre") || note.html.contains("<code"),
+            "指令页的正文应当按代码块渲染：{}",
+            note.html
+        );
+
+        cleanup(&database);
+    }
+
+    /// 跳转绕成环：报一句能看懂的错，而不是递归到栈溢出
+    #[test]
+    fn a_redirect_loop_is_reported() {
+        let database = scratch("loop");
+        command_page(&database, "甲", "REDIRECT: 乙");
+        command_page(&database, "乙", "REDIRECT: 甲");
+
+        let error = database.resolve_address("甲").unwrap_err();
+        assert!(error.contains("环"), "{error}");
+
+        cleanup(&database);
+    }
+
+    /// 指令写坏了要报出来 —— 不能静静显示成正文
+    #[test]
+    fn a_broken_command_is_reported() {
+        let database = scratch("broken");
+        command_page(&database, "坏的", "随便写点什么");
+
+        let error = database.resolve_address("坏的").unwrap_err();
+        assert!(error.contains("认不出来"), "{error}");
+
+        // 只有标记、第二行都没写
+        database.create("空的").unwrap();
+        database.commit("空的", "$$COMMAND$$", None).unwrap();
+        let error = database.resolve_address("空的").unwrap_err();
+        assert!(error.contains("没写指令"), "{error}");
+
+        cleanup(&database);
+    }
+
+    /// 随机重定向：落在指定命名空间里的某一篇，并且标明这是随机来的
+    #[test]
+    fn random_redirect_lands_somewhere_in_that_namespace() {
+        let database = scratch("random-command");
+        database.add_namespace("manual", Vec::new(), None).unwrap();
+        database.create("manual:甲").unwrap();
+        database.create("manual:乙").unwrap();
+        command_page(&database, "随机", "RANDOM_REDIRECT: manual");
+
+        let resolved = database.resolve_address("随机").unwrap().unwrap();
+        let Outcome::Note { title } = &resolved.outcome else {
+            panic!("应当落到一篇笔记上");
+        };
+        assert!(title == "manual:甲" || title == "manual:乙", "{title}");
+        let via = resolved.via.expect("随机跳转也要记下从哪儿来");
+        assert!(via.random, "界面据此说「来自随机跳转」");
+
+        cleanup(&database);
     }
 
     #[test]

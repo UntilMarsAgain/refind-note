@@ -63,6 +63,11 @@ impl Namespace {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NamespaceTable {
     pub items: Vec<Namespace>,
+    /// 默认的跨站命名空间播种过没有。
+    ///
+    /// 播完置位，于是**删掉之后不会再长回来** —— 播种只发生在新仓库上。
+    #[serde(default)]
+    pub defaults_sown: bool,
 }
 
 impl Default for NamespaceTable {
@@ -75,6 +80,7 @@ impl NamespaceTable {
     /// 内建的那几个。
     pub fn builtin() -> Self {
         Self {
+            defaults_sown: false,
             items: vec![
                 Namespace {
                     id: MAIN_ID.to_string(),
@@ -144,6 +150,47 @@ impl NamespaceTable {
     /// 虚拟的：页面由程序提供，仓库里没有（`special`）
     pub fn is_virtual(&self, id: &str) -> bool {
         self.get(id).is_some_and(|item| !item.storable)
+    }
+
+    /// 种下两个默认的**跨站**命名空间（只在没播种过、且名字没被占用时）。
+    ///
+    /// 它们是给人**写链接**用的：`[[zhwiki:条目]]` 画成绿链，点了交给浏览器。
+    /// 播种只发生一次，之后删掉就不会再回来 —— 默认值不该是"删不掉的东西"。
+    /// 返回表有没有变（变了调用方要落盘）。
+    pub fn sow_defaults(&mut self) -> bool {
+        if self.defaults_sown {
+            return false;
+        }
+
+        const DEFAULTS: [(&str, &[&str], &str); 2] = [
+            (
+                "zhwiki",
+                &["中文维基百科"],
+                "https://zh.wikipedia.org/wiki/$1",
+            ),
+            ("qw", &["求闻百科"], "https://www.qiuwenbaike.cn/wiki/$1"),
+        ];
+
+        for (name, aliases, site) in DEFAULTS {
+            // 名字或别名被占了就跳过这一条：不跟人自己建的命名空间抢名字
+            let taken = std::iter::once(name)
+                .chain(aliases.iter().copied())
+                .any(|candidate| self.lookup(candidate).is_some());
+            if taken {
+                continue;
+            }
+            let aliases: Vec<String> = aliases.iter().map(|alias| alias.to_string()).collect();
+            self.items.push(Namespace {
+                id: self.next_id(),
+                name: name.to_string(),
+                aliases,
+                storable: false,
+                site: Some(site.to_string()),
+            });
+        }
+
+        self.defaults_sown = true;
+        true
     }
 
     /// 下一个没被占用的标识：`ns1`、`ns2`……
@@ -533,15 +580,15 @@ mod tests {
         table.add("manual", vec!["手册".to_string()], None).unwrap();
 
         let by_alias = table.lookup(" 手册 ").expect("别名应当认得出");
-        assert_eq!(by_alias.id, "ns1");
+        let id = by_alias.id.clone();
         assert_eq!(
             table.lookup("MANUAL").map(|item| item.id.as_str()),
-            Some("ns1")
+            Some(id.as_str())
         );
 
         // 回显用规范名：别名只是"也认"，不是它的名字
         let parsed = crate::vault::title::parse("手册:入门", &table).unwrap();
-        assert_eq!(parsed.key(), "ns1:入门");
+        assert_eq!(parsed.key(), format!("{id}:入门"));
         assert_eq!(parsed.display(&table), "manual:入门");
     }
 
@@ -585,16 +632,21 @@ mod tests {
     fn a_namespaced_note_is_addressable_and_keeps_its_namespace() {
         let database = scratch("addressable");
 
-        let table = database.namespaces();
         let created = database
             .add_namespace("manual", vec!["手册".to_string()], None)
             .unwrap();
-        assert_eq!(created.len(), 5);
+        let id = created
+            .iter()
+            .find(|item| item.name == "manual")
+            .unwrap()
+            .id
+            .clone();
 
         let title = database.create("manual:入门").unwrap();
         assert_eq!(title, "manual:入门");
 
         // 用别名访问：回显保留别名，落到仓库上仍然是同一篇
+        assert!(!id.is_empty(), "刚建的命名空间该有个标识");
         let resolved = database
             .resolve_address("手册:入门")
             .unwrap()
@@ -631,7 +683,7 @@ mod tests {
         let id = database.id_of("manual:入门").expect("刚建的就该找得到");
         let before = database.log_path(&id);
 
-        database.rename_namespace("ns1", "手册").unwrap();
+        database.rename_namespace("manual", "手册").unwrap();
 
         // 文件一个不挪，键也不变 —— 变的只有显示标题
         assert_eq!(database.log_path(&id), before);
@@ -657,7 +709,7 @@ mod tests {
         assert_eq!(moved, 2);
 
         // 命名空间还在，里面的页面进了回收站
-        assert!(database.namespaces().get("ns1").is_some());
+        assert!(database.namespaces().lookup("manual").is_some());
         assert!(!database.exists("manual:一"));
         assert!(database.exists("留下来的"));
 
@@ -683,7 +735,7 @@ mod tests {
 
         let moved = database.delete_namespace("manual").unwrap();
         assert_eq!(moved, 1);
-        assert!(database.namespaces().get("ns1").is_none());
+        assert!(database.namespaces().lookup("manual").is_none());
         assert!(!database.exists("manual:入门"));
 
         cleanup(&database);
@@ -692,28 +744,41 @@ mod tests {
     #[test]
     fn a_cross_site_namespace_holds_no_pages() {
         let database = scratch("cross-site");
+        // 默认播下来的那两个跨站命名空间就该在（新仓库）
+        let seeded = database.namespaces();
+        assert!(seeded.lookup("zhwiki").is_some(), "新仓库该种下 zhwiki");
+        assert!(seeded.lookup("求闻百科").is_some(), "别名也认");
+
         database
             .add_namespace(
-                "zhwiki",
-                vec!["中文维基".to_string()],
+                "elsewhere",
+                vec!["别处".to_string()],
                 Some("https://example.org/wiki/$1".to_string()),
             )
             .unwrap();
 
         let table = database.namespaces();
-        let found = table.lookup("中文维基").unwrap();
+        let found = table.lookup("别处").unwrap();
         assert!(found.is_cross_site());
         assert!(!found.storable);
-        assert!(database.create("zhwiki:平陆运河").is_err());
+        // 本仓库里建不了它：页面在别人家
+        assert!(database.create("elsewhere:某页").is_err());
+        assert!(crate::vault::title::parse("elsewhere:某页", &table).is_err());
 
-        // 地址栏里敲它：这一页不在本仓库，说清楚比"找不到"有用
-        assert!(database
-            .resolve_address("zhwiki:平陆运河")
-            .unwrap_err()
-            .contains("跨站"));
-        assert!(address::parse("zhwiki:平陆运河", &table)
-            .unwrap_err()
-            .contains("跨站"));
+        // 但**写成地址**解析得出来：它是个地址，只是落到"交给浏览器打开"
+        let parsed = address::parse("elsewhere:某页", &table).unwrap().unwrap();
+        assert_eq!(parsed.canonical, "elsewhere:某页");
+        let resolved = database
+            .resolve_address("elsewhere:某页")
+            .unwrap()
+            .expect("不是空输入");
+        assert_eq!(
+            resolved.outcome,
+            crate::vault::resolve::Outcome::CrossSite {
+                title: "elsewhere:某页".to_string(),
+                url: "https://example.org/wiki/某页".to_string(),
+            }
+        );
 
         cleanup(&database);
     }
