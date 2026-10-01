@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import type { RevisionSummary } from "../../bindings/note.ts";
+import type { RevisionSummary } from "../../ipc/note.ts";
 import StorageBadge from "./StorageBadge.vue";
 
 /**

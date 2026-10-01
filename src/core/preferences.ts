@@ -8,15 +8,15 @@
 import { computed, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { applyAppearance } from "./appearance.ts";
-import type { MaintenanceInfo } from "../bindings/maintenance.ts";
-import type { Policy } from "../bindings/note.ts";
+import type { MaintenanceInfo } from "../ipc/maintenance.ts";
+import type { Policy } from "../ipc/note.ts";
 import type {
     DatabaseMeta,
     Preferences,
     Star,
     ThemeMode,
     WorkspaceInfo,
-} from "../bindings/settings.ts";
+} from "../ipc/settings.ts";
 import { markStartupReady, reportStartupFailure, startupPhase } from "./startup.ts";
 
 /** 默认值要与 Rust 端 `Preferences::default()` 一致 */

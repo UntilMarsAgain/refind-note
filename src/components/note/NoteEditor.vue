@@ -9,20 +9,20 @@ import {
     type Note,
     type Policy,
     type Reading,
-} from "../../bindings/note.ts";
-import type { Uploaded } from "../../bindings/files.ts";
-import StoragePicker from "../StoragePicker.vue";
-import { fileReferenceOf } from "../../view/file-links.ts";
-import { clipboardFiles, uploadPasted } from "../../view/paste-files.ts";
+} from "../../ipc/note.ts";
+import type { Uploaded } from "../../ipc/files.ts";
+import StoragePicker from "../common/StoragePicker.vue";
+import { fileReferenceOf } from "../../dom/file-links.ts";
+import { clipboardFiles, uploadPasted } from "../../dom/paste-files.ts";
 import { protection } from "../../core/preferences.ts";
-import { applyLineNumbers, codeLineNumbers, highlightCode } from "../../view/code-blocks.ts";
-import { decorateNoteHtml } from "../../view/note-html.ts";
+import { applyLineNumbers, codeLineNumbers, highlightCode } from "../../dom/code-blocks.ts";
+import { decorateNoteHtml } from "../../dom/note-html.ts";
 // `codemirror` 是元包（提供 basicSetup 等），EditorState 由 @codemirror/state 提供 ——
 // 后者必须作为**直接依赖**安装：pnpm 的严格 node_modules 下，传递依赖不可直接导入。
 import { basicSetup } from "codemirror";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { sourceExtensions } from "../../view/editor-setup.ts";
+import { sourceExtensions } from "../../dom/editor-setup.ts";
 
 /**
  * 笔记编辑器。

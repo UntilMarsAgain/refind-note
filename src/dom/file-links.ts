@@ -6,7 +6,7 @@
  * 于是"笔记里写什么"不依赖"东西存在哪"。
  */
 
-import type { FileEntry } from "../bindings/files.ts";
+import type { FileEntry } from "../ipc/files.ts";
 
 /**
  * 文件字节的地址前缀（Rust 侧注册的协议）。

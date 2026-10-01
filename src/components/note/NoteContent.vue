@@ -2,9 +2,9 @@
 import { nextTick, onMounted, ref, watch } from "vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { applyLineNumbers, codeLineNumbers, highlightCode } from "../../view/code-blocks.ts";
-import { decorateNoteHtml } from "../../view/note-html.ts";
-import { saveNameOf, saveVaultFile, savableTitle } from "../../view/file-save.ts";
+import { applyLineNumbers, codeLineNumbers, highlightCode } from "../../dom/code-blocks.ts";
+import { decorateNoteHtml } from "../../dom/note-html.ts";
+import { saveNameOf, saveVaultFile, savableTitle } from "../../dom/file-save.ts";
 import { flash } from "../../core/notice.ts";
 
 /**

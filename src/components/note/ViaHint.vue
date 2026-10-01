@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Via } from "../../bindings/address.ts";
+import type { Via } from "../../ipc/address.ts";
 
 /**
  * 「从哪儿来」：这一页是被**哪条指令**带过来的。

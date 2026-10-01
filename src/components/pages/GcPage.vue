@@ -5,7 +5,7 @@ import {
   formatBytes,
   formatTime,
   type GcReport,
-} from "../../bindings/maintenance.ts";
+} from "../../ipc/maintenance.ts";
 import { flash } from "../../core/notice.ts";
 import { maintenance, refreshWorkspaceInfo } from "../../core/preferences.ts";
 

@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { Plus } from "@lucide/vue";
-import type { Namespace } from "../../bindings/namespace.ts";
+import type { Namespace } from "../../ipc/namespace.ts";
 
 /**
  * 命名空间管理（设置页的一节，地址 `special:settings#namespaces`）。

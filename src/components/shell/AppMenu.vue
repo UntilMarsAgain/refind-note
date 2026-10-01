@@ -2,8 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { BookOpen } from "@lucide/vue";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { openMenu } from "../../view/context-menu.ts";
-import type { HelpPage } from "../../bindings/help.ts";
+import { openMenu } from "../../dom/context-menu.ts";
+import type { HelpPage } from "../../ipc/help.ts";
 import { FALLBACK_GROUP, metaOf, SPECIAL_GROUPS } from "../../core/special.ts";
 import { logoSrc } from "../../core/theme.ts";
 

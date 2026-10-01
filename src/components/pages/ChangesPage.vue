@@ -2,7 +2,7 @@
 import { onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { Clock } from "@lucide/vue";
-import type { ChangeEntry } from "../../bindings/activity.ts";
+import type { ChangeEntry } from "../../ipc/activity.ts";
 
 /**
  * 最近编辑（`special:changes`）：**跨全部笔记**的版本流水。

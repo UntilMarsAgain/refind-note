@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { KeyRound, Upload } from "@lucide/vue";
 import { flash } from "../../core/notice.ts";
-import { shortFingerprint, type GpgKey } from "../../bindings/keys.ts";
+import { shortFingerprint, type GpgKey } from "../../ipc/keys.ts";
 import { gpgAvailable, protection, setProtection } from "../../core/preferences.ts";
 
 /**

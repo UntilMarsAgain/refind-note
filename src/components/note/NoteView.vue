@@ -2,11 +2,11 @@
 import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { ArrowLeft, Download, History, RotateCcw } from "@lucide/vue";
-import type { Via } from "../../bindings/address.ts";
-import type { Note, Reading } from "../../bindings/note.ts";
+import type { Via } from "../../ipc/address.ts";
+import type { Note, Reading } from "../../ipc/note.ts";
 import { parentOf } from "../../core/title.ts";
 import { flash } from "../../core/notice.ts";
-import { saveNoteMarkdown } from "../../view/file-save.ts";
+import { saveNoteMarkdown } from "../../dom/file-save.ts";
 import NoteContent from "./NoteContent.vue";
 import PageHeader, { type PageAction } from "./PageHeader.vue";
 import StorageBadge from "./StorageBadge.vue";

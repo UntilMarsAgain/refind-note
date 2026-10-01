@@ -6,7 +6,7 @@ import ContextMenu from "./components/shell/ContextMenu.vue";
 import DebugPanel from "./components/shell/DebugPanel.vue";
 import FloatingTools from "./components/shell/FloatingTools.vue";
 import ImageViewer from "./components/shell/ImageViewer.vue";
-import RenderPane from "./components/RenderPane.vue";
+import RenderPane from "./components/shell/RenderPane.vue";
 import StartupError from "./components/shell/StartupError.vue";
 import StartupLoading from "./components/shell/StartupLoading.vue";
 import TabRail from "./components/shell/TabRail.vue";
@@ -14,10 +14,10 @@ import WindowResizeHandles from "./components/shell/WindowResizeHandles.vue";
 import WindowTitleBar from "./components/shell/WindowTitleBar.vue";
 import { listen } from "@tauri-apps/api/event";
 import { withSection } from "./core/address.ts";
-import type { HelpPage } from "./bindings/help.ts";
+import type { HelpPage } from "./ipc/help.ts";
 import { loadBrowsing } from "./core/browsing.ts";
 import { dismissNotice, flash, notice } from "./core/notice.ts";
-import { setOpenInNewTab } from "./view/note-html.ts";
+import { setOpenInNewTab } from "./dom/note-html.ts";
 import {
   cycleTheme,
   flushPreferences,
@@ -27,9 +27,9 @@ import {
   updatePreferences,
 } from "./core/preferences.ts";
 import { restartStartup, startupPhase } from "./core/startup.ts";
-import { formatBytes, type MaintenanceReport } from "./bindings/maintenance.ts";
+import { formatBytes, type MaintenanceReport } from "./ipc/maintenance.ts";
 import { useTabs } from "./core/tabs.ts";
-import { installWheelZoom } from "./view/zoom-wheel.ts";
+import { installWheelZoom } from "./dom/zoom-wheel.ts";
 
 /**
  * 窗口骨架。

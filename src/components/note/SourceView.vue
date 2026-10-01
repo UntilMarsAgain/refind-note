@@ -3,12 +3,12 @@ import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { basicSetup } from "codemirror";
-import { sourceExtensions } from "../../view/editor-setup.ts";
+import { sourceExtensions } from "../../dom/editor-setup.ts";
 
 /**
  * **只看不改**的源码视图。
  *
- * 与编辑器用的是同一套 CodeMirror 配置（`view/editor-setup.ts`）：配色、模板块的
+ * 与编辑器用的是同一套 CodeMirror 配置（`dom/editor-setup.ts`）：配色、模板块的
  * 装饰、`[[内部链接]]`、代码块的语言高亮都一模一样。差别只有一条 —— 这里是只读的：
  * `editable: false` 让内容不再是可编辑区（光标不进、字敲不进去），
  * `readOnly: true` 再挡住快捷键与命令这一类改文档的路径。

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { policyLabel, type Policy } from "../bindings/note.ts";
-import { gpgAvailable } from "../core/preferences.ts";
+import { policyLabel, type Policy } from "../../ipc/note.ts";
+import { gpgAvailable } from "../../core/preferences.ts";
 import KeyChooser from "./KeyChooser.vue";
 
 /**

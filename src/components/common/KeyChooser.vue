@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { keyLabel, shortFingerprint, type GpgKey } from "../bindings/keys.ts";
+import { keyLabel, shortFingerprint, type GpgKey } from "../../ipc/keys.ts";
 
 /**
  * 挑一把 GPG 密钥。

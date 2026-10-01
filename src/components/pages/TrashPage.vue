@@ -6,7 +6,7 @@ import {
   formatBytes,
   formatTime,
   type TrashEntry,
-} from "../../bindings/maintenance.ts";
+} from "../../ipc/maintenance.ts";
 import { flash } from "../../core/notice.ts";
 import { maintenance } from "../../core/preferences.ts";
 

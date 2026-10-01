@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Download, History, Pencil, Star, Trash2, type LucideIcon } from "@lucide/vue";
 import { computed } from "vue";
-import type { Via } from "../../bindings/address.ts";
+import type { Via } from "../../ipc/address.ts";
 import ViaHint from "./ViaHint.vue";
 
 /**

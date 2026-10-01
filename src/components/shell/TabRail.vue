@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from "vue";
 import { PanelLeftClose, PanelLeftOpen, Plus, Settings, X } from "@lucide/vue";
-import { openMenu } from "../../view/context-menu.ts";
+import { openMenu } from "../../dom/context-menu.ts";
 import { railCollapsed, toggleRail } from "../../core/preferences.ts";
 import type { TabState } from "../../core/tabs.ts";
 import { initialOf } from "../../core/title.ts";

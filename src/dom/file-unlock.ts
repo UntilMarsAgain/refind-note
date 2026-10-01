@@ -7,7 +7,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import type { FileInfo } from "../bindings/files.ts";
+import type { FileInfo } from "../ipc/files.ts";
 
 /** 问一份文件的现状（不读字节，只看明文头与本次会话里有没有口令） */
 export async function fileInfo(name: string): Promise<FileInfo | null> {

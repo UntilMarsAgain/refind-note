@@ -5,7 +5,7 @@
  */
 
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import type { Preferences } from "../bindings/settings.ts";
+import type { Preferences } from "../ipc/settings.ts";
 import { accent, applyTheme } from "./theme.ts";
 
 /** 把一份偏好应用到页面上 */

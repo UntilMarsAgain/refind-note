@@ -2,7 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { BookOpen, Code } from "@lucide/vue";
-import type { HelpPage } from "../../bindings/help.ts";
+import type { HelpPage } from "../../ipc/help.ts";
 import NoteContent from "../note/NoteContent.vue";
 import PageHeader, { type PageAction } from "../note/PageHeader.vue";
 import SourceView from "../note/SourceView.vue";

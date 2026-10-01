@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import type { Protection, ProtectionReport } from "../../bindings/note.ts";
+import type { Protection, ProtectionReport } from "../../ipc/note.ts";
 import { flash } from "../../core/notice.ts";
 import { forgetPassphrase } from "../../core/preferences.ts";
 

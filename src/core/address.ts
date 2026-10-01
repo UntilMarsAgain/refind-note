@@ -11,7 +11,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import type { ParsedAddress, ResolvedAddress } from "../bindings/address.ts";
+import type { ParsedAddress, ResolvedAddress } from "../ipc/address.ts";
 import { labelOf } from "./special.ts";
 
 /**

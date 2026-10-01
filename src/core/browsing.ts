@@ -9,7 +9,7 @@
 
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import type { Visit } from "../bindings/activity.ts";
+import type { Visit } from "../ipc/activity.ts";
 import { preferences } from "./preferences.ts";
 
 export const browsingHistory = ref<Visit[]>([]);

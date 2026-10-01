@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { Star } from "@lucide/vue";
-import type { HelpPage } from "../../bindings/help.ts";
+import type { HelpPage } from "../../ipc/help.ts";
 import { starred, toggleStar } from "../../core/preferences.ts";
 
 /**

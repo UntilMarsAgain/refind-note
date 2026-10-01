@@ -1,7 +1,7 @@
 import { computed, ref } from "vue";
 import { resolveAddress, titleOf } from "./address.ts";
 import { recordVisit } from "./browsing.ts";
-import type { ResolvedAddress } from "../bindings/address.ts";
+import type { ResolvedAddress } from "../ipc/address.ts";
 
 /** 切换标签页的原因 */
 export type Movement =

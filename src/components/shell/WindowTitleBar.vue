@@ -21,7 +21,7 @@ import {
 } from "@lucide/vue";
 import { logoSrc } from "../../core/theme.ts";
 import { currentWindow } from "../../core/window-api.ts";
-import type { ThemeMode } from "../../bindings/settings.ts";
+import type { ThemeMode } from "../../ipc/settings.ts";
 import { preferences } from "../../core/preferences.ts";
 
 /**

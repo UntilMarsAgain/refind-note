@@ -2,7 +2,7 @@
 import { computed } from "vue";
 import { Copy } from "@lucide/vue";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import type { ThemeMode } from "../../bindings/settings.ts";
+import type { ThemeMode } from "../../ipc/settings.ts";
 import { flash } from "../../core/notice.ts";
 import {
   databaseMeta,

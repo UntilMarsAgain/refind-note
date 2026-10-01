@@ -14,8 +14,8 @@ const page = ref(1);
 <script setup lang="ts">
 import { computed, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import type { HelpPage } from "../../bindings/help.ts";
-import type { NoteSummary } from "../../bindings/note.ts";
+import type { HelpPage } from "../../ipc/help.ts";
+import type { NoteSummary } from "../../ipc/note.ts";
 import { metaOf } from "../../core/special.ts";
 
 /**

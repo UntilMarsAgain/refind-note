@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { X } from "@lucide/vue";
-import { closeImage, viewingImage } from "../../view/image-viewer.ts";
-import { saveNameOf, saveVaultFile, savableTitle } from "../../view/file-save.ts";
+import { closeImage, viewingImage } from "../../dom/image-viewer.ts";
+import { saveNameOf, saveVaultFile, savableTitle } from "../../dom/file-save.ts";
 import { flash } from "../../core/notice.ts";
 
 /**

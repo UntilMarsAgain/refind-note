@@ -5,7 +5,7 @@
  * 各处的项由各自给出（现在只有标签栏），这里只负责画出来、并保证关得掉。
  */
 import { onBeforeUnmount, watch } from "vue";
-import { closeMenu, contextMenu } from "../../view/context-menu.ts";
+import { closeMenu, contextMenu } from "../../dom/context-menu.ts";
 
 function onKey(event: KeyboardEvent) {
   if (event.key === "Escape") {

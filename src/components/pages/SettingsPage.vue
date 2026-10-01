@@ -2,10 +2,10 @@
 import { computed, nextTick, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { flash } from "../../core/notice.ts";
-import type { Policy } from "../../bindings/note.ts";
-import KeyChooser from "../KeyChooser.vue";
+import type { Policy } from "../../ipc/note.ts";
+import KeyChooser from "../common/KeyChooser.vue";
 import NamespaceManager from "./NamespaceManager.vue";
-import type { ThemeMode } from "../../bindings/settings.ts";
+import type { ThemeMode } from "../../ipc/settings.ts";
 import {
   databaseRoot,
   gpgAvailable,
@@ -18,7 +18,7 @@ import {
   updatePreferences,
   workspaceRoot,
 } from "../../core/preferences.ts";
-import { formatTime } from "../../bindings/maintenance.ts";
+import { formatTime } from "../../ipc/maintenance.ts";
 
 /**
  * 设置页（`special:settings`）。

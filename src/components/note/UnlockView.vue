@@ -2,7 +2,7 @@
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { Lock, Unlock } from "@lucide/vue";
-import type { Reading } from "../../bindings/note.ts";
+import type { Reading } from "../../ipc/note.ts";
 import { unlock } from "../../core/preferences.ts";
 
 /**

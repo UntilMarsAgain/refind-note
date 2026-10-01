@@ -10,7 +10,7 @@ import {
   Scan,
   Sun,
 } from "@lucide/vue";
-import type { ThemeMode } from "../../bindings/settings.ts";
+import type { ThemeMode } from "../../ipc/settings.ts";
 
 /**
  * 贴在右下角、往上堆的一组按钮。

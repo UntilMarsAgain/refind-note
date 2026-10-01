@@ -4,15 +4,15 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { Lock, Upload } from "@lucide/vue";
-import type { FileEntry, Uploaded } from "../../bindings/files.ts";
-import { formatBytes, formatTime } from "../../bindings/maintenance.ts";
-import { fileReferenceOf } from "../../view/file-links.ts";
-import { saveVaultFile } from "../../view/file-save.ts";
+import type { FileEntry, Uploaded } from "../../ipc/files.ts";
+import { formatBytes, formatTime } from "../../ipc/maintenance.ts";
+import { fileReferenceOf } from "../../dom/file-links.ts";
+import { saveVaultFile } from "../../dom/file-save.ts";
 import { flash } from "../../core/notice.ts";
 import { protection } from "../../core/preferences.ts";
-import type { Policy } from "../../bindings/note.ts";
-import StoragePicker from "../StoragePicker.vue";
-import { clipboardFiles, uploadPasted } from "../../view/paste-files.ts";
+import type { Policy } from "../../ipc/note.ts";
+import StoragePicker from "../common/StoragePicker.vue";
+import { clipboardFiles, uploadPasted } from "../../dom/paste-files.ts";
 
 /**
  * 文件（`special:files`）。

@@ -6,7 +6,7 @@ import {
   policyLabel,
   type Policy,
   type RevisionSummary,
-} from "../../bindings/note.ts";
+} from "../../ipc/note.ts";
 import { gpgAvailable, protection as repoProtection } from "../../core/preferences.ts";
 
 /**
