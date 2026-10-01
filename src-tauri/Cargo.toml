@@ -57,6 +57,8 @@ tauri-plugin-deep-link = "2.6.1"
 brotli = "9.0.0"
 aes-gcm = "0.11.1"
 sm4 = "0.6.0"
+ureq = "3.4.2"
+hmac = "0.13.0"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
