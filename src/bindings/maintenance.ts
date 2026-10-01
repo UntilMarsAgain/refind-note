@@ -34,7 +34,7 @@ export interface MaintenanceReport {
     gc: GcReport | null;
 }
 
-/** 整理设置（跟着仓库走，在 `settings/config.json` 里） */
+/** 整理设置（跟着仓库走，在 `settings/repository.json` 里） */
 export interface MaintenanceInfo {
     /** 回收站留多少天 */
     trash_keep_days: number;

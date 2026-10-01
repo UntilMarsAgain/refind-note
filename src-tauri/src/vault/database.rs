@@ -11,7 +11,7 @@
 //!   trash/<命名空间>/<id>.log
 //!
 //! settings/
-//!   config.json    数据语义设置（目前是封装策略）—— 跟着仓库走
+//!   repository.json  这个仓库自己的设置（默认封装策略、回收站保留、整理间隔）
 //! ```
 //!
 //! 目录与那些 JSON 在打开时按需建出来：第一次启动就该是完整的，不必等写了一次才出现。
@@ -37,7 +37,9 @@ pub const MODEL_VERSION: &str = "1.0.0";
 
 const META_FILE: &str = "meta.json";
 const NAMESPACES_FILE: &str = "namespaces.json";
-const CONFIG_FILE: &str = "config.json";
+const CONFIG_FILE: &str = "repository.json";
+/// 老仓库里这个文件叫 `config.json`：名字看不出它是仓库的，改名时留一条迁移
+const LEGACY_CONFIG_FILE: &str = "config.json";
 const TITLES_FILE: &str = "titles.json";
 const BLOBS_DIR: &str = "blobs";
 const OBJECTS_DIR: &str = "objects";
@@ -91,7 +93,7 @@ impl Default for Config {
 #[derive(Debug)]
 pub struct Database {
     root: PathBuf,
-    /// 数据语义设置（`config.json`）所在的那一层
+    /// 仓库设置（`repository.json`）所在的那一层
     settings: PathBuf,
     meta: Meta,
 }
@@ -99,8 +101,11 @@ pub struct Database {
 impl Database {
     /// 打开（必要时建立）数据库，并认一遍它是谁的、什么版本。
     ///
-    /// 数据库自己的文件都在 `db/` 下；**数据语义设置**（`config.json`）放到
-    /// 工作目录的 `settings/` 下 —— 它跟着仓库走，但和别的配置文件放在一处。
+    /// 数据库自己的文件都在 `db/` 下；**仓库自己的设置**（`repository.json`，
+    /// 默认封装策略、回收站保留天数、整理间隔）放到工作目录的 `settings/` 下 ——
+    /// 它跟着这份仓库走（换台机器读同一份仓库，行为要一样），只是和别的配置文件放在一处。
+    /// 名字里写的是 **repository**：`settings/` 下还有 `preferences.json`（这台机器的偏好），
+    /// 不点明的话，从文件名看不出哪个跟仓库走、哪个跟机器走。
     pub fn open(workspace: &Workspace) -> Result<Self, String> {
         let root = workspace.database_dir();
         let settings = workspace.settings_dir();
@@ -115,7 +120,15 @@ impl Database {
         // 命名空间表放在 db/ 而不是 settings/：它决定"一个标题说的是哪一篇"，
         // 是这批数据的一部分（换台机器读同一份仓库，也得认出同一批标题）
         ensure_json(&root.join(NAMESPACES_FILE), &NamespaceTable::default())?;
-        ensure_json(&settings.join(CONFIG_FILE), &Config::default())?;
+        // 老仓库里它叫 `config.json`：上一次改名之前写下的，先搬过来，
+        // 免得"换个文件名"就把设置读丢、退回默认值
+        let legacy = settings.join(LEGACY_CONFIG_FILE);
+        let current = settings.join(CONFIG_FILE);
+        if legacy.is_file() && !current.is_file() {
+            fs::rename(&legacy, &current)
+                .map_err(|error| format!("搬不动 {}：{error}", legacy.display()))?;
+        }
+        ensure_json(&current, &Config::default())?;
 
         let database = Self {
             root,
@@ -362,6 +375,37 @@ mod tests {
         // 重新打开认得出来，且不新建
         let again = open(&root).unwrap();
         assert_eq!(again.meta().created_at, database.meta().created_at);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 老仓库里的 `config.json` 会被搬成 `repository.json`，设置不丢
+    #[test]
+    fn the_old_config_file_is_moved_to_its_new_name() {
+        let root = scratch("legacy-config");
+        {
+            // 老样子：先用旧名字写一份非默认的设置
+            let workspace = Workspace::open(root.clone()).unwrap();
+            let settings = workspace.settings_dir();
+            fs::create_dir_all(&settings).unwrap();
+            fs::write(
+                settings.join(LEGACY_CONFIG_FILE),
+                r#"{"trash_keep_days":7,"gc_interval_days":3}"#,
+            )
+            .unwrap();
+        }
+
+        let database = open(&root).unwrap();
+        assert!(
+            !database.settings.join(LEGACY_CONFIG_FILE).exists(),
+            "旧的该搬走"
+        );
+        assert!(database.settings.join(CONFIG_FILE).is_file());
+
+        // 搬过来的是**内容**，不是一份新的默认值
+        let config = database.config();
+        assert_eq!(config.trash_keep_days, 7);
+        assert_eq!(config.gc_interval_days, 3);
 
         let _ = fs::remove_dir_all(&root);
     }

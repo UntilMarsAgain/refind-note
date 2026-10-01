@@ -32,7 +32,7 @@ struct WorkspaceInfo {
     maintenance: MaintenanceInfo,
 }
 
-/// 整理相关的设置（都在 `settings/config.json` 里）
+/// 整理相关的设置（都在仓库的 `settings/repository.json` 里）
 #[derive(Serialize)]
 struct MaintenanceInfo {
     trash_keep_days: u64,

@@ -85,7 +85,7 @@ function submitAccent() {
   accentDraft.value = preferences.value.accent;
 }
 
-/** 改整理设置：两个天数一起提交（它俩都在仓库的 config.json 里） */
+/** 改整理设置：两个天数一起提交（它俩都在仓库的设置里） */
 async function submitMaintenance(patch: { trash?: number; gc?: number }) {
   const trash = patch.trash ?? maintenance.value.trash_keep_days;
   const gc = patch.gc ?? maintenance.value.gc_interval_days;

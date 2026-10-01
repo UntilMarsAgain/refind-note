@@ -29,7 +29,7 @@ const preferencesFile = computed(() =>
   workspaceRoot.value ? `${workspaceRoot.value}/settings/preferences.json` : NOT_OPEN,
 );
 const configFile = computed(() =>
-  workspaceRoot.value ? `${workspaceRoot.value}/settings/config.json` : NOT_OPEN,
+  workspaceRoot.value ? `${workspaceRoot.value}/settings/repository.json` : NOT_OPEN,
 );
 
 /** 深浅色的显示名 */

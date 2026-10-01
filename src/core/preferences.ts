@@ -39,7 +39,7 @@ export const databaseMeta = ref<DatabaseMeta | null>(null);
 /**
  * 整理设置（回收站留多少天、自动整理隔多少天、上次各是什么时候）。
  *
- * 它在**仓库**里（`settings/config.json`），不在偏好里 —— 换台机器读同一份仓库，
+ * 它在**仓库**里（`settings/repository.json`），不在偏好里 —— 换台机器读同一份仓库，
  * 这两个期限也该跟着走。所以它与偏好分开存，重新读一次才更新。
  */
 export const maintenance = ref<MaintenanceInfo>({
@@ -70,7 +70,7 @@ export const gpgAvailable = ref(false);
 /**
  * 新内容落盘时的**仓库默认**保护策略。
  *
- * 它**不是偏好**，是数据库的设置（`settings/config.json`）：它决定数据长什么样，
+ * 它**不是偏好**，是仓库自己的设置（`settings/repository.json`）：它决定数据长什么样，
  * 跟着仓库走，而不是跟着这台机器走。已经写过的笔记照它自己最新一版粘住，
  * 它只对还没有正文的新笔记生效。
  */
