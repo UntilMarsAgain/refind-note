@@ -2,13 +2,13 @@
 //!
 //! 解析器只构建一次（见 [`MARKDOWN`]）；解析本身取 `&self`，可复用。
 //!
-//! 这一层不知道存储：目标是否存在、模板页写了什么，都由调用方在渲染前通过
-//! [`crate::title::LinkResolver`] 传进来，再经 [`render_with`] 注入当次渲染。
+//! 这一层不知道存储：目标是否存在，由调用方在渲染前通过
+//! [`crate::vault::target::Resolver`] 传进来，再经 [`render_with`] 注入当次渲染。
 #![allow(dead_code)]
 
 pub mod syntax;
 
-use crate::vault::title::LinkResolver;
+use crate::vault::target::Resolver;
 use markdown_it::MarkdownIt;
 use std::cell::RefCell;
 use std::sync::LazyLock;
@@ -44,11 +44,11 @@ thread_local! {
     /// **每次调用各自一份**——两个线程同时渲染时，一个的「用完清空」会把另一个
     /// 正在进行的渲染打断（并行跑测试就复现了）。`parse(&self, src)` 又没有 env
     /// 参数，所以用线程局部变量承载：解析本身是同步的，规则必然跑在同一个线程上。
-    static CURRENT_RESOLVER: RefCell<Option<LinkResolver>> = const { RefCell::new(None) };
+    static CURRENT_RESOLVER: RefCell<Option<Resolver>> = const { RefCell::new(None) };
 }
 
 /// 取当前渲染的解析器（供自定义语法使用）
-pub fn current_resolver() -> Option<LinkResolver> {
+pub fn current_resolver() -> Option<Resolver> {
     CURRENT_RESOLVER.with(|cell| cell.borrow().clone())
 }
 
@@ -108,7 +108,7 @@ pub fn render(markdown: &str) -> String {
 }
 
 /// 带链接解析的渲染：`[[目标]]` 会额外带上 `data-key` / `data-title` / `data-missing`。
-pub fn render_with(markdown: &str, resolver: Option<&LinkResolver>) -> String {
+pub fn render_with(markdown: &str, resolver: Option<&Resolver>) -> String {
     // 存下旧值、用完还原：若出现嵌套渲染，也不会互相踩
     let previous = CURRENT_RESOLVER.with(|cell| cell.borrow().clone());
     CURRENT_RESOLVER.with(|cell| *cell.borrow_mut() = resolver.cloned());
@@ -262,9 +262,9 @@ mod tests {
                 std::thread::spawn(move || {
                     let mut keys = HashSet::new();
                     keys.insert(format!("0:条目{index}"));
-                    let resolver = LinkResolver::new(
-                        Arc::new(keys),
+                    let resolver = crate::vault::target::Resolver::new(
                         Arc::new(crate::vault::namespace::NamespaceTable::builtin()),
+                        Arc::new(crate::vault::target::PageIndex::of_keys(keys)),
                         None,
                     );
                     let html = render_with(

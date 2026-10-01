@@ -5,4 +5,5 @@ pub mod database;
 pub mod namespace;
 pub mod notes;
 pub mod resolve;
+pub mod target;
 pub mod title;

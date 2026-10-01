@@ -17,7 +17,7 @@
 //! （见 `commit_with`）。回滚有两种做法：照当前保护重写（`rollback`），
 //! 或直接复制那一版的封装（`rollback_copy`）。
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -30,7 +30,7 @@ use crate::storage::store::hash_hex;
 use crate::storage::workspace::{append_line, read_json, write_bytes, write_json};
 use crate::vault::database::{now, Database};
 use crate::vault::namespace::MAIN_ID;
-use crate::vault::title::LinkResolver;
+use crate::vault::target::{PageIndex, Resolver};
 
 const DEFAULT_MIME: &str = "text/markdown";
 
@@ -671,37 +671,19 @@ impl Database {
 
     /// 把正文渲染成 HTML。
     ///
-    /// 内部链接要判红蓝，所以得先把「现有的全部页面名」交给解析器 ——
-    /// 渲染发生在 markdown-it 的回调里，那时没有仓库可查。
+    /// 内部链接要判红蓝，所以得先把"现有页面"的索引交给解析器 ——
+    /// 渲染发生在 markdown 的回调里，那时没有仓库可查。
+    /// 那份索引与地址解析用的是同一个来源（见 [`PageIndex::of`]）。
     ///
     /// 阅读页与编辑器预览都走这里：**渲染只有一处**，所以"预览里是什么样"
     /// 与"存下来再读是什么样"不会分家。
     pub fn render_html(&self, markdown: &str, title: &str) -> Result<String, String> {
         let table = Arc::new(self.namespaces());
-        // 当前笔记：`[[/子页]]` 要拼在它的页面名后面，命名空间不变
+        // 当前页：`[[/子页]]` 要拼在它的页面名后面，命名空间不变
         let from = crate::vault::title::parse(title, &table).ok();
-        let resolver = LinkResolver::new(self.link_keys()?, table, from);
+        let index = Arc::new(PageIndex::of(self));
+        let resolver = Resolver::new(table, index, from);
         Ok(crate::markdown::render_with(markdown, Some(&resolver)))
-    }
-
-    /// 现有页面的**规范键**集合（链接解析用它判红 / 蓝链）。
-    ///
-    /// 笔记与帮助页放在同一张表里 —— 帮助页不在仓库里，但链接解析要一视同仁
-    /// （`[[Help:入门]]` 该是一条蓝链）。
-    fn link_keys(&self) -> Result<Arc<HashSet<String>>, String> {
-        let table = self.namespaces();
-        let mut keys: HashSet<String> = self
-            .titles()?
-            .notes
-            .values()
-            .filter_map(|display| crate::vault::title::parse(display, &table).ok())
-            .map(|parsed| parsed.key())
-            .collect();
-
-        for slug in crate::features::help::slugs() {
-            keys.insert(format!("{}:{slug}", crate::vault::namespace::HELP_ID));
-        }
-        Ok(Arc::new(keys))
     }
 
     /// 这一篇的全部提交，**新的在前**。

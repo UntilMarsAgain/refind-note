@@ -49,6 +49,8 @@ impl Database {
         };
         let ParsedAddress { address, canonical } = parsed;
 
+        let index = crate::vault::target::PageIndex::of(self);
+
         if address.namespace.id == crate::vault::namespace::HELP_ID {
             let wanted = address.page.trim();
             let Some(found) = crate::features::help::find(self, wanted) else {
@@ -97,7 +99,8 @@ impl Database {
         }
         .display(&table);
 
-        if self.exists(&title) {
+        // "在不在"问的就是链接解析那张索引：一处回答，两处一样
+        if index.contains(&address.namespace.id, &address.page) {
             return Ok(Some(ResolvedAddress {
                 address,
                 canonical,

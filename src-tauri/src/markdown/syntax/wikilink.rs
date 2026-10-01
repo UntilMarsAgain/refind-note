@@ -12,7 +12,7 @@
 //! 只输出 `data-doc`。
 
 use crate::markdown::current_resolver;
-use crate::vault::title::Resolved;
+use crate::vault::target::Target;
 use markdown_it::parser::inline::{InlineRule, InlineState, Text};
 use markdown_it::{MarkdownIt, Node, NodeValue, Renderer};
 
@@ -22,7 +22,7 @@ pub struct WikiLink {
     /// 笔记里原样写的目标，便于排障与回退
     pub doc: String,
     /// 解析结果；没有注入解析器时为 None
-    pub resolved: Option<Resolved>,
+    pub resolved: Option<Target>,
 }
 
 impl NodeValue for WikiLink {
@@ -32,16 +32,16 @@ impl NodeValue for WikiLink {
         attrs.push(("data-doc", self.doc.clone()));
 
         if let Some(resolved) = &self.resolved {
-            attrs.push(("data-key", resolved.key.clone()));
-            attrs.push(("data-title", resolved.title.clone()));
+            attrs.push(("data-key", resolved.key().to_string()));
+            attrs.push(("data-title", resolved.title().to_string()));
             attrs.push((
                 "data-missing",
-                if resolved.exists { "false" } else { "true" }.into(),
+                if resolved.exists() { "false" } else { "true" }.into(),
             ));
             // 跨站链接：目标是别人家的页面。带上地址，前端按外链打开（绿色）
-            if let Some(url) = &resolved.url {
+            if let Some(url) = resolved.url() {
                 attrs.push(("data-interwiki", "true".into()));
-                attrs.push(("data-url", url.clone()));
+                attrs.push(("data-url", url.to_string()));
             }
         }
 
@@ -97,8 +97,7 @@ impl InlineRule for WikiLinkScanner {
 #[cfg(test)]
 mod tests {
     use crate::markdown::{render, render_with};
-    use crate::vault::title::LinkResolver;
-    use std::collections::HashSet;
+    use crate::vault::target::{PageIndex, Resolver};
     use std::sync::Arc;
 
     #[test]
@@ -145,11 +144,9 @@ mod tests {
     /// 注入解析器后，红链与蓝链必须被标出来
     #[test]
     fn resolver_marks_red_and_blue_links() {
-        let mut keys = HashSet::new();
-        keys.insert("0:存在的条目".to_string());
-        let resolver = LinkResolver::new(
-            Arc::new(keys),
+        let resolver = Resolver::new(
             Arc::new(crate::vault::namespace::NamespaceTable::builtin()),
+            Arc::new(PageIndex::of_keys(["0:存在的条目".to_string()])),
             None,
         );
 
