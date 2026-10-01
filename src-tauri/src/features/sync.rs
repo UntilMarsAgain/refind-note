@@ -88,6 +88,10 @@ pub struct SyncSettings {
     pub enabled: bool,
     /// 传上去之前要不要再套一层（钥匙就是下面这一把）
     pub encrypt: bool,
+    /// 下一次同步**把本机这份整份重传**（换了钥匙就得这样：云端那些旧密文已经解不开了）。
+    /// 跑完这一趟就自动清掉。
+    #[serde(default)]
+    pub reupload: bool,
     /// **软件生成的**那把钥匙（base64，32 字节）。
     ///
     /// 它只在这台机器上（`settings/sync.json`，权限只给本人）——换台机器要把这串抄过去，
@@ -108,7 +112,72 @@ impl SyncSettings {
     }
 }
 
-/// 生成一把新的云端钥匙：32 字节随机，写成 base64 给人抄
+/// 给**界面**看的那一份：**不含任何秘密**。
+///
+/// 密钥与 S3 的私钥都不出去 —— 存本地至少得碰到这台电脑，显示出来就不一定了
+/// （直播、共享屏幕、随手截个图，都可能把它带出去）。界面只需要知道"配没配"。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SyncSettingsView {
+    pub enabled: bool,
+    pub encrypt: bool,
+    /// 云端密钥配好了没有（**钥匙本身不出去**）
+    pub has_key: bool,
+    /// S3 私钥配好了没有
+    pub has_secret: bool,
+    pub endpoint: String,
+    pub region: String,
+    pub bucket: String,
+    pub prefix: String,
+    pub access_key: String,
+}
+
+impl SyncSettings {
+    /// 交出去的那一份（秘密只报"有没有"）
+    pub fn view(&self) -> SyncSettingsView {
+        SyncSettingsView {
+            enabled: self.enabled,
+            encrypt: self.encrypt,
+            has_key: !self.key.is_empty(),
+            has_secret: !self.s3.secret_key.is_empty(),
+            endpoint: self.s3.endpoint.clone(),
+            region: self.s3.region.clone(),
+            bucket: self.s3.bucket.clone(),
+            prefix: self.s3.prefix.clone(),
+            access_key: self.s3.access_key.clone(),
+        }
+    }
+
+    /// 界面改完交回来：秘密**留空就是不改**（界面根本拿不到它们，也就无从交回）
+    pub fn apply(&mut self, patch: SyncSettingsPatch) {
+        self.enabled = patch.enabled;
+        self.encrypt = patch.encrypt;
+        self.s3.endpoint = patch.endpoint;
+        self.s3.region = patch.region;
+        self.s3.bucket = patch.bucket;
+        self.s3.prefix = patch.prefix;
+        self.s3.access_key = patch.access_key;
+        if let Some(secret) = patch.secret_key {
+            self.s3.secret_key = secret;
+        }
+    }
+}
+
+/// 界面上改完交回来的那一份
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct SyncSettingsPatch {
+    pub enabled: bool,
+    pub encrypt: bool,
+    pub endpoint: String,
+    pub region: String,
+    pub bucket: String,
+    pub prefix: String,
+    pub access_key: String,
+    /// `None` = 不改；`Some("")` = 清掉
+    pub secret_key: Option<String>,
+}
+
+/// 生成一把新的云端钥匙：32 字节随机，写成 base64
 pub fn generate_key() -> Result<String, String> {
     use base64::Engine as _;
 
@@ -407,10 +476,20 @@ enum Decision {
 /// 单独写成一个纯函数，是为了能**不碰网络**把每条分支都试一遍 —— 同步最怕的就是
 /// "某种情形下悄悄丢了东西"，而那只能靠把这些情形一个个列出来盯着。
 fn decide(
+    force_upload: bool,
     local: Option<&Local>,
     remote: Option<&Remote>,
     aligned: Option<&Stamp>,
 ) -> (Decision, String) {
+    // 换过钥匙的那一趟：本机有的一律重传（云端那些旧密文已经解不开了）
+    if force_upload {
+        return match (local, remote) {
+            (Some(_), _) => (Decision::Upload, "重传这一份".to_string()),
+            (None, Some(_)) => (Decision::Download, String::new()),
+            (None, None) => (Decision::Nothing, String::new()),
+        };
+    }
+
     match (local, remote, aligned) {
         // ---- 两边都有 ----
         (Some(local), Some(remote), aligned) => {
@@ -497,13 +576,27 @@ pub fn run(
     });
     let lock = acquire(&s3)?;
 
-    let outcome = reconcile(&s3, &root, &mut index, transform.as_ref(), progress);
+    let outcome = reconcile(
+        &s3,
+        &root,
+        &mut index,
+        transform.as_ref(),
+        settings.reupload,
+        progress,
+    );
 
     // 不管成没成，锁都要放掉：留着它，别的机器要等过期才能动
     let _ = lock.release(&s3);
 
     let report = outcome?;
     index.save(workspace)?;
+
+    // "整份重传"是**一次性**的：这一趟跑完就清掉，免得此后每次都重传
+    if settings.reupload {
+        let mut updated = settings.clone();
+        updated.reupload = false;
+        save_settings(workspace, &updated)?;
+    }
     Ok(report)
 }
 
@@ -513,6 +606,7 @@ fn reconcile(
     root: &Path,
     index: &mut Index,
     transform: &dyn SyncTransform,
+    force_upload: bool,
     progress: &dyn Fn(Progress),
 ) -> Result<SyncReport, String> {
     let mut report = SyncReport::default();
@@ -546,7 +640,12 @@ fn reconcile(
     let planned: Vec<(String, Decision, String)> = paths
         .iter()
         .map(|path| {
-            let (decision, why) = decide(local.get(path), remote.get(path), index.files.get(path));
+            let (decision, why) = decide(
+                force_upload,
+                local.get(path),
+                remote.get(path),
+                index.files.get(path),
+            );
             (path.clone(), decision, why)
         })
         .collect();
@@ -906,6 +1005,43 @@ mod tests {
         }
     }
 
+    /// **交给界面的那一份里不许有秘密**：密钥与 S3 私钥都只报"有没有"。
+    ///
+    /// 这条是给后来者看的护栏：哪天有人图省事把 `key` 加回 view，测试当场就红。
+    #[test]
+    fn the_view_carries_no_secrets() {
+        let settings = SyncSettings {
+            enabled: true,
+            encrypt: true,
+            reupload: false,
+            key: "SUPER-SECRET-CLOUD-KEY".to_string(),
+            s3: S3Config {
+                endpoint: "https://s3.example.com".to_string(),
+                bucket: "b".to_string(),
+                access_key: "AK".to_string(),
+                secret_key: "SUPER-SECRET-S3".to_string(),
+                ..Default::default()
+            },
+        };
+
+        let shown = serde_json::to_string(&settings.view()).unwrap();
+        assert!(!shown.contains("SUPER-SECRET"), "{shown}");
+        assert!(shown.contains("\"has_key\":true"), "{shown}");
+        assert!(shown.contains("\"has_secret\":true"), "{shown}");
+
+        // 界面交回来时私钥留空 = **不改**（它本来就拿不到原来那一把）
+        let mut target = settings.clone();
+        target.apply(SyncSettingsPatch {
+            enabled: false,
+            encrypt: true,
+            endpoint: "https://other".to_string(),
+            ..Default::default()
+        });
+        assert_eq!(target.s3.secret_key, "SUPER-SECRET-S3");
+        assert_eq!(target.s3.endpoint, "https://other");
+        assert_eq!(target.key, "SUPER-SECRET-CLOUD-KEY");
+    }
+
     /// 云端那一层：封了能解、封出来的每一次都不一样、换了钥匙解不开
     #[test]
     fn the_cloud_layer_round_trips() {
@@ -970,6 +1106,7 @@ mod tests {
     #[test]
     fn a_quiet_pair_does_nothing() {
         let (decision, _) = decide(
+            false,
             Some(&local("h1", 100)),
             Some(&remote("aaa", 100)),
             Some(&stamp("h1", 100, "aaa")),
@@ -980,6 +1117,7 @@ mod tests {
     #[test]
     fn only_the_local_side_changed_uploads() {
         let (decision, _) = decide(
+            false,
             Some(&local("h2", 200)),
             Some(&remote("aaa", 100)),
             Some(&stamp("h1", 100, "aaa")),
@@ -990,6 +1128,7 @@ mod tests {
     #[test]
     fn only_the_remote_side_changed_downloads() {
         let (decision, _) = decide(
+            false,
             Some(&local("h1", 100)),
             Some(&remote("bbb", 200)),
             Some(&stamp("h1", 100, "aaa")),
@@ -1001,6 +1140,7 @@ mod tests {
     #[test]
     fn a_real_conflict_is_settled_by_time() {
         let (decision, why) = decide(
+            false,
             Some(&local("h2", 200)),
             Some(&remote("bbb", 300)),
             Some(&stamp("h1", 100, "aaa")),
@@ -1009,6 +1149,7 @@ mod tests {
         assert!(!why.is_empty(), "取哪边、为什么，要说得出来");
 
         let (decision, _) = decide(
+            false,
             Some(&local("h2", 400)),
             Some(&remote("bbb", 300)),
             Some(&stamp("h1", 100, "aaa")),
@@ -1017,6 +1158,7 @@ mod tests {
 
         // 时间几乎一样时保守：留本机那份（宁可多传一次，也别把刚写的盖掉）
         let (decision, _) = decide(
+            false,
             Some(&local("h2", 300)),
             Some(&remote("bbb", 300)),
             Some(&stamp("h1", 100, "aaa")),
@@ -1027,10 +1169,10 @@ mod tests {
     /// 新写的传上去，云端多出来的拿回来
     #[test]
     fn a_first_sync_takes_the_union() {
-        let (decision, _) = decide(Some(&local("h1", 100)), None, None);
+        let (decision, _) = decide(false, Some(&local("h1", 100)), None, None);
         assert_eq!(decision, Decision::Upload);
 
-        let (decision, _) = decide(None, Some(&remote("aaa", 100)), None);
+        let (decision, _) = decide(false, None, Some(&remote("aaa", 100)), None);
         assert_eq!(decision, Decision::Download);
     }
 
@@ -1039,6 +1181,7 @@ mod tests {
     fn deletions_travel_only_when_the_other_side_is_untouched() {
         // 本机删了（索引里有、本机没有），云端还在 → 云端也删
         let (decision, why) = decide(
+            false,
             None,
             Some(&remote("aaa", 100)),
             Some(&stamp("h1", 100, "aaa")),
@@ -1048,6 +1191,7 @@ mod tests {
 
         // 云端删了，本机没动过 → 本机也删
         let (decision, _) = decide(
+            false,
             Some(&local("h1", 100)),
             None,
             Some(&stamp("h1", 100, "aaa")),
@@ -1056,6 +1200,7 @@ mod tests {
 
         // 云端删了、本机**改过** → 不跟着删（本机那份是新的，传上去）
         let (decision, _) = decide(
+            false,
             Some(&local("h2", 300)),
             None,
             Some(&stamp("h1", 100, "aaa")),
@@ -1327,6 +1472,7 @@ mod end_to_end {
         SyncSettings {
             enabled: true,
             encrypt: true,
+            reupload: false,
             key: key.to_string(),
             s3: S3Config {
                 endpoint: address.to_string(),

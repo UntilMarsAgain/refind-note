@@ -19,20 +19,39 @@ export interface S3Config {
     secret_key: string;
 }
 
-/** 同步的设置（`settings/sync.json`，只在这台机器上） */
+/**
+ * 同步的设置 —— **界面这一侧看不到秘密**。
+ *
+ * 云端密钥与 S3 私钥都不出后端：存本地至少得碰到这台电脑，显示出来就不一定了
+ * （直播、共享屏幕、随手截图都可能把它带出去）。界面只知道"配没配"。
+ */
 export interface SyncSettings {
     /** 启动时自动同步一次 */
     enabled: boolean;
-    /** 传上去之前要不要再套一层（钥匙就是下面这一把） */
+    /** 传上去之前要不要再套一层 */
     encrypt: boolean;
-    /**
-     * **软件生成的**那把云端密钥（base64，32 字节）。
-     *
-     * 它只在这台机器上；换台机器同步同一份仓库，要把这一串抄过去 ——
-     * 抄不过去，云端那一份就解不开了。
-     */
-    key: string;
-    s3: S3Config;
+    /** 云端密钥配好了没有（**钥匙本身不在这份数据里**） */
+    has_key: boolean;
+    /** S3 私钥配好了没有 */
+    has_secret: boolean;
+    endpoint: string;
+    region: string;
+    bucket: string;
+    prefix: string;
+    access_key: string;
+}
+
+/** 改完交回去的那一份：私钥留空就是不改 */
+export interface SyncSettingsPatch {
+    enabled: boolean;
+    encrypt: boolean;
+    endpoint: string;
+    region: string;
+    bucket: string;
+    prefix: string;
+    access_key: string;
+    /** 只有真的换了才带上；不带就是不改 */
+    secret_key?: string;
 }
 
 /** 一次同步的结果 */

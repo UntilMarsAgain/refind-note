@@ -118,6 +118,7 @@ pub fn run() {
             commands::sync::sync_settings,
             commands::sync::sync_generate_key,
             commands::sync::sync_set_key,
+            commands::sync::sync_export_key,
             commands::sync::set_sync_settings,
             commands::sync::sync_ready,
             commands::sync::sync_now,

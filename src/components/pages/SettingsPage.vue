@@ -1,10 +1,15 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { save } from "@tauri-apps/plugin-dialog";
 import { flash } from "../../core/notice.ts";
 import { CIPHER_NOTES, COMPRESSION_NOTES, type Cipher, type Compression, type Policy } from "../../ipc/note.ts";
-import { describeReport, type SyncReport, type SyncSettings } from "../../ipc/sync.ts";
+import {
+  describeReport,
+  type SyncReport,
+  type SyncSettings,
+  type SyncSettingsPatch,
+} from "../../ipc/sync.ts";
 import KeyChooser from "../common/KeyChooser.vue";
 import NamespaceManager from "./NamespaceManager.vue";
 import type { ThemeMode } from "../../ipc/settings.ts";
@@ -202,9 +207,16 @@ function setEncrypt(value: string | null) {
 const sync = ref<SyncSettings>({
   enabled: false,
   encrypt: false,
-  key: "",
-  s3: { endpoint: "", region: "", bucket: "", prefix: "", access_key: "", secret_key: "" },
+  has_key: false,
+  has_secret: false,
+  endpoint: "",
+  region: "",
+  bucket: "",
+  prefix: "",
+  access_key: "",
 });
+/** 改这一栏时：新填的 S3 私钥。**留空就是不改**（界面本来就拿不到原来那一把） */
+const secretDraft = ref("");
 const syncBusy = ref(false);
 /** 上一次同步的结果（就在这一页上再说一遍，不必去翻浮条） */
 const lastSync = ref("");
@@ -222,10 +234,21 @@ async function loadSync() {
   }
 }
 
-/** 存一下（开关、每一栏改动都走它） */
+/** 存一下（开关、每一栏改动都走它）。私钥只有真的重填了才带上 */
 async function saveSync() {
+  const patch: SyncSettingsPatch = {
+    enabled: sync.value.enabled,
+    encrypt: sync.value.encrypt,
+    endpoint: sync.value.endpoint,
+    region: sync.value.region,
+    bucket: sync.value.bucket,
+    prefix: sync.value.prefix,
+    access_key: sync.value.access_key,
+    ...(secretDraft.value ? { secret_key: secretDraft.value } : {}),
+  };
   try {
-    sync.value = await invoke<SyncSettings>("set_sync_settings", { settings: sync.value });
+    sync.value = await invoke<SyncSettings>("set_sync_settings", { patch });
+    secretDraft.value = "";
     syncProblem.value = "";
   } catch (error) {
     syncProblem.value = String(error);
@@ -255,49 +278,58 @@ async function syncNow() {
 /** 改过连接信息还没同步过（提示一句"先同步一次看看"） */
 const syncSettingsDirty = ref(false);
 
-/** 刚从"生成密钥"那里拿到的钥匙：摆在页面上让人抄走 */
-const freshKey = ref("");
-/** 从别的机器抄过来的那一串（粘贴进来） */
+/** 从别的机器抄过来的那一串（粘贴进来；交出去之后这边不留） */
 const pastedKey = ref("");
 
 /**
  * 生成一把新的云端密钥。
  *
- * 生成之后**摆在页面上**，要抄到别的机器上去 —— 换台机器同步同一份仓库，
- * 靠的就是这一串。丢了没有后路：那是这一层加密的意义所在。
+ * **不显示、也不返回**（版本就在后端）：直播、共享屏幕、随手截图都可能把屏幕上的
+ * 东西带出去，而存在本地至少得碰到这台电脑。要带到别的机器上就「导出到文件」。
+ *
+ * 换钥匙意味着云端那些旧密文解不开了，所以下一次同步会**把本机这份整份重传**。
  */
 async function generateSyncKey() {
   syncProblem.value = "";
   try {
-    freshKey.value = await invoke<string>("sync_generate_key");
-    sync.value.key = freshKey.value;
-    sync.value.encrypt = true;
-    flash("已生成云端密钥：抄下来，换机器时要用它");
+    sync.value = await invoke<SyncSettings>("sync_generate_key");
+    flash("已生成密钥（不显示）；要带到别的机器上请「导出到文件」");
   } catch (error) {
     syncProblem.value = String(error);
   }
 }
 
-/** 抄一把钥匙回来（另一台机器上生成的那一串） */
+/** 用另一台机器上生成的那一串（粘贴进来；交出去之后这边不留） */
 async function usePastedKey() {
   syncProblem.value = "";
   try {
     sync.value = await invoke<SyncSettings>("sync_set_key", { key: pastedKey.value });
     pastedKey.value = "";
-    freshKey.value = "";
-    flash(sync.value.encrypt ? "已用这把钥匙" : "已清掉云端加密");
+    flash(sync.value.has_key ? "已用这把密钥；下次同步会把本机这份整份重传" : "已清掉云端加密");
   } catch (error) {
     syncProblem.value = String(error);
   }
 }
 
-/** 复制到剪贴板（与别处同一个插件：webview 里的剪贴板 API 不保证可用） */
-async function copyKey(key: string) {
+/**
+ * 把密钥**导出成一个文件**（带到别的机器上的那条路）。
+ *
+ * 内容由后端写，界面既不显示也不经手；走的是系统保存对话框。
+ */
+async function exportKey() {
+  syncProblem.value = "";
   try {
-    await writeText(key);
-    flash("密钥已复制");
+    const target = await save({
+      title: "导出同步密钥",
+      defaultPath: "refind-note-sync-key.txt",
+    });
+    if (!target) {
+      return;
+    }
+    await invoke("sync_export_key", { target });
+    flash(`密钥已写到 ${target}；那一份文件就是钥匙，别放会被同步的地方`);
   } catch (error) {
-    flash(`复制失败：${error}`);
+    syncProblem.value = String(error);
   }
 }
 
@@ -675,7 +707,7 @@ watch(
       <span class="row__label">服务地址</span>
       <code class="row__id">#sync-endpoint</code>
       <input
-          v-model="sync.s3.endpoint"
+          v-model="sync.endpoint"
           class="row__text"
           type="text"
           placeholder="https://s3.example.com（不带桶名）"
@@ -687,14 +719,14 @@ watch(
       <span class="row__label">桶与前缀</span>
       <code class="row__id">#sync-bucket</code>
       <input
-          v-model="sync.s3.bucket"
+          v-model="sync.bucket"
           class="row__text"
           type="text"
           placeholder="桶名"
           @change="saveSync()"
       />
       <input
-          v-model="sync.s3.prefix"
+          v-model="sync.prefix"
           class="row__text"
           type="text"
           placeholder="前缀（可留空，例如 refind-note）"
@@ -706,7 +738,7 @@ watch(
       <span class="row__label">区域</span>
       <code class="row__id">#sync-region</code>
       <input
-          v-model="sync.s3.region"
+          v-model="sync.region"
           class="row__text"
           type="text"
           placeholder="us-east-1（多数兼容服务不校验）"
@@ -718,17 +750,17 @@ watch(
       <span class="row__label">密钥</span>
       <code class="row__id">#sync-keys</code>
       <input
-          v-model="sync.s3.access_key"
+          v-model="sync.access_key"
           class="row__text"
           type="text"
           placeholder="Access Key"
           @change="saveSync()"
       />
       <input
-          v-model="sync.s3.secret_key"
+          v-model="secretDraft"
           class="row__text"
           type="password"
-          placeholder="Secret Key"
+          :placeholder="sync.has_secret ? 'Secret Key 已设置（留空表示不改）' : 'Secret Key'"
           @change="saveSync()"
       />
     </div>
@@ -737,18 +769,12 @@ watch(
       <span class="row__label">云端加密</span>
       <code class="row__id">#sync-key</code>
       <span class="row__hint">
-        {{ sync.encrypt && sync.key ? "已开启 —— 传上去的每一份都是加密的" : "未开启 —— 传上去的是明文" }}
+        {{ sync.has_key ? "密钥已设置 —— 传上去的每一份都是加密的" : "还没有密钥 —— 传上去的是明文" }}
       </span>
       <button class="row__go" type="button" @click="generateSyncKey">
-        {{ sync.key ? "换一把新密钥" : "生成密钥" }}
+        {{ sync.has_key ? "换一把新密钥" : "生成密钥" }}
       </button>
-    </div>
-
-    <div v-if="sync.key" class="row">
-      <span class="row__label">密钥</span>
-      <code class="row__id">#sync-key-copy</code>
-      <input class="row__text" type="text" :value="sync.key" readonly @focus="($event.target as HTMLInputElement).select()"/>
-      <button class="row__go" type="button" @click="copyKey(sync.key)">复制</button>
+      <button v-if="sync.has_key" class="row__go" type="button" @click="exportKey">导出到文件…</button>
     </div>
 
     <div class="row">
@@ -758,7 +784,7 @@ watch(
           v-model="pastedKey"
           class="row__text"
           type="text"
-          placeholder="把另一台机器上生成的那一串粘在这里"
+          placeholder="把另一台机器上导出的那串密钥粘在这里"
       />
       <button class="row__go" type="button" :disabled="!pastedKey.trim()" @click="usePastedKey">
         用这一把
@@ -766,9 +792,10 @@ watch(
     </div>
 
     <p class="settings__hint">
-      密钥是<strong>这台机器上生成的</strong>（32 字节随机，base64 写出来就是那一串），
-      只存在本机。换台机器同步同一份仓库时，把这串抄过去 ——
-      <strong>抄丢了就解不开云端那一份了</strong>，所以趁早抄。
+      密钥由本程序生成（32 字节随机），<strong>只存在这台机器上，界面上不显示</strong> ——
+      显示出来就不只是"碰到电脑才能偷"了：直播、共享屏幕、随手截个图都可能把它带出去。
+      要带到别的机器上，用「导出到文件」，那份文件就是钥匙本身（别放进会被同步的目录）。
+      换一把密钥意味着云端那些旧密文解不开了，所以<strong>下一次同步会把本机这份整份重传</strong>。
       这一层防的是存储服务与捡到那个桶的人；笔记自身那几层（GPG / 口令）防的是拿到你这台
       机器的人，两件事各管各的。
     </p>
