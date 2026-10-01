@@ -7,7 +7,7 @@
 use serde::Serialize;
 
 use crate::address::{self, Address, Mode, ParsedAddress};
-use crate::codec::{self, Policy, Secrets, SignatureReport};
+use crate::codec::{self, EncryptionReport, Policy, Secrets, SignatureReport};
 use crate::database::Database;
 use crate::notes::Reading;
 use crate::session;
@@ -121,14 +121,15 @@ impl Database {
         Ok(committed.rev)
     }
 
-    /// 某一版的**签名校验报告**：签名者、验没验过、为什么。
+    /// 某一版**落盘封装的细节**：签名验得怎么样、加密到谁、口令这次会话里有没有。
     ///
-    /// 没有签名层就是 `None`。外层要是口令层，得先在这次会话里解锁才走得到签名层。
-    pub fn signature_report(
+    /// 三样各自独立：某一层查不动（没有 gpg、外层口令还没给）只让**那一项**空着，
+    /// 其余照报 —— 想知道"这一版能不能解开"的时候，不该因为验不了签名就什么都看不到。
+    pub fn protection_report(
         &self,
         title: &str,
         reference: Option<&str>,
-    ) -> Result<Option<SignatureReport>, String> {
+    ) -> Result<ProtectionReport, String> {
         let id = self.locate(title)?;
         let state = self.state_of(&id)?;
         let (rev, blob) = match reference {
@@ -140,18 +141,38 @@ impl Database {
             }
         };
         if blob.is_empty() {
-            return Ok(None);
+            // 还没有正文：没有 blob，也就没有封装可报
+            return Ok(ProtectionReport::default());
         }
 
+        let protection = self.blobs().protection(&blob)?;
         let passphrase = session::passphrase_for(&id, rev);
+
+        // 签名：逐层走进去才能验，所以外层有口令层时，得先在这次会话里解过锁
         let file = self.blobs().read_stored(&blob)?;
-        codec::signature_report(
+        let (signature, signature_problem) = match codec::signature_report(
             &file,
             &Secrets {
                 passphrase: passphrase.as_deref(),
             },
-        )
-        .map_err(|error| error.to_string())
+        ) {
+            Ok(report) => (report, None),
+            Err(error) => (None, Some(error.to_string())),
+        };
+
+        // 加密：只看头里记的那把钥匙，本机认不认得
+        let encryption = match &protection.encrypt {
+            Some(key) => Some(codec::encryption_report(key).map_err(|error| error.to_string())?),
+            None => None,
+        };
+
+        Ok(ProtectionReport {
+            signature,
+            signature_problem,
+            encryption,
+            // 口令层问的是"这次会话里有没有它的口令"，也就是"现在还读不读得动"
+            passphrase_ready: protection.symmetric.then(|| passphrase.is_some()),
+        })
     }
 
     /// 给某一版解锁：`reference` 是 token，`None` = 最新版
@@ -169,6 +190,19 @@ impl Database {
         session::unlock(&id, rev, passphrase.to_string());
         Ok(())
     }
+}
+
+/// 某一版落盘封装的细节。三项各自独立，查不动的那项空着（附原因）。
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProtectionReport {
+    /// 签名层的校验结论；没有签名层、或验签这步没跑起来时是 `None`
+    pub signature: Option<SignatureReport>,
+    /// 签名没报出来的原因（没有 gpg、外层口令没给）
+    pub signature_problem: Option<String>,
+    /// 加密层：加密到谁、本机有没有那把私钥
+    pub encryption: Option<EncryptionReport>,
+    /// 口令层：这次会话里有没有这一版的口令（没套口令层就是 `None`）
+    pub passphrase_ready: Option<bool>,
 }
 
 /// 版本 token → 版本号（现在只认数字；收 token 是语法层的事，解释 token 是这里的事）

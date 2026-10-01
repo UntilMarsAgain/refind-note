@@ -141,6 +141,19 @@ pub struct SignatureReport {
     pub detail: String,
 }
 
+/// 加密层的现状：加密到谁，以及本机对付不对付得了。
+///
+/// 只看**本地钥匙串**，不动数据 —— 所以它不解锁也说得出来。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct EncryptionReport {
+    /// 写这一版时指定的加密密钥（头里记的那个）
+    pub key: String,
+    /// 本机有没有对应的**私钥** —— 有才解得开
+    pub secret: bool,
+    /// 人话说明
+    pub detail: String,
+}
+
 /// 一个 blob 声明用了哪些层 —— **明文头里就有，不需要口令**
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Protection {
@@ -381,6 +394,27 @@ pub fn signature_report(file: &[u8], secrets: &Secrets<'_>) -> Result<Option<Sig
     }
 
     Ok(None)
+}
+
+/// 本机认不认得这把钥匙。只看钥匙串里有没有，不去解任何东西。
+pub fn encryption_report(key: &str) -> Result<EncryptionReport> {
+    let mut context = gpg_context()?;
+
+    // 有私钥才解得开；只有公钥说明这一份是"加密给别人"的，本机读不了
+    let secret = context.get_secret_key(key).is_ok();
+    let detail = if secret {
+        "本机有这把私钥：输入它的口令就能解开".to_string()
+    } else if context.get_key(key).is_ok() {
+        "本机只有公钥、没有私钥：这一份本机解不开".to_string()
+    } else {
+        "本机没有这把钥匙：这一份本机解不开".to_string()
+    };
+
+    Ok(EncryptionReport {
+        key: key.to_string(),
+        secret,
+        detail,
+    })
 }
 
 /// 照头逐层解开。顺序是**从外往内**。

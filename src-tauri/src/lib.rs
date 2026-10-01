@@ -150,14 +150,14 @@ fn rollback_note(
     database.rollback_note(&title, &reference, summary, copy, protection, passphrase)
 }
 
-/// 某一版的签名校验报告（签名者、验没验过、为什么）；没有签名层返回 null
+/// 某一版落盘封装的细节（签名验得怎么样、加密到谁、口令这次会话里有没有）
 #[tauri::command]
-fn signature_report(
+fn protection_report(
     title: String,
     reference: Option<String>,
-) -> Result<Option<codec::SignatureReport>, String> {
+) -> Result<resolve::ProtectionReport, String> {
     let (_, database) = open_database()?;
-    database.signature_report(&title, reference.as_deref())
+    database.protection_report(&title, reference.as_deref())
 }
 
 #[tauri::command]
@@ -220,7 +220,7 @@ pub fn run() {
             discard_draft,
             list_revisions,
             rollback_note,
-            signature_report,
+            protection_report,
             delete_note,
             list_notes,
             special_pages,
