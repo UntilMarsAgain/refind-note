@@ -14,6 +14,7 @@ import {
     Dices,
     FolderOpen,
     History,
+    KeyRound,
     List,
     Plus,
     Settings,
@@ -55,6 +56,12 @@ const META: Record<string, SpecialPageMeta> = {
     },
     newtab: { label: "新标签页", tip: "打开一个空白标签页", icon: Plus, group: "导航" },
     settings: { label: "设置", tip: "外观与界面偏好", icon: Settings, group: "工具" },
+    keys: {
+        label: "GPG 密钥",
+        tip: "看本机钥匙串里的钥匙，挑一把当默认",
+        icon: KeyRound,
+        group: "工具",
+    },
     debug: { label: "诊断", tip: "工作目录与数据库的现状", icon: Stethoscope, group: "工具" },
     files: {
         label: "文件",

@@ -4,6 +4,7 @@ pub mod changes;
 pub mod codec;
 pub mod database;
 pub mod files;
+pub mod keys;
 pub mod maintenance;
 pub mod markdown;
 pub mod namespace;
@@ -130,6 +131,25 @@ fn serve_file(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<
         .header("Content-Type", mime)
         .body(bytes)
         .unwrap_or_else(|_| missing())
+}
+
+/// 钥匙串里的钥匙（新的在前）；没有 gpg 时是空列表
+#[tauri::command]
+fn gpg_keys() -> Result<Vec<keys::GpgKey>, String> {
+    keys::list()
+}
+
+/// 从一份钥匙文件导入
+#[tauri::command]
+fn import_gpg_key(path: String) -> Result<keys::ImportSummary, String> {
+    let bytes = std::fs::read(&path).map_err(|error| format!("读不到这个文件：{error}"))?;
+    keys::import(&bytes)
+}
+
+/// 删掉一把公钥（带私钥的不动）
+#[tauri::command]
+fn delete_gpg_key(fingerprint: String) -> Result<(), String> {
+    keys::delete(&fingerprint)
 }
 
 /// 最近的改动（跨全部笔记，新的在前）
@@ -481,6 +501,9 @@ pub fn run() {
             protection_report,
             delete_note,
             list_notes,
+            gpg_keys,
+            import_gpg_key,
+            delete_gpg_key,
             recent_changes,
             browsing_history,
             record_visit,

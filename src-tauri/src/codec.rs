@@ -662,7 +662,7 @@ pub fn set_gpg_home(dir: std::path::PathBuf) {
     let _ = TEST_GPG_HOME.set(dir);
 }
 
-fn gpg_context() -> Result<gpgme::Context> {
+pub(crate) fn gpg_context() -> Result<gpgme::Context> {
     if !gpg_available() {
         return Err(CodecError::GpgUnavailable);
     }
@@ -753,7 +753,7 @@ fn gpg_verify(content: &[u8], signature: &[u8]) -> Result<VerifyOutcome> {
 }
 
 /// 本地对签名者公钥的信任程度 → 人话
-fn trust_label(validity: gpgme::Validity) -> String {
+pub(crate) fn trust_label(validity: gpgme::Validity) -> String {
     match validity {
         gpgme::Validity::Unknown => "本机没有这把公钥".to_string(),
         gpgme::Validity::Undefined => "这把公钥还没打信任分".to_string(),

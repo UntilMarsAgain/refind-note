@@ -13,8 +13,9 @@ use crate::namespace::{NamespaceTable, SPECIAL_ID};
 use crate::title;
 
 /// 现有的特殊页面。不在这里面的 `special:` 地址直接报「没有这个特殊页面」。
-pub const SPECIAL_PAGES: [&str; 10] = [
+pub const SPECIAL_PAGES: [&str; 11] = [
     "newtab", "settings", "all", "random", "debug", "trash", "gc", "files", "changes", "history",
+    "keys",
 ];
 
 /// 命名空间部分：`id` 是它的身份，`spelling` 是回显时用的拼写。

@@ -10,6 +10,7 @@ import FilesPage from "./FilesPage.vue";
 import GcPage from "./GcPage.vue";
 import DeleteView from "./DeleteView.vue";
 import HistoryPage from "./HistoryPage.vue";
+import KeysPage from "./KeysPage.vue";
 import HistoryView from "./HistoryView.vue";
 import MissingView from "./MissingView.vue";
 import NewTabView from "./NewTabView.vue";
@@ -147,6 +148,8 @@ defineExpose({
       <ChangesPage v-else-if="specialPage === 'changes'" @open="emit('navigate', $event)"/>
 
       <HistoryPage v-else-if="specialPage === 'history'" @navigate="emit('navigate', $event)"/>
+
+      <KeysPage v-else-if="specialPage === 'keys'"/>
 
       <TrashPage
           v-else-if="specialPage === 'trash'"
