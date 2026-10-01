@@ -330,15 +330,12 @@ impl Database {
         &self,
         title: &str,
         reference: Option<&str>,
-        target: &str,
+        target: &std::path::Path,
     ) -> Result<(), String> {
         let Reading::Ready { note } = self.read_note(title, reference)? else {
             return Err("这一版是加密的：先解锁，再导出".to_string());
         };
-        crate::storage::workspace::write_bytes(
-            std::path::Path::new(target),
-            note.markdown.as_bytes(),
-        )
+        crate::storage::workspace::write_bytes(target, note.markdown.as_bytes())
     }
 
     /// 读某一版：`reference` 是地址里的 token，`None` = 最新版
@@ -620,7 +617,7 @@ mod tests {
         let target =
             std::env::temp_dir().join(format!("refind-note-export-test-{}.md", std::process::id()));
         database
-            .export_note("导出我", None, target.to_str().unwrap())
+            .export_note("导出我", None, target.as_path())
             .unwrap();
 
         let written = std::fs::read_to_string(&target).unwrap();
@@ -628,7 +625,7 @@ mod tests {
 
         // 取不到的位置：报错，而不是悄悄当成功
         assert!(database
-            .export_note("导出我", None, "/没有这个目录/也/不许/写.md")
+            .export_note("导出我", None, std::path::Path::new("/没有这个目录/也/不许/写.md"))
             .is_err());
 
         let _ = std::fs::remove_file(&target);

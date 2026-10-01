@@ -6,10 +6,12 @@
 //!
 //! - [`deep_link`]：`refind://Help:首页` 的注册、解析与交付；
 //! - [`protocol`]：`refind://localhost/file/<名字>` 的取字节服务（含 `Range`）；
+//! - [`saving`]：另存为 / 导出的东西落到哪个文件上（手机上统一进下载目录）；
 //! - [`staging`]：交给系统应用打开时，先落到临时目录的那一步。
 
 pub mod deep_link;
 pub mod protocol;
+pub mod saving;
 pub mod staging;
 
 /// 把 URL 里的百分号编码换回原文（不是合法转义就原样留着）。

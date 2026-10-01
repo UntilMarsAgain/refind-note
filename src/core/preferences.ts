@@ -10,6 +10,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { applyAppearance } from "./appearance.ts";
 import type { MaintenanceInfo } from "../ipc/maintenance.ts";
 import type { Policy } from "../ipc/note.ts";
+import { refreshPlatform } from "./platform.ts";
 import { syncAtStartup } from "./sync.ts";
 import type {
     DatabaseMeta,
@@ -118,6 +119,9 @@ let dirty = false;
  * 界面不再往下走 —— 这种状态继续用下去，可能把东西写进一个不该写的目录。
  */
 export async function openWorkspace(): Promise<void> {
+    // 先问一句"这是不是手机"：另存为走哪条路看它（见 `core/platform.ts`）
+    await refreshPlatform();
+
     // **顺序要紧**：先同步，再打开数据库。
     //
     // 反过来的话，新机器上那几张表（titles / namespaces）是打开数据库时当场建出来的

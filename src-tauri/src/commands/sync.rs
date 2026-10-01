@@ -76,7 +76,7 @@ pub fn sync_set_key(key: String) -> Result<SyncSettingsView, String> {
 ///
 /// 走系统的保存对话框：内容由后端写，界面既不显示也不经手。
 #[tauri::command]
-pub fn sync_export_key(target: String) -> Result<(), String> {
+pub fn sync_export_key(app: AppHandle, target: Option<String>) -> Result<String, String> {
     let workspace = open_workspace()?;
     let settings = sync::settings(&workspace);
     if settings.key.is_empty() {
@@ -89,8 +89,15 @@ pub fn sync_export_key(target: String) -> Result<(), String> {
          {}\n",
         settings.key
     );
-    crate::storage::workspace::write_bytes(std::path::Path::new(&target), text.as_bytes())
+    // 没给路径（手机上）就落进下载目录
+    let target = crate::platform::saving::resolve(&app, target, KEY_FILE_NAME)?;
+    crate::storage::workspace::write_bytes(&target, text.as_bytes())?;
+    Ok(target.to_string_lossy().to_string())
 }
+
+/// 密钥导出时的默认文件名
+const KEY_FILE_NAME: &str = "refind-note-sync-key.txt";
+
 
 /// 把云端密钥**复制到剪贴板** —— 与 [`sync_export_key`] 同一条路的两个出口。
 ///

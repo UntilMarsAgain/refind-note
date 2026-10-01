@@ -159,9 +159,9 @@ impl Database {
     }
 
     /// 另存为：把某一版复制到用户选的位置
-    pub fn export_file(&self, title: &str, target: &str) -> Result<(), String> {
+    pub fn export_file(&self, title: &str, target: &std::path::Path) -> Result<(), String> {
         let (bytes, _mime) = self.read_file(title, None)?;
-        write_bytes(std::path::Path::new(target), &bytes)
+        write_bytes(target, &bytes)
     }
 
     /// 这一版的头：mime + 存储方式。**不需要口令** —— 头本来就是明文。

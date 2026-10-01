@@ -26,6 +26,9 @@ pub static TEMPLATES: &[(&str, TemplateRenderer)] = &[
     ("css", render_css),
     ("html", render_html),
     ("js", render_js),
+    ("mermaid", render_mermaid),
+    ("math", render_math),
+    ("signature", render_signature),
 ];
 
 /// 内容按 `[标签]` 分节的模板。
@@ -684,6 +687,79 @@ fn size_rule(name: &str, value: &str) -> Option<String> {
     }
     let unit = if unit.is_empty() { "px" } else { unit };
     Some(format!("{name}: {digits}{unit};"))
+}
+
+/// `::mermaid` —— 画一张图（[mermaid](https://mermaid.js.org) 的语法）。
+///
+/// 这里只把**原文**放进 `<pre class="mermaid">`，画图在前端（mermaid 是 JS）。
+/// 与 `::code` 同一个道理：图定义里的 `-->`、`[]`、`{}` 都是它自己的记号，
+/// 绝不能按 markdown 解析。
+///
+/// 原文同时留一份在 `data-source` 上：mermaid 画完会把元素内容换成 SVG，
+/// 切主题要重画时就靠这份原文还原（见前端 `dom/diagrams.ts`）。
+fn render_mermaid(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
+    let source = template.body.trim();
+    if source.is_empty() {
+        render_problem(template, fmt, "里面还没有图 —— 写一段 mermaid 定义");
+        return;
+    }
+
+    fmt.cr();
+    fmt.open("div", &[("class", "diagram".to_string())]);
+    fmt.cr();
+    fmt.open(
+        "pre",
+        &[
+            ("class", "mermaid".to_string()),
+            ("data-source", source.to_string()),
+        ],
+    );
+    fmt.text(source);
+    fmt.close("pre");
+    fmt.cr();
+    fmt.close("div");
+    fmt.cr();
+}
+
+/// `::math` —— 独立成段（或多行）的公式，TeX 原文，前端用 KaTeX 排版。
+///
+/// 正文**不按 markdown 解析**：公式里的 `*`、`_`、`\` 都是数学的一部分
+/// （与 `::code`、`::mermaid` 同一条规矩）。
+/// 只写一行的公式也可以用 `$…$` / `$$…$$`，那是 `syntax/math.rs` 认的。
+fn render_math(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
+    let tex = template.body.trim();
+    if tex.is_empty() {
+        render_problem(template, fmt, "里面还没有公式 —— 写一段 TeX");
+        return;
+    }
+
+    fmt.cr();
+    fmt.open(
+        "div",
+        &[
+            ("class", "math math--display".to_string()),
+            ("data-tex", tex.to_string()),
+        ],
+    );
+    // 排版之前看到的是原文，取不到 KaTeX 也不至于是一片空白
+    fmt.text(tex);
+    fmt.close("div");
+    fmt.cr();
+}
+
+/// `::signature` —— 落款：右对齐的一段（署名、日期、"写在最后"的话）。
+///
+/// 内容照常按 markdown 渲染（落款里常有 `[[链接]]`、强调、甚至一张签名图）；
+/// 硬换行保留（样式里那条 `white-space: pre-line`），
+/// 所以"名字一行、日期一行"照写就是两行。
+fn render_signature(_template: &Template, node: &Node, fmt: &mut dyn Renderer) {
+    fmt.cr();
+    fmt.open("div", &[("class", "signature".to_string())]);
+    fmt.cr();
+    fmt.contents(&node.children);
+    fmt.cr();
+    fmt.close("div");
+    fmt.cr();
 }
 
 /// `::code lang=rust lines=off start=10 highlight=2-3` —— 像 markdown 的代码块，

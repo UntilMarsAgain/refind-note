@@ -624,6 +624,43 @@ mod tests {
         assert!(missing.contains("src"), "{missing}");
     }
 
+    /// `::mermaid`：原文照收（图定义里的记号不该被 markdown 解析），
+    /// 另存一份在 `data-source` 上给"切主题重画"用
+    #[test]
+    fn mermaid_keeps_its_source_verbatim() {
+        let html = render("::mermaid\n  graph TD\n    A[开始] --> B{行不行}\n     B -->|行| C[干活]\n");
+        assert!(html.contains(r#"<pre class="mermaid""#), "{html}");
+        assert!(html.contains("A[开始] --&gt; B{行不行}"), "箭头照原样：{html}");
+        assert!(html.contains("data-source="), "原文要留一份：{html}");
+        // 图定义里的 `-->` `{}` 不该变成 HTML 标签
+        assert!(!html.contains("<b>"), "{html}");
+    }
+
+    #[test]
+    fn mermaid_without_content_says_so() {
+        let html = render("::mermaid\n");
+        assert!(html.contains("template--problem"), "{html}");
+    }
+
+    /// `::math`：TeX 原文进 `data-tex`，元素里留着原文当兜底
+    #[test]
+    fn math_template_hands_the_source_to_the_frontend() {
+        let html = render("::math\n  \\frac{a}{b} = c_1 * d\n");
+        assert!(html.contains("math--display"), "{html}");
+        assert!(html.contains(r#"data-tex="\frac{a}{b} = c_1 * d""#), "{html}");
+        // `*` 与 `_` 是公式的一部分，不该被当成强调
+        assert!(!html.contains("<em>"), "{html}");
+    }
+
+    /// `::signature`：落款 —— 内容按 markdown 走，右对齐交给样式
+    #[test]
+    fn signature_keeps_markdown_and_a_right_aligned_box() {
+        let html = render("::signature\n  甲  \n  2026 年秋\n");
+        assert!(html.contains(r#"<div class="signature">"#), "{html}");
+        assert!(html.contains("甲"), "{html}");
+        assert!(html.contains("2026 年秋"), "{html}");
+    }
+
     #[test]
     fn unknown_template_renders_a_box() {
         let html = render("::还没有的模板 标题=\"含 空格\" flag\n  内容一行\n");

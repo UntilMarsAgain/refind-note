@@ -6,6 +6,7 @@ use crate::storage::session;
 use crate::vault::address::{self, ParsedAddress};
 use crate::vault::notes::{Draft, Note, NoteSummary, Reading, RevisionSummary};
 use crate::vault::resolve::{self, ResolvedAddress};
+use tauri::AppHandle;
 
 /// 解析地址栏那一行（只做语法）。空输入不是地址，返回 `None`；
 /// 语法有问题时，错误里是一句给人看的话。
@@ -32,9 +33,33 @@ pub fn read_note(title: String, reference: Option<String>) -> Result<Reading, St
 /// 读不到不是错误：上了锁会明说。
 /// 导出某一版的 markdown 原文到用户选的位置（路径由系统保存对话框给出）
 #[tauri::command]
-pub fn export_note(title: String, reference: Option<String>, target: String) -> Result<(), String> {
+pub fn export_note(
+    app: AppHandle,
+    title: String,
+    reference: Option<String>,
+    target: Option<String>,
+) -> Result<String, String> {
     let (_, database) = open_database()?;
-    database.export_note(&title, reference.as_deref(), &target)
+    // 没给路径（手机上）就落进下载目录；给的是 `content://…` 也当没给
+    let target = crate::platform::saving::resolve(&app, target, &note_file_name(&title))?;
+    database.export_note(&title, reference.as_deref(), &target)?;
+    Ok(target.to_string_lossy().to_string())
+}
+
+/// 导出时的默认文件名：标题里的斜杠（子页面）与文件系统不认的字符都换成 `-`。
+///
+/// 与界面那边 `dom/file-save.ts::noteFileName` 是同一条规矩：桌面走系统对话框时
+/// 名字由界面给，手机上进下载目录时由这里给。
+fn note_file_name(title: &str) -> String {
+    let safe: String = title
+        .chars()
+        .map(|ch| match ch {
+            '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '-',
+            other => other,
+        })
+        .collect();
+    let safe = safe.trim();
+    format!("{}.md", if safe.is_empty() { "笔记" } else { safe })
 }
 
 #[tauri::command]

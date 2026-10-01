@@ -907,3 +907,72 @@
 .note-body .file-locked__problem {
   color: var(--danger);
 }
+
+/* ---- 数学公式 ----
+   后端只认出公式并把 TeX 原文放在 data-tex 上，排版由 KaTeX 在前端做
+   （见 `dom/math.ts`）。没排上之前元素里显示的是原文，所以这里也管"原文的样子" */
+.note-body .math:not([data-math-ready]) {
+  font-family: var(--mono-font);
+  font-size: 0.94em;
+  color: var(--text-dim);
+}
+
+.note-body .math--display {
+  display: block;
+  margin: 0.9em 0;
+  text-align: center;
+  /* 又长又宽的公式让它自己横向滚，别把版面撑破 */
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* ---- mermaid 图 ----
+   没画出来之前是一段代码（原文），画出来之后里面是 SVG */
+.note-body .diagram {
+  margin: 1.1em 0;
+}
+
+.note-body pre.mermaid {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--code-bg);
+  font-family: var(--mono-font);
+  font-size: 0.9em;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+/* 画好了：原样的框收掉，让 SVG 自己站中间 */
+.note-body pre.mermaid[data-processed="true"] {
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: center;
+}
+
+.note-body pre.mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* 画不出来：留一条红线，原文还在，鼠标悬上去有原因 */
+.note-body pre.mermaid[data-problem] {
+  border-color: var(--danger);
+  border-left-width: 3px;
+}
+
+/* ---- 落款 ----
+   右对齐的一段；硬换行保留（名字一行、日期一行，照写就是两行） */
+.note-body .signature {
+  margin: 1.6em 0 0.4em;
+  text-align: right;
+  color: var(--text-dim);
+  white-space: pre-line;
+}
+
+.note-body .signature p {
+  margin: 0;
+}

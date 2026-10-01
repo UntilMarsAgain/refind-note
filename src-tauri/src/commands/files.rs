@@ -4,6 +4,7 @@ use crate::features::files;
 use crate::open_database;
 use crate::platform::{decode_percent, staging};
 use crate::storage::codec::Policy;
+use tauri::AppHandle;
 
 /// 附件清单（新的在前）
 #[tauri::command]
@@ -141,7 +142,11 @@ pub fn delete_file(title: String) -> Result<(), String> {
 
 /// 另存为：把某一版复制到用户选的位置
 #[tauri::command]
-pub fn export_file(title: String, target: String) -> Result<(), String> {
+pub fn export_file(app: AppHandle, title: String, target: Option<String>) -> Result<String, String> {
     let (_, database) = open_database()?;
-    database.export_file(&title, &target)
+    // 没给路径（手机上）就按页面名落进下载目录
+    let name = title.trim().split(':').next_back().unwrap_or(&title).trim();
+    let target = crate::platform::saving::resolve(&app, target, name)?;
+    database.export_file(&title, &target)?;
+    Ok(target.to_string_lossy().to_string())
 }

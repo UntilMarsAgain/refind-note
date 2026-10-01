@@ -15,6 +15,14 @@ version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["vers
 name="refind-note-$version"
 tarball="$here/$name.tar.gz"
 
+# 版本号在这一带的四处要对得上（tauri.conf.json 是源头，PKGBUILD 是这里要用的那份）：
+# 对不上的话打出来的包会顶着旧版本号，装了也不更新（pacman 比的就是它）。
+pkgbuild_version="$(sed -n 's/^pkgver=\(.*\)$/\1/p' "$here/PKGBUILD" | head -1)"
+if [ "$pkgbuild_version" != "$version" ]; then
+    echo "PKGBUILD 里的 pkgver=$pkgbuild_version，配置里是 $version —— 已经改成 $version" >&2
+    sed -i "s/^pkgver=.*$/pkgver=$version/" "$here/PKGBUILD"
+fi
+
 echo "源码：$root"
 echo "版本：$version"
 
@@ -28,6 +36,7 @@ tar -czf "$tarball" \
     --exclude='./.git' \
     --exclude='./src-tauri/gen' \
     --exclude='./packaging/arch/*.tar.gz' \
+    --exclude='./packaging/arch/*.pkg.tar.*' \
     -C "$root" .
 
 echo "打好了：$tarball"

@@ -11,10 +11,12 @@
 
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { type MenuItem, openMenu } from "./context-menu.ts";
+import { scheduleDiagrams } from "./diagrams.ts";
 import { fileTargetOf, fileUrl, vaultKeyOf } from "./file-links.ts";
 import { saveNameOf, saveVaultFile, savableTitle } from "./file-save.ts";
 import { fileInfo, freshUrl, readable, unlockFile } from "./file-unlock.ts";
 import { viewImage } from "./image-viewer.ts";
+import { renderMath } from "./math.ts";
 import { wireTabs } from "./tabs.ts";
 
 /**
@@ -230,6 +232,9 @@ export function decorateNoteHtml(root: HTMLElement): void {
         }
     }
     wireTabs(root);
+    // 公式与图：都是"拿到元素再加工"，与上面几步同一类事
+    renderMath(root);
+    scheduleDiagrams(root);
     // 脚本放最后：跑起来时，正文该接的线都接好了
     runScripts(root);
 }

@@ -14,6 +14,7 @@ import {
   syncBusy,
   syncNow as requestSync,
 } from "../../core/sync.ts";
+import { isMobile } from "../../core/platform.ts";
 import KeyChooser from "../common/KeyChooser.vue";
 import NamespaceManager from "./NamespaceManager.vue";
 import type { ThemeMode } from "../../ipc/settings.ts";
@@ -329,15 +330,19 @@ async function usePastedKey() {
 async function exportKey() {
   syncProblem.value = "";
   try {
-    const target = await save({
-      title: "导出同步密钥",
-      defaultPath: "refind-note-sync-key.txt",
-    });
-    if (!target) {
-      return;
+    // 手机上不问位置：后端放进下载目录，回来说落在哪
+    let target: string | null = null;
+    if (!isMobile()) {
+      target = await save({
+        title: "导出同步密钥",
+        defaultPath: "refind-note-sync-key.txt",
+      });
+      if (!target) {
+        return;
+      }
     }
-    await invoke("sync_export_key", { target });
-    flash(`密钥已写到 ${target}；那一份文件就是钥匙，别放会被同步的地方`);
+    const written = await invoke<string>("sync_export_key", { target });
+    flash(`密钥已写到 ${written}；那一份文件就是钥匙，别放会被同步的地方`);
   } catch (error) {
     syncProblem.value = String(error);
   }

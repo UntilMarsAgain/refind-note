@@ -1,8 +1,10 @@
 /**
  * 另存为 / 导出：把仓库里的东西存到用户选的位置。
  *
- * 两条路都走系统保存对话框（dialog 插件），再由后端把内容复制过去 ——
+ * 桌面上两条路都走系统保存对话框（dialog 插件），再由后端把内容复制过去 ——
  * 前端不碰文件内容，也不自己拼落盘的字节。
+ * **手机上不问位置**（那边没有"选个文件夹"这回事）：后端统一放进下载目录，
+ * 把落在哪告诉我们，我们再原样说给用户听。
  *
  * - [`saveVaultFile`]：`File:` 命名空间里的一份文件（图片、附件）；
  * - [`saveNoteMarkdown`]：一篇笔记的 **markdown 原文**（连模板记号一起带走）。
@@ -10,16 +12,20 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
+import { isMobile } from "../core/platform.ts";
 import { fileNameOfUrl, vaultKeyOf } from "./file-links.ts";
 
 /** 把一个**文件页面**（`File:桥.png`）另存为；取消返回 null，存好了返回目标路径 */
 export async function saveVaultFile(title: string, name?: string): Promise<string | null> {
+    if (isMobile()) {
+        // 手机上不问位置（没有那个对话框）：后端统一放进下载目录，回来告诉我们落在哪
+        return await invoke<string>("export_file", { title, target: null });
+    }
     const target = await save({ defaultPath: name ?? title, title: "另存为" });
     if (!target) {
         return null;
     }
-    await invoke("export_file", { title, target });
-    return target;
+    return await invoke<string>("export_file", { title, target });
 }
 
 /** 正文里一个地址对应的文件页面标题；不是本仓库的文件就是 null */
@@ -42,12 +48,15 @@ export async function saveNoteMarkdown(
     title: string,
     reference: string | null = null,
 ): Promise<string | null> {
+    if (isMobile()) {
+        // 同上：手机上进下载目录
+        return await invoke<string>("export_note", { title, reference, target: null });
+    }
     const target = await save({ defaultPath: noteFileName(title), title: "导出 Markdown" });
     if (!target) {
         return null;
     }
-    await invoke("export_note", { title, reference, target });
-    return target;
+    return await invoke<string>("export_note", { title, reference, target });
 }
 
 /**
