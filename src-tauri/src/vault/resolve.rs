@@ -441,7 +441,11 @@ impl Database {
         Ok(session::passphrase_for(&id, rev).is_some())
     }
 
-    /// 给某一版解锁：`reference` 是 token，`None` = 最新版
+    /// 给某一版解锁：`reference` 是 token，`None` = 最新版。
+    ///
+    /// **当场验一遍**：口令对不对，只有真拿它去解一次才知道。不验的话错的口令也照存，
+    /// 界面以为解开了、去读却读不出来 —— 于是"再输一次"这条路就断了，错误还会伪装成
+    /// 别的东西（图片那边就表现成"图片不存在"）。
     pub fn unlock(
         &self,
         title: &str,
@@ -453,8 +457,42 @@ impl Database {
             None => None,
         };
         let (id, rev) = self.resolve_revision(title, rev)?;
-        session::unlock(&id, rev, passphrase.to_string());
-        Ok(())
+
+        let state = self.state_of(&id)?;
+        let blob = if rev == state.rev {
+            state.blob.clone()
+        } else {
+            self.event_at(&id, title, rev)?.1
+        };
+
+        // 只有**口令层**才验：gpg 那几层问的是钥匙串，与这里的口令无关；
+        // 还没有正文的那一版（0 版）也没什么可解的
+        let sealed = if blob.is_empty() {
+            false
+        } else {
+            self.blobs().protection(&blob)?.symmetric
+        };
+        if !sealed {
+            session::unlock(&id, rev, passphrase.to_string());
+            return Ok(());
+        }
+
+        match self.blobs().get(
+            &blob,
+            &Secrets {
+                passphrase: Some(passphrase),
+            },
+        ) {
+            Ok(_) => {
+                session::unlock(&id, rev, passphrase.to_string());
+                Ok(())
+            }
+            Err(error) => {
+                // 错的就别留着：留着只会让"再输一次"变成不可能
+                session::forget(&id, rev);
+                Err(error)
+            }
+        }
     }
 }
 
@@ -517,6 +555,51 @@ mod tests {
         if let Some(root) = database.root().parent() {
             let _ = std::fs::remove_dir_all(root);
         }
+    }
+
+    /// 解锁要**当场验**：错的口令不该被当成解开了 ——
+    /// 不验的话界面以为解开了、去读却读不出来，"再输一次"这条路就断了
+    #[test]
+    fn unlocking_checks_the_passphrase_right_away() {
+        // 碰会话口令的用例要串行（锁是全局那一把）
+        let _guard = crate::storage::session::test_lock::guard();
+        let database = scratch("unlock-check");
+        let policy = crate::storage::codec::Policy {
+            compress: true,
+            symmetric: true,
+            ..Default::default()
+        };
+        database.create("密文").unwrap();
+        database
+            .commit_with(
+                "密文",
+                "正文",
+                None,
+                Some(policy),
+                Some("对的口令".to_string()),
+            )
+            .unwrap();
+        crate::storage::session::forget_all();
+
+        // 错的：报"口令不对"，而且不留下任何东西（再输一次才可能）
+        let error = database.unlock("密文", None, "错的口令").unwrap_err();
+        assert!(error.contains("口令不对"), "{error}");
+        assert!(!database.passphrase_stored("密文", None).unwrap());
+        assert!(matches!(
+            database.read_note("密文", None).unwrap(),
+            Reading::Locked { .. }
+        ));
+
+        // 对的：解开，读得动
+        database.unlock("密文", None, "对的口令").unwrap();
+        assert!(database.passphrase_stored("密文", None).unwrap());
+        assert!(matches!(
+            database.read_note("密文", None).unwrap(),
+            Reading::Ready { .. }
+        ));
+
+        crate::storage::session::forget_all();
+        cleanup(&database);
     }
 
     /// 导出：写到用户给的位置，内容就是 markdown **原文**（连模板记号一起带走）

@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
 import { Lock, Unlock } from "@lucide/vue";
-import type { Reading } from "../../ipc/note.ts";
 import { unlock } from "../../core/preferences.ts";
 
 /**
@@ -11,8 +9,8 @@ import { unlock } from "../../core/preferences.ts";
  * 读一篇上了锁的笔记时会先落到这一页 —— 口令**按版本存**，同一篇的不同版本可以用
  * 不同的密码，所以在别的版本上解过锁不等于这一版能读。
  *
- * 口令对不对只有接着读一次才知道，所以这里只管把口令交给后端：
- * 提交成功后 emit `unlocked`，由上层去重读并把结果（含 `wrongPassphrase`）递回来。
+ * 口令交给后端**当场验**（错的不会存下来）；验过之后 emit `unlocked`，
+ * 由上层把地址换回那一页（它自己会重读）。
  */
 const props = defineProps<{
   title: string;
@@ -32,9 +30,12 @@ const emit = defineEmits<{
 const passphrase = ref("");
 const busy = ref(false);
 const error = ref("");
-/** 上一次试的口令不对（后端在读的时候已经把它丢掉了） */
-const wrong = ref(false);
-
+/**
+ * 输一次口令。
+ *
+ * 后端**当场验**：错的口令不会存下来，报一句"口令不对"。所以这里出错时**不清输入框**，
+ * 改一下再点就是了 —— 没有"再输一次"的机会，比报错本身更难受。
+ */
 async function submit() {
   if (!passphrase.value) {
     return;
@@ -42,22 +43,9 @@ async function submit() {
 
   busy.value = true;
   error.value = "";
-  wrong.value = false;
 
   try {
     await unlock(props.title, props.reference, passphrase.value);
-
-    // 口令对不对只有接着读一次才知道：读通了才算真的解开，
-    // 读不动就把它当作"这把不对"，当场说清楚，不用把人绕回上一页。
-    const reading = await invoke<Reading>("read_note", {
-      title: props.title,
-      reference: props.reference,
-    });
-    if (reading.state === "locked") {
-      wrong.value = true;
-      return;
-    }
-
     passphrase.value = "";
     emit("unlocked");
   } catch (reason) {
@@ -95,7 +83,6 @@ async function submit() {
       </button>
     </div>
 
-    <p v-if="wrong" class="unlock__error">口令不正确，请重试。</p>
     <p v-if="error" class="unlock__error">{{ error }}</p>
 
     <!--
