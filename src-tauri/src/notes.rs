@@ -61,6 +61,11 @@ pub enum Event {
         ns: String,
         title: String,
     },
+    /// 删除标记：日志挪进回收站**之前**写的一条
+    ///
+    /// 它不改内容，只是把"什么时候删的"记在日志自己身上 ——
+    /// 表里的记录会被清掉、文件的改动时间会被复制打断，这一条不会。
+    Del { at: String },
     /// 一次提交
     Rev {
         at: String,
@@ -79,6 +84,8 @@ pub enum Event {
 pub struct NoteState {
     pub ns: String,
     pub title: String,
+    /// 最后一次删除的时间（还原之后仍然留着：删过这件事也是历史）
+    pub deleted_at: Option<String>,
     /// 建立时间
     pub created: String,
     /// 最后一次提交时间
@@ -172,6 +179,9 @@ pub fn fold(events: &[Event]) -> NoteState {
                 state.title = title.clone();
                 state.created = at.clone();
                 state.modified = at.clone();
+            }
+            Event::Del { at } => {
+                state.deleted_at = Some(at.clone());
             }
             Event::Rev {
                 at,
@@ -298,7 +308,7 @@ impl Database {
         Ok(events)
     }
 
-    fn append(&self, id: &str, event: &Event) -> Result<(), String> {
+    pub(crate) fn append(&self, id: &str, event: &Event) -> Result<(), String> {
         let line = serde_json::to_string(event).map_err(|error| format!("写不进日志：{error}"))?;
         append_line(&self.log_path(id), &line)
     }
@@ -731,24 +741,45 @@ impl Database {
         let id = self.locate(title)?;
         let display = self.display_of(title)?;
 
+        // 先留一条删除标记：挪过去之后，日志里还答得出"什么时候删的"
+        if self.log_path(&id).is_file() {
+            self.append(&id, &Event::Del { at: now() })?;
+        }
+
         let from = self.log_path(&id);
         if from.is_file() {
             let to = self.trash_path(&id);
+            if let Some(parent) = to.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|error| format!("建不出目录 {}：{error}", parent.display()))?;
+            }
             fs::rename(&from, &to)
                 .map_err(|error| format!("挪不动 {}：{error}", from.display()))?;
         }
 
-        // 草稿跟着走。留一个没有主的槽位，下次建同名笔记会莫名其妙"有草稿"。
-        match fs::remove_file(self.draft_path(&id)) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(format!("删不掉草稿：{error}")),
-        }
+        // 草稿槽位**留着**：它按标识存，而标识不会重用，所以留着既不会串到别人身上，
+        // 还原回来时也还接着写得上。没有主的槽位由仓库整理那一轮清（那是人点过头的）。
 
         let mut titles = self.titles()?;
         titles.notes.remove(&id);
         titles.trashed.insert(id, display);
         self.save_titles(&titles)
+    }
+
+    /// 从回收站还原时补的那一版：内容复用原来的 blob，摘要写明来路。
+    pub(crate) fn append_restored(&self, id: &str, blob: &str, bytes: u64) -> Result<(), String> {
+        let rev = self.state_of(id)?.rev + 1;
+        self.append(
+            id,
+            &Event::Rev {
+                at: now(),
+                rev,
+                blob: blob.to_string(),
+                bytes,
+                mime: DEFAULT_MIME.to_string(),
+                summary: Some("从回收站还原".to_string()),
+            },
+        )
     }
 
     /// 列出全部笔记。
@@ -1129,6 +1160,7 @@ mod tests {
                     symmetric: true,
                     ..Default::default()
                 },
+                ..Default::default()
             })
             .unwrap();
         database.create("甲").unwrap();
@@ -1206,6 +1238,7 @@ mod tests {
                     symmetric: true,
                     ..Default::default()
                 },
+                ..Default::default()
             })
             .unwrap();
         database.create("甲").unwrap();
@@ -1253,6 +1286,7 @@ mod tests {
                     symmetric: true,
                     ..Default::default()
                 },
+                ..Default::default()
             })
             .unwrap();
         database.create("甲").unwrap();
@@ -1305,6 +1339,7 @@ mod tests {
                     gpg_sign: Some("不存在@example".to_string()),
                     ..Default::default()
                 },
+                ..Default::default()
             })
             .unwrap();
         database.create("甲").unwrap();
@@ -1331,6 +1366,7 @@ mod tests {
                     symmetric: true,
                     ..Default::default()
                 },
+                ..Default::default()
             })
             .unwrap();
         database.create("甲").unwrap();
@@ -1408,6 +1444,7 @@ mod tests {
                     symmetric: true,
                     ..Default::default()
                 },
+                ..Default::default()
             })
             .unwrap();
         database.create("甲").unwrap();
@@ -1574,10 +1611,11 @@ mod tests {
         assert!(database.read("甲").is_err());
         assert!(database.id_of("甲").is_none());
 
-        // 但日志还在 trash 里 —— 删错了捞得回来；草稿槽位跟着走
+        // 但日志还在 trash 里 —— 删错了捞得回来
         assert!(!log.is_file());
         assert!(database.trash_path(&id).is_file());
-        assert!(!database.draft_path(&id).exists());
+        // 草稿槽位也留着：标识不会重用，留着不碍事，还原时还写得上
+        assert!(database.draft_path(&id).exists());
 
         // 再删一次要报"没有这篇"
         assert!(database.delete("甲").unwrap_err().contains("没有这篇"));

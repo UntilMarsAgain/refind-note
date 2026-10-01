@@ -5,6 +5,7 @@ import { preferences } from "../preferences.ts";
 import type { TabState } from "../tabs.ts";
 import AllPages from "./AllPages.vue";
 import DebugPage from "./DebugPage.vue";
+import GcPage from "./GcPage.vue";
 import DeleteView from "./DeleteView.vue";
 import HistoryView from "./HistoryView.vue";
 import MissingView from "./MissingView.vue";
@@ -13,6 +14,7 @@ import NoteEditor from "./NoteEditor.vue";
 import NoteView from "./NoteView.vue";
 import RollbackView from "./RollbackView.vue";
 import SettingsPage from "./SettingsPage.vue";
+import TrashPage from "./TrashPage.vue";
 import UnlockView from "./UnlockView.vue";
 
 /**
@@ -136,6 +138,13 @@ defineExpose({
       <SettingsPage v-else-if="specialPage === 'settings'" :focus="section"/>
 
       <DebugPage v-else-if="specialPage === 'debug'"/>
+
+      <TrashPage
+          v-else-if="specialPage === 'trash'"
+          @navigate="emit('navigate', $event)"
+      />
+
+      <GcPage v-else-if="specialPage === 'gc'" @navigate="emit('navigate', $event)"/>
 
       <AllPages v-else-if="specialPage === 'all'" @navigate="emit('navigate', $event)"/>
 

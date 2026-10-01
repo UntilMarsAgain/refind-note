@@ -19,9 +19,11 @@ import {
   flushPreferences,
   openWorkspace,
   preferences,
+  refreshWorkspaceInfo,
   updatePreferences,
 } from "./preferences.ts";
 import { restartStartup, startupPhase } from "./startup.ts";
+import { formatBytes, type MaintenanceReport } from "./bindings/maintenance.ts";
 import { useTabs } from "./tabs.ts";
 import { installWheelZoom } from "./zoom-wheel.ts";
 
@@ -306,6 +308,37 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 /**
+ * 开机那一轮维护：清过期的回收站条目、回收没人引用的内容块。
+ *
+ * 到期才做（默认每天一次），没到期后端直接返回 `null` —— 所以这里不必自己看时间。
+ * 做了什么都写进横幅：这种在背后删东西的事，不能一句话都不说。
+ */
+async function runMaintenanceOnce() {
+  try {
+    const report = await invoke<MaintenanceReport | null>("run_maintenance");
+    if (!report) {
+      return;
+    }
+    const parts: string[] = [];
+    if (report.purged && report.purged.removed > 0) {
+      parts.push(`清掉回收站 ${report.purged.removed} 条`);
+    }
+    if (report.gc && report.gc.removed_blobs > 0) {
+      parts.push(
+        `回收内容块 ${report.gc.removed_blobs} 个（${formatBytes(report.gc.freed_bytes)}）`,
+      );
+    }
+    if (parts.length > 0) {
+      flash(`仓库整理：${parts.join("、")}`);
+    }
+    await refreshWorkspaceInfo();
+  } catch (error) {
+    // 维护失败不该挡住开机：记一笔就接着用
+    console.warn("自动维护失败：", error);
+  }
+}
+
+/**
  * 开局的标签页也要有地址。
  *
  * 它在启动跑完之前只是一只空壳（解析要问后端，那时后端还没准备好）；
@@ -315,8 +348,11 @@ watch(
   startupPhase,
   (phase) => {
     const tab = active.value;
-    if (phase === "ready" && tab && !tab.address && !tab.route) {
-      void navigate("special:newtab", "push");
+    if (phase === "ready") {
+      if (tab && !tab.address && !tab.route) {
+        void navigate("special:newtab", "push");
+      }
+      void runMaintenanceOnce();
     }
   },
   { immediate: true },

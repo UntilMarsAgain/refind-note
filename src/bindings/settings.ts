@@ -2,6 +2,7 @@
  * 偏好与工作目录信息 —— 与 Rust 侧 `src-tauri/src/settings.rs`、`lib.rs` 一一对应。
  */
 
+import type { MaintenanceInfo } from "./maintenance.ts";
 import type { Policy } from "./note.ts";
 
 export type ThemeMode = "system" | "light" | "dark";
@@ -41,4 +42,6 @@ export interface WorkspaceInfo {
     protection: Policy;
     /** 这台计算机上有没有 gpg（没有时签名 / 加密不可用） */
     gpg_available: boolean;
+    /** 整理设置：回收站留多少天、自动整理隔多少天、上次各是什么时候 */
+    maintenance: MaintenanceInfo;
 }

@@ -60,6 +60,14 @@ pub struct Meta {
 pub struct Config {
     /// 默认的封装策略：还没有正文的新笔记从它出发
     pub protection: Policy,
+    /// 回收站里的条目留多少天（到期由自动维护清掉）
+    pub trash_keep_days: u64,
+    /// 自动整理的间隔：隔这么多天跑一次
+    pub gc_interval_days: u64,
+    /// 上次清回收站的时间（RFC3339）；空串 = 从没做过
+    pub last_trash_purge: String,
+    /// 上次整理的时间（RFC3339）；空串 = 从没做过
+    pub last_gc: String,
 }
 
 impl Default for Config {
@@ -70,6 +78,12 @@ impl Default for Config {
                 compress: true,
                 ..Default::default()
             },
+            // 回收站留一个月：够长到"删错了还来得及捞"，也够短到"不会攒成垃圾场"
+            trash_keep_days: 30,
+            // 整理**每天一次**：它只是扫一遍日志与内容块，开销小，也不动还有引用的东西
+            gc_interval_days: 1,
+            last_trash_purge: String::new(),
+            last_gc: String::new(),
         }
     }
 }
@@ -181,6 +195,16 @@ impl Database {
 
     pub fn blobs(&self) -> BlobStore {
         BlobStore::new(self.root.join(BLOBS_DIR))
+    }
+
+    /// 笔记日志所在的目录（整理那一轮要扫它）
+    pub fn objects_dir(&self) -> PathBuf {
+        self.root.join(OBJECTS_DIR)
+    }
+
+    /// 已删除笔记的日志目录
+    pub fn trash_dir(&self) -> PathBuf {
+        self.root.join(TRASH_DIR)
     }
 
     pub fn drafts_dir(&self) -> PathBuf {

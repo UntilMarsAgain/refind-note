@@ -8,6 +8,7 @@
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { applyAppearance } from "./appearance.ts";
+import type { MaintenanceInfo } from "./bindings/maintenance.ts";
 import type { Policy } from "./bindings/note.ts";
 import type { DatabaseMeta, Preferences, ThemeMode, WorkspaceInfo } from "./bindings/settings.ts";
 import { markStartupReady, reportStartupFailure, startupPhase } from "./startup.ts";
@@ -26,6 +27,34 @@ export const preferences = ref<Preferences>({
 export const workspaceRoot = ref("");
 export const databaseRoot = ref("");
 export const databaseMeta = ref<DatabaseMeta | null>(null);
+
+/**
+ * 整理设置（回收站留多少天、自动整理隔多少天、上次各是什么时候）。
+ *
+ * 它在**仓库**里（`settings/config.json`），不在偏好里 —— 换台机器读同一份仓库，
+ * 这两个期限也该跟着走。所以它与偏好分开存，重新读一次才更新。
+ */
+export const maintenance = ref<MaintenanceInfo>({
+    trash_keep_days: 30,
+    gc_interval_days: 1,
+    last_trash_purge: "",
+    last_gc: "",
+});
+
+/**
+ * 重新读一遍仓库那一层的信息（工作目录、数据库、整理设置）。
+ *
+ * 启动时读一次；跑完整理之后还要再读一次 —— 上次执行时间变了，页面上那两行得跟上。
+ */
+export async function refreshWorkspaceInfo(): Promise<void> {
+    const info = await invoke<WorkspaceInfo>("open_workspace");
+    workspaceRoot.value = info.root;
+    databaseRoot.value = info.database_root;
+    databaseMeta.value = info.meta;
+    protection.value = info.protection;
+    gpgAvailable.value = info.gpg_available;
+    maintenance.value = info.maintenance;
+}
 
 /** 这台计算机上有没有 gpg（没有时签名 / 加密的选项不可用） */
 export const gpgAvailable = ref(false);
@@ -85,6 +114,7 @@ export async function openWorkspace(): Promise<void> {
         preferences.value = info.preferences;
         protection.value = info.protection;
         gpgAvailable.value = info.gpg_available;
+        maintenance.value = info.maintenance;
         // 开局的样子照默认值来；之后在标签栏上怎么开合都不再动它
         railCollapsed.value = info.preferences.rail_collapsed;
         markStartupReady();

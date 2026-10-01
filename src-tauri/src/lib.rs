@@ -1,6 +1,7 @@
 mod address;
 pub mod codec;
 pub mod database;
+pub mod maintenance;
 pub mod markdown;
 pub mod namespace;
 pub mod notes;
@@ -15,7 +16,7 @@ use serde::Serialize;
 
 use address::ParsedAddress;
 use codec::Policy;
-use database::{Config, Database, Meta};
+use database::{Database, Meta};
 use namespace::Namespace;
 use notes::{Draft, Note, NoteSummary, Reading, RevisionSummary};
 use resolve::ResolvedAddress;
@@ -35,6 +36,17 @@ struct WorkspaceInfo {
     protection: Policy,
     /// 这台计算机上有没有 gpg（没有时签名 / 加密不可用）
     gpg_available: bool,
+    /// 仓库的整理设置：回收站留多少天、自动整理隔多少天、上次各是什么时候
+    maintenance: MaintenanceInfo,
+}
+
+/// 整理相关的设置（都在 `settings/config.json` 里）
+#[derive(Serialize)]
+struct MaintenanceInfo {
+    trash_keep_days: u64,
+    gc_interval_days: u64,
+    last_trash_purge: String,
+    last_gc: String,
 }
 
 /// 每个命令各自打开一次工作目录与数据库 —— 不跨命令共享状态
@@ -54,13 +66,74 @@ fn open_workspace() -> Result<WorkspaceInfo, String> {
         preferences: settings::load(&workspace)?,
         protection: database.protection(),
         gpg_available: database.gpg_available(),
+        maintenance: {
+            let config = database.config();
+            MaintenanceInfo {
+                trash_keep_days: config.trash_keep_days,
+                gc_interval_days: config.gc_interval_days,
+                last_trash_purge: config.last_trash_purge,
+                last_gc: config.last_gc,
+            }
+        },
     })
+}
+
+/// 改整理设置：回收站留多少天、自动整理隔多少天（都不小于 1 天）
+#[tauri::command]
+fn set_maintenance(trash_keep_days: u64, gc_interval_days: u64) -> Result<(), String> {
+    let (_, database) = open_database()?;
+    let mut config = database.config();
+    config.trash_keep_days = trash_keep_days.max(1);
+    config.gc_interval_days = gc_interval_days.max(1);
+    database.save_config(&config)
 }
 
 #[tauri::command]
 fn save_preferences(preferences: Preferences) -> Result<Preferences, String> {
     let (workspace, _) = open_database()?;
     settings::save(&workspace, preferences)
+}
+
+/// 回收站里的条目（新的在前）
+#[tauri::command]
+fn list_trash() -> Result<Vec<maintenance::TrashEntry>, String> {
+    let (_, database) = open_database()?;
+    database.list_trash()
+}
+
+/// 还原一条：日志挪回 `objects/`，并补一版"从回收站还原"
+#[tauri::command]
+fn restore_note(title: String) -> Result<Reading, String> {
+    let (_, database) = open_database()?;
+    database.restore(&title)
+}
+
+/// 永久清除一条（**不可撤销**；它引用的内容块留给整理那一轮去回收）
+#[tauri::command]
+fn purge_trash_entry(title: String) -> Result<(), String> {
+    let (_, database) = open_database()?;
+    database.purge_trash_entry(&title)
+}
+
+/// 清掉回收站里超过 `older_than_days` 天的条目（`0` = 全部）
+#[tauri::command]
+fn purge_trash(older_than_days: i64) -> Result<maintenance::PurgeReport, String> {
+    let (_, database) = open_database()?;
+    database.purge_trash(older_than_days)
+}
+
+/// 整理一遍：回收没人引用的内容块、清掉没有主的草稿槽位
+#[tauri::command]
+fn gc(orphan_blobs: bool, orphan_drafts: bool) -> Result<maintenance::GcReport, String> {
+    let (_, database) = open_database()?;
+    database.gc(orphan_blobs, orphan_drafts)
+}
+
+/// 开机自动维护：到期才做，没到期返回 null
+#[tauri::command]
+fn run_maintenance() -> Result<Option<maintenance::MaintenanceReport>, String> {
+    let (_, database) = open_database()?;
+    database.run_maintenance()
 }
 
 /// 命名空间表（标题前缀那张表）
@@ -116,7 +189,9 @@ fn delete_namespace(key: String) -> Result<usize, String> {
 #[tauri::command]
 fn set_protection(protection: Policy) -> Result<(), String> {
     let (_, database) = open_database()?;
-    database.save_config(&Config { protection })
+    let mut config = database.config();
+    config.protection = protection;
+    database.save_config(&config)
 }
 
 /// 解析地址栏那一行（只做语法）。空输入不是地址，返回 `None`；
@@ -276,6 +351,13 @@ pub fn run() {
             protection_report,
             delete_note,
             list_notes,
+            list_trash,
+            restore_note,
+            purge_trash_entry,
+            purge_trash,
+            gc,
+            run_maintenance,
+            set_maintenance,
             namespaces,
             add_namespace,
             update_namespace,

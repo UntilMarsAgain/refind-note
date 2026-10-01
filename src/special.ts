@@ -9,7 +9,7 @@
  */
 
 import type { Component } from "vue";
-import { Dices, List, Plus, Settings, Stethoscope } from "@lucide/vue";
+import { Dices, List, Plus, Settings, Stethoscope, Trash2, Wrench } from "@lucide/vue";
 
 export interface SpecialPageMeta {
     /** 显示名 */
@@ -23,7 +23,7 @@ export interface SpecialPageMeta {
 }
 
 /** 菜单分组顺序；没登记的页面落到「其它」 */
-export const SPECIAL_GROUPS = ["导航", "工具"] as const;
+export const SPECIAL_GROUPS = ["导航", "工具", "维护"] as const;
 
 export const FALLBACK_GROUP = "其它";
 
@@ -33,6 +33,8 @@ const META: Record<string, SpecialPageMeta> = {
     newtab: { label: "新标签页", tip: "打开一个空白标签页", icon: Plus, group: "导航" },
     settings: { label: "设置", tip: "外观与界面偏好", icon: Settings, group: "工具" },
     debug: { label: "诊断", tip: "工作目录与数据库的现状", icon: Stethoscope, group: "工具" },
+    trash: { label: "回收站", tip: "删过的笔记，可以还原或永久清除", icon: Trash2, group: "维护" },
+    gc: { label: "仓库整理", tip: "回收没有引用的内容块与草稿槽位", icon: Wrench, group: "维护" },
 };
 
 /** 取某个特殊页面的元信息；没登记的给一份兜底（显示原名，进「其它」） */

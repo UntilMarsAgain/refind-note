@@ -22,12 +22,18 @@ const emit = defineEmits<{
 const busy = ref(false);
 const error = ref("");
 
+/** 顺手整理一遍：回收这一篇留下的内容块（它引用的内容这时才成为孤儿） */
+const tidyUp = ref(false);
+
 async function confirm() {
   busy.value = true;
   error.value = "";
 
   try {
     await invoke("delete_note", { title: props.title });
+    if (tidyUp.value) {
+      await invoke("gc", { orphanBlobs: true, orphanDrafts: false });
+    }
     emit("deleted");
   } catch (reason) {
     error.value = String(reason);
@@ -43,8 +49,20 @@ async function confirm() {
 
     <p class="delete__note">
       正文与历史都会从列表里消失。日志会挪进回收站，<strong>没有真的抹掉</strong>
-      —— 以后还能捞回来。
+      —— 在 `special:trash` 里还能捞回来。回收站里的笔记引用的内容块也一并留着，
+      所以还原出来还是原样。
     </p>
+
+    <label class="delete__tidy">
+      <input v-model="tidyUp" type="checkbox"/>
+      <span>
+        同时整理一遍（回收已经没人引用的内容块）
+        <span class="delete__tidy-hint">
+          这一篇的内容块还躺在回收站里、仍然被引用，所以这一步收不到它 ——
+          它要等这条被永久清除之后才谈得上回收。
+        </span>
+      </span>
+    </label>
 
     <p v-if="error" class="delete__error">{{ error }}</p>
 
@@ -71,6 +89,31 @@ async function confirm() {
   margin: 0;
   color: var(--text-dim);
   font-size: 13.5px;
+  line-height: 1.7;
+}
+
+.delete__tidy {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 16px 0 0;
+  color: var(--text);
+  font-size: 13.5px;
+  line-height: 1.6;
+  cursor: pointer;
+}
+
+.delete__tidy input {
+  flex: 0 0 auto;
+  margin-top: 4px;
+  accent-color: var(--accent);
+}
+
+.delete__tidy-hint {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-dim);
+  font-size: 12.5px;
   line-height: 1.7;
 }
 

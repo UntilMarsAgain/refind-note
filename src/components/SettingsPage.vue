@@ -1,17 +1,22 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
+import { invoke } from "@tauri-apps/api/core";
+import { flash } from "../notice.ts";
 import type { Policy } from "../bindings/note.ts";
 import NamespaceManager from "./NamespaceManager.vue";
 import type { ThemeMode } from "../bindings/settings.ts";
 import {
   databaseRoot,
   gpgAvailable,
+  maintenance,
   preferences,
   protection,
+  refreshWorkspaceInfo,
   setProtection,
   updatePreferences,
   workspaceRoot,
 } from "../preferences.ts";
+import { formatTime } from "../bindings/maintenance.ts";
 
 /**
  * 设置页（`special:settings`）。
@@ -77,6 +82,43 @@ function submitAccent() {
   }
   // 写了个不成形的颜色：退回当前生效的那个，而不是把它存下去
   accentDraft.value = preferences.value.accent;
+}
+
+/** 改整理设置：两个天数一起提交（它俩都在仓库的 config.json 里） */
+async function submitMaintenance(patch: { trash?: number; gc?: number }) {
+  const trash = patch.trash ?? maintenance.value.trash_keep_days;
+  const gc = patch.gc ?? maintenance.value.gc_interval_days;
+
+  try {
+    await invoke("set_maintenance", {
+      trashKeepDays: Math.max(1, Math.round(trash)),
+      gcIntervalDays: Math.max(1, Math.round(gc)),
+    });
+    await refreshWorkspaceInfo();
+  } catch (reason) {
+    console.warn("改整理设置失败：", reason);
+    flash(String(reason));
+  }
+}
+
+function submitKeepDays(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const days = Number(input.value);
+  if (!Number.isFinite(days)) {
+    input.value = String(maintenance.value.trash_keep_days);
+    return;
+  }
+  void submitMaintenance({ trash: days });
+}
+
+function submitGcInterval(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const days = Number(input.value);
+  if (!Number.isFinite(days)) {
+    input.value = String(maintenance.value.gc_interval_days);
+    return;
+  }
+  void submitMaintenance({ gc: days });
 }
 
 function toggleLimitWidth(event: Event) {
@@ -297,6 +339,53 @@ watch(
       :class="{ 'row--target': isFocused('namespaces') }"
     >
       <NamespaceManager/>
+    </div>
+
+    <h2 class="settings__section">维护</h2>
+
+    <p class="settings__note">
+      删掉的笔记先进回收站，到期由**开机时的自动维护**清理；整理只回收没人引用的内容块。
+      超过保留期的条目才会被清掉，所以调小这个数等于"下次开机就清掉一批"。
+    </p>
+
+    <div
+      id="trash-keep-days"
+      class="row"
+      :class="{ 'row--target': isFocused('trash-keep-days') }"
+    >
+      <span class="row__label">回收站保留</span>
+      <code class="row__id">#trash-keep-days</code>
+      <input
+        class="num"
+        type="number"
+        min="1"
+        max="3650"
+        step="1"
+        :value="maintenance.trash_keep_days"
+        @change="submitKeepDays"
+      />
+      <span class="row__unit">天</span>
+      <span class="row__hint">上次清理：{{ formatTime(maintenance.last_trash_purge) }}</span>
+    </div>
+
+    <div
+      id="gc-interval-days"
+      class="row"
+      :class="{ 'row--target': isFocused('gc-interval-days') }"
+    >
+      <span class="row__label">自动整理间隔</span>
+      <code class="row__id">#gc-interval-days</code>
+      <input
+        class="num"
+        type="number"
+        min="1"
+        max="3650"
+        step="1"
+        :value="maintenance.gc_interval_days"
+        @change="submitGcInterval"
+      />
+      <span class="row__unit">天</span>
+      <span class="row__hint">上次整理：{{ formatTime(maintenance.last_gc) }}</span>
     </div>
 
     <h2 class="settings__section">存储</h2>
