@@ -649,3 +649,21 @@
   color: var(--text-dim);
   font-size: 0.9em;
 }
+
+/*
+ * 正文里的图片点一下就看得更大（见 note-html.ts），所以给个手型：
+ * 不然没人知道它点得动。
+ */
+.note-body img {
+  cursor: zoom-in;
+}
+
+/* 加载不出来的图片换成了这句说明 */
+.note-body .image-missing {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 0.92em;
+}

@@ -5,6 +5,7 @@ import { preferences } from "../preferences.ts";
 import type { TabState } from "../tabs.ts";
 import AllPages from "./AllPages.vue";
 import DebugPage from "./DebugPage.vue";
+import FilesPage from "./FilesPage.vue";
 import GcPage from "./GcPage.vue";
 import DeleteView from "./DeleteView.vue";
 import HistoryView from "./HistoryView.vue";
@@ -138,6 +139,8 @@ defineExpose({
       <SettingsPage v-else-if="specialPage === 'settings'" :focus="section"/>
 
       <DebugPage v-else-if="specialPage === 'debug'"/>
+
+      <FilesPage v-else-if="specialPage === 'files'"/>
 
       <TrashPage
           v-else-if="specialPage === 'trash'"

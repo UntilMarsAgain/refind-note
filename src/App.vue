@@ -5,6 +5,7 @@ import AppMenu from "./components/AppMenu.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import DebugPanel from "./components/DebugPanel.vue";
 import FloatingTools from "./components/FloatingTools.vue";
+import ImageViewer from "./components/ImageViewer.vue";
 import RenderPane from "./components/RenderPane.vue";
 import StartupError from "./components/StartupError.vue";
 import StartupLoading from "./components/StartupLoading.vue";
@@ -444,6 +445,8 @@ onBeforeUnmount(() => {
         @scroll-bottom="renderPane?.scrollToBottom()"
     />
   </div>
+
+  <ImageViewer/>
 
   <ContextMenu/>
 

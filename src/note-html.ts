@@ -1,7 +1,8 @@
 /**
  * 笔记 HTML 注入 DOM 之后的收尾工作。
  *
- * 两件事：给正文挂上右键菜单，以及图片取不到时换一句说明。
+ * 三件事：把相对地址换成能取到字节的附件地址、给正文挂上右键菜单、
+ * 图片取不到时换一句说明。
  *
  * 放在这里而不是各个组件里，是因为阅读视图与编辑器预览都会注入同一份 HTML，
  * 行为该由同一处决定。
@@ -9,6 +10,9 @@
 
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { type MenuItem, openMenu } from "./context-menu.ts";
+import { fileTargetOf, fileUrl, vaultKeyOf } from "./file-links.ts";
+import { saveVaultFile, savableKey } from "./file-save.ts";
+import { viewImage } from "./image-viewer.ts";
 
 /**
  * "在新标签页打开"由 App 注入。
@@ -58,7 +62,15 @@ function attachContextMenu(root: HTMLElement) {
         const items: MenuItem[] = [];
 
         if (target instanceof HTMLImageElement) {
+            const key = savableKey(target.src);
+            items.push({ label: "看大图", run: () => viewImage(target.src, target.alt) });
             items.push({ label: "复制图片地址", run: () => writeText(target.src) });
+            if (key) {
+                items.push({
+                    label: "另存为…",
+                    run: () => void saveVaultFile(key).catch((error) => console.warn(error)),
+                });
+            }
         } else if (target instanceof HTMLAnchorElement) {
             // 内部链接上写的是笔记名（`data-title`），外部链接就是 href
             const title = target.dataset.title;
@@ -66,6 +78,13 @@ function attachContextMenu(root: HTMLElement) {
             if (title && openInNewTab) {
                 // 与 Ctrl+点击同一件事：右键里也该有它，否则这条路只有键盘用户找得到
                 items.push({ label: "在新标签页打开", run: () => openInNewTab?.(title) });
+            }
+            const key = vaultKeyOf(address);
+            if (key) {
+                items.push({
+                    label: "另存为…",
+                    run: () => void saveVaultFile(key).catch((error) => console.warn(error)),
+                });
             }
             items.push({ label: "复制链接地址", run: () => writeText(address) });
         }
@@ -85,9 +104,48 @@ function attachContextMenu(root: HTMLElement) {
     });
 }
 
+/**
+ * 相对地址 → 附件地址。
+ *
+ * 笔记里写的是名字（`![桥](桥.png)`），而 webview 取字节要有地址。认的只有
+ * "既不是锚点、也不是绝对路径、也没有协议"的那一类（见 `fileTargetOf`）——
+ * 其余的（外链、页内锚点）各有各的用法，不能抢。
+ */
+function resolveFileTargets(root: HTMLElement) {
+    for (const element of root.querySelectorAll<HTMLElement>("img[src], a[href]")) {
+        // 反复注入（预览重渲染）时不要重复处理
+        if (element.dataset.fileResolved) {
+            continue;
+        }
+        element.dataset.fileResolved = "yes";
+
+        const attribute = element instanceof HTMLImageElement ? "src" : "href";
+        const raw = element.getAttribute(attribute) ?? "";
+        const target = fileTargetOf(raw);
+        if (target) {
+            element.setAttribute(attribute, fileUrl(decoded(target)));
+        }
+    }
+}
+
+/**
+ * markdown 渲染器会把非 ASCII 的目标做一次百分号编码（`桥.png` → `%E6%A1%A5.png`），
+ * 所以这里先把它解码回名字，再由 [`fileUrl`] 统一编码 —— 不然会编码两次，
+ * 后端按名字就查不到了。
+ */
+function decoded(target: string): string {
+    try {
+        return decodeURIComponent(target);
+    } catch {
+        // 非法转义序列（名字里就有个 `%`）就按原样用
+        return target;
+    }
+}
+
 /** 笔记 HTML 注入之后的收尾 */
 export function decorateNoteHtml(root: HTMLElement): void {
     attachContextMenu(root);
+    resolveFileTargets(root);
     for (const image of root.querySelectorAll<HTMLImageElement>("img")) {
         // 反复注入（预览重渲染、开关来回切）时不要重复处理
         if (image.dataset.imageReady) {
@@ -98,8 +156,9 @@ export function decorateNoteHtml(root: HTMLElement): void {
     }
 }
 
-/** 图片取不到时给一句说明 */
+/** 图片：点一下看大图，加载不出来给一句说明 */
 function attachImage(image: HTMLImageElement) {
+    image.addEventListener("click", () => viewImage(image.src, image.alt));
     image.addEventListener("error", () => markMissing(image));
     // 已经失败过的（比如缓存里就是坏的）不会再触发 error，这里补一刀
     if (image.complete && image.naturalWidth === 0) {

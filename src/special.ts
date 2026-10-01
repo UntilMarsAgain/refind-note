@@ -9,7 +9,16 @@
  */
 
 import type { Component } from "vue";
-import { Dices, List, Plus, Settings, Stethoscope, Trash2, Wrench } from "@lucide/vue";
+import {
+    Dices,
+    FolderOpen,
+    List,
+    Plus,
+    Settings,
+    Stethoscope,
+    Trash2,
+    Wrench,
+} from "@lucide/vue";
 
 export interface SpecialPageMeta {
     /** 显示名 */
@@ -33,6 +42,12 @@ const META: Record<string, SpecialPageMeta> = {
     newtab: { label: "新标签页", tip: "打开一个空白标签页", icon: Plus, group: "导航" },
     settings: { label: "设置", tip: "外观与界面偏好", icon: Settings, group: "工具" },
     debug: { label: "诊断", tip: "工作目录与数据库的现状", icon: Stethoscope, group: "工具" },
+    files: {
+        label: "文件",
+        tip: "浏览、上传、管理附件",
+        icon: FolderOpen,
+        group: "导航",
+    },
     trash: { label: "回收站", tip: "删过的笔记，可以还原或永久清除", icon: Trash2, group: "维护" },
     gc: { label: "仓库整理", tip: "回收没有引用的内容块与草稿槽位", icon: Wrench, group: "维护" },
 };

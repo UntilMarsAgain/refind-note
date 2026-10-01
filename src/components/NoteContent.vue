@@ -4,6 +4,9 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { applyLineNumbers, codeLineNumbers, highlightCode } from "../code-blocks.ts";
 import { decorateNoteHtml } from "../note-html.ts";
+import { vaultKeyOf } from "../file-links.ts";
+import { saveVaultFile } from "../file-save.ts";
+import { flash } from "../notice.ts";
 
 /**
  * 正文：把后端渲染好的 HTML 注入进来，再做一遍 DOM 收尾。
@@ -188,6 +191,19 @@ function onClick(event: MouseEvent) {
         document.getElementById(id)?.scrollIntoView({ block: "start" });
         // 章节是唯一允许前端自己确定的部分：报给上层，让它叠进地址栏
         emit("section", id);
+        return;
+    }
+
+    // 附件（`refind://…`）：它不是一个能"打开"的网址，点一下给"另存为"
+    const key = vaultKeyOf(href);
+    if (key) {
+        void saveVaultFile(key)
+            .then((target) => {
+                if (target) {
+                    flash(`已另存为：${target}`);
+                }
+            })
+            .catch((error) => flash(`另存失败：${error}`));
         return;
     }
 

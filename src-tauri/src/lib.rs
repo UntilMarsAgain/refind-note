@@ -1,6 +1,7 @@
 mod address;
 pub mod codec;
 pub mod database;
+pub mod files;
 pub mod maintenance;
 pub mod markdown;
 pub mod namespace;
@@ -92,6 +93,103 @@ fn set_maintenance(trash_keep_days: u64, gc_interval_days: u64) -> Result<(), St
 fn save_preferences(preferences: Preferences) -> Result<Preferences, String> {
     let (workspace, _) = open_database()?;
     settings::save(&workspace, preferences)
+}
+
+/// `refind://localhost/files/<键>` → 附件的字节。
+///
+/// 只给 webview 里的 `<img src>` 用：笔记正文里写的是相对名字，渲染之后由前端
+/// 换成这个地址。键照表查，查不到、文件不在、读不动都是 404 —— **不猜路径**。
+fn serve_file(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<Vec<u8>> {
+    let missing = || {
+        tauri::http::Response::builder()
+            .status(404)
+            .body(Vec::new())
+            .expect("空响应总是拼得出来")
+    };
+
+    let Some(key) = request.uri().path().strip_prefix("/files/") else {
+        return missing();
+    };
+    let Ok((_, database)) = open_database() else {
+        return missing();
+    };
+    let Some(path) = database.file_path(key) else {
+        return missing();
+    };
+    let Ok(bytes) = std::fs::read(&path) else {
+        return missing();
+    };
+
+    let mime = path
+        .extension()
+        .map(|extension| files::mime_of(&extension.to_string_lossy().to_lowercase()))
+        .unwrap_or("application/octet-stream");
+    tauri::http::Response::builder()
+        .header("Content-Type", mime)
+        .body(bytes)
+        .unwrap_or_else(|_| missing())
+}
+
+/// 附件清单（新的在前）
+#[tauri::command]
+fn list_files() -> Result<Vec<files::FileEntry>, String> {
+    let (_, database) = open_database()?;
+    database.list_files()
+}
+
+/// 从系统文件对话框选的路径收一个附件（字节由后端自己读，不走 IPC）
+#[tauri::command]
+fn upload_file(path: String) -> Result<files::Uploaded, String> {
+    let (_, database) = open_database()?;
+    let source = std::path::PathBuf::from(&path);
+    let bytes = std::fs::read(&source).map_err(|error| format!("读不到这个文件：{error}"))?;
+    let name = source
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| "未命名".to_string());
+    database.add_file(&name, &bytes)
+}
+
+/// 粘贴进来的字节直接走二进制通道（名字放在头里）。
+///
+/// 剪贴板里的文件没有路径可读，只能把字节递过来；用原始 IPC 体而不是 base64，
+/// 大图才不会在编码上再翻一倍。
+#[tauri::command]
+fn upload_bytes(request: tauri::ipc::Request<'_>) -> Result<files::Uploaded, String> {
+    let (_, database) = open_database()?;
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("粘贴上传要走二进制通道，但没收到字节".to_string());
+    };
+    let name = request
+        .headers()
+        .get("x-file-name")
+        .and_then(|value| value.to_str().ok())
+        .map(files::decode_key)
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "粘贴的文件".to_string());
+    database.add_file(&name, bytes)
+}
+
+/// 改附件的显示名
+#[tauri::command]
+fn rename_file(id: String, name: String) -> Result<files::FileEntry, String> {
+    let (_, database) = open_database()?;
+    database.rename_file(&id, &name)
+}
+
+/// 删一个附件
+#[tauri::command]
+fn delete_file(id: String) -> Result<(), String> {
+    let (_, database) = open_database()?;
+    database.delete_file(&id)
+}
+
+/// 另存为：把一个附件复制到用户选的位置
+#[tauri::command]
+fn export_file(key: String, target: String) -> Result<(), String> {
+    let (_, database) = open_database()?;
+    let bytes = database.read_file(&key)?;
+    std::fs::write(&target, bytes).map_err(|error| format!("写不进 {target}：{error}"))
 }
 
 /// 回收站里的条目（新的在前）
@@ -333,7 +431,9 @@ fn lock() {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .register_uri_scheme_protocol("refind", |_context, request| serve_file(&request))
         .invoke_handler(tauri::generate_handler![
             open_workspace,
             save_preferences,
@@ -351,6 +451,12 @@ pub fn run() {
             protection_report,
             delete_note,
             list_notes,
+            list_files,
+            upload_file,
+            upload_bytes,
+            rename_file,
+            delete_file,
+            export_file,
             list_trash,
             restore_note,
             purge_trash_entry,

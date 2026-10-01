@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { Check, RotateCcw, Save, Trash2, X } from "@lucide/vue";
+import { Check, ImagePlus, RotateCcw, Save, Trash2, X } from "@lucide/vue";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
     policyFrom,
     policyLabel,
@@ -10,6 +11,9 @@ import {
     type Policy,
     type Reading,
 } from "../bindings/note.ts";
+import type { Uploaded } from "../bindings/files.ts";
+import { fileReferenceOf } from "../file-links.ts";
+import { clipboardFiles, uploadPasted } from "../paste-files.ts";
 import { gpgAvailable, protection } from "../preferences.ts";
 import { resolvedTheme } from "../theme.ts";
 import { applyLineNumbers, codeLineNumbers, highlightCode } from "../code-blocks.ts";
@@ -580,6 +584,75 @@ async function discard() {
     }
 }
 
+/**
+ * 上传一个附件，并在光标处插入对它的引用。
+ *
+ * 路径交给后端去读（字节不经过前端）；插进去的是**引用**（`![](名字)`），
+ * 不是地址 —— 笔记里写的始终是名字。
+ */
+async function insertFile() {
+  const picked = await open({ multiple: true, title: "选择要插入的文件" });
+  if (!picked) {
+    return;
+  }
+  const paths = Array.isArray(picked) ? picked : [picked];
+
+  busy.value = true;
+  try {
+    const references: string[] = [];
+    for (const path of paths) {
+      const uploaded = await invoke<Uploaded>("upload_file", { path });
+      references.push(fileReferenceOf(uploaded.entry));
+    }
+    insertAtCursor(references.join("\n"));
+    status.value = `已插入 ${references.length} 个附件`;
+  } catch (error) {
+    status.value = `插入失败：${String(error)}`;
+  } finally {
+    busy.value = false;
+  }
+}
+
+/** 把一段文字插到光标处（没有光标就插到末尾） */
+function insertAtCursor(text: string) {
+  if (!view) {
+    markdown.value += text;
+    return;
+  }
+  const range = view.state.selection.main;
+  view.dispatch({
+    changes: { from: range.from, to: range.to, insert: text },
+    selection: { anchor: range.from + text.length },
+  });
+  view.focus();
+}
+
+/** 编辑器里按 Ctrl+V：剪贴板里是文件就收进来并插入引用 */
+async function onPasteFiles(event: ClipboardEvent): Promise<boolean> {
+  const picked = clipboardFiles(event);
+  if (picked.length === 0) {
+    return false;
+  }
+
+  busy.value = true;
+  try {
+    const references: string[] = [];
+    await uploadPasted(picked, async (bytes, name) => {
+      const uploaded = await invoke<Uploaded>("upload_bytes", bytes, {
+        headers: { "x-file-name": encodeURIComponent(name) },
+      });
+      references.push(fileReferenceOf(uploaded.entry));
+    });
+    insertAtCursor(references.join("\n"));
+    status.value = `已插入 ${references.length} 个附件`;
+  } catch (error) {
+    status.value = `粘贴上传失败：${String(error)}`;
+  } finally {
+    busy.value = false;
+  }
+  return true;
+}
+
 /** 退出编辑但**保留**草稿：回到这篇的阅读地址 */
 function leave() {
     emit("navigate", props.title);
@@ -609,6 +682,14 @@ onMounted(async () => {
                     templateHighlight,
                     templateFold,
                     EditorView.lineWrapping,
+                    // 剪贴板里是文件（截图、复制的图）就收进仓库并插入引用；
+                    // 普通文字返回 false，交回编辑器自己处理
+                    EditorView.domEventHandlers({
+                        paste: (event) => {
+                            void onPasteFiles(event);
+                            return false;
+                        },
+                    }),
                     EditorView.updateListener.of((update) => {
                         if (!update.docChanged || syncing) {
                             return;
@@ -720,6 +801,17 @@ watch(markdown, (value) => {
             </label>
           </div>
         </details>
+
+        <button
+            class="ebtn"
+            type="button"
+            title="上传文件，并在光标处插入引用（也可以直接 Ctrl+V 粘贴）"
+            :disabled="busy || !hasNote"
+            @click="insertFile"
+        >
+          <ImagePlus :size="14" :stroke-width="1.9"/>
+          插入文件
+        </button>
 
         <button
             class="ebtn"
