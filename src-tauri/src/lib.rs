@@ -115,6 +115,10 @@ pub fn run() {
             commands::activity::record_visit,
             commands::activity::clear_history,
             commands::activity::special_pages,
+            commands::sync::sync_settings,
+            commands::sync::set_sync_settings,
+            commands::sync::sync_ready,
+            commands::sync::sync_now,
             platform::deep_link::take_pending_address,
         ])
         .setup(|app| {

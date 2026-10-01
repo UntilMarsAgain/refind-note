@@ -1,9 +1,14 @@
 <script setup lang="ts">
+import { startupNote } from "../../core/startup.ts";
+
 /**
  * 启动还在跑时顶替主区域的那张加载页。
  *
  * 与错误页同一个位置、同一套外形：启动的三种状态在主区域上是三选一，
  * 切换时不会跳一下。
+ *
+ * 那一行字是**跟着步骤走**的（见 `startup.ts`）：打开目录、读偏好、与云端同步……
+ * 同步可能要跑一会儿，所以进度就写在这里，而不是让人对着一个转圈猜。
  */
 </script>
 
@@ -11,7 +16,7 @@
   <div class="loading">
     <div class="loading__box">
       <span class="loading__spinner" aria-hidden="true" />
-      <p class="loading__text" role="status">正在打开工作目录…</p>
+      <p class="loading__text" role="status">{{ startupNote }}</p>
     </div>
   </div>
 </template>

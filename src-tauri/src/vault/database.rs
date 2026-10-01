@@ -27,7 +27,6 @@ use crate::storage::codec::Policy;
 use crate::storage::store::BlobStore;
 use crate::storage::workspace::{write_json, Workspace};
 use crate::vault::namespace::{NamespaceTable, MAIN_ID};
-use crate::vault::notes::Titles;
 
 /// 认领标记：`meta.json` 里是它，才认这是重逢笔记的数据库
 pub const KIND: &str = "refind-note";
@@ -116,10 +115,10 @@ impl Database {
         }
 
         let meta = open_meta(&root)?;
-        ensure_json(&root.join(TITLES_FILE), &Titles::default())?;
-        // 命名空间表放在 db/ 而不是 settings/：它决定"一个标题说的是哪一篇"，
-        // 是这批数据的一部分（换台机器读同一份仓库，也得认出同一批标题）
-        ensure_json(&root.join(NAMESPACES_FILE), &NamespaceTable::default())?;
+        // **空表不写**：写下来就成了"本机改过"，同步时会跟云端那份打架 ——
+        // 新机器上前两样本来就没有，正好让云端那份落下来。
+        // 读的时候没有文件就是默认值（见 `read_json`），用到才写。
+        //
         // 老仓库里它叫 `config.json`：上一次改名之前写下的，先搬过来，
         // 免得"换个文件名"就把设置读丢、退回默认值
         let legacy = settings.join(LEGACY_CONFIG_FILE);
@@ -128,7 +127,6 @@ impl Database {
             fs::rename(&legacy, &current)
                 .map_err(|error| format!("搬不动 {}：{error}", legacy.display()))?;
         }
-        ensure_json(&current, &Config::default())?;
 
         let database = Self {
             root,
@@ -136,22 +134,25 @@ impl Database {
             meta,
         };
 
-        // 表里缺的内建命名空间补上（老仓库可能还没有 `File:` / `Help:`），
-        // 默认的跨站命名空间只在新仓库上播一次（见 `sow_defaults`）
-        let mut table = database.namespaces();
-        let filled = table.ensure_builtins();
-        let sown = table.sow_defaults();
-        if filled || sown {
-            database.save_namespaces(&table)?;
-        }
-
         database.ensure_namespace_dirs()?;
         Ok(database)
     }
 
-    /// 命名空间表（标题前缀那张表）
+    /// 命名空间表（标题前缀那张表）。
+    ///
+    /// 读的时候顺手做两件修补，但**不写盘**：缺的内建补上（老仓库可能还没有
+    /// `File:` / `Help:`），表文件压根不存在时把默认的跨站命名空间摆上。
+    /// 写盘留给下一次真正的改动 —— 这台上没动过的东西，磁盘上就不该凭空多一个文件
+    /// （那会被同步当成"本机改过"，跟云端那份打架）。
     pub fn namespaces(&self) -> NamespaceTable {
-        crate::storage::workspace::read_json(&self.root.join(NAMESPACES_FILE))
+        let mut table: NamespaceTable =
+            crate::storage::workspace::read_json(&self.root.join(NAMESPACES_FILE));
+        let fresh = !self.root.join(NAMESPACES_FILE).is_file();
+        table.ensure_builtins();
+        if fresh {
+            table.sow_defaults();
+        }
+        table
     }
 
     pub fn save_namespaces(&self, table: &NamespaceTable) -> Result<(), String> {
@@ -247,6 +248,8 @@ impl Database {
         self.root.join(TITLES_FILE)
     }
 
+    /// 仓库设置。文件不在就是默认值 —— 与命名空间表同一个道理：**不主动写**，
+    /// 写下来就会被同步当成"本机改过"。改了设置（`save_config`）才落盘。
     pub fn config(&self) -> Config {
         crate::storage::workspace::read_json(&self.settings.join(CONFIG_FILE))
     }
@@ -311,14 +314,6 @@ pub fn identify(meta: &Meta) -> Result<(), String> {
     Ok(())
 }
 
-/// 表文件不在就落一份默认的：该在的东西第一次打开就该在。
-fn ensure_json<T: Serialize + Default>(path: &Path, default: &T) -> Result<(), String> {
-    if path.exists() {
-        return Ok(());
-    }
-    write_json(path, default)
-}
-
 /// 当前时间，RFC3339（UTC）。格式化几乎不会失败，兜底给空串。
 pub fn now() -> String {
     OffsetDateTime::now_utc()
@@ -364,7 +359,13 @@ mod tests {
             .unwrap()
             .is_dir());
         assert!(database.drafts_dir().is_dir());
-        assert!(database.titles_path().is_file());
+        // 空表**不写**：写下来会被同步当成"本机改过"（新机器上尤其），
+        // 读到的是默认值，第一次真正改名/建页时才落盘
+        assert!(!database.titles_path().is_file());
+        assert!(
+            database.namespaces().get("0").is_some(),
+            "内建命名空间要读得到"
+        );
         // 压缩默认开着：正文多半是文本，压一下几乎总是划算，而且无感
         let default_protection = database.config().protection;
         assert!(default_protection.compress);

@@ -9,6 +9,9 @@
 //! ```
 //!
 //! 目录在打开时按需建出来，用户第一次启动就能直接用，不必先手动 mkdir。
+//!
+//! 这一层还回答一件事：**哪些东西该跟着仓库走、哪些是这台机器的**（见
+//! [`is_synced`]）—— 同步那边照这个答案办事，不必自己认路径。
 
 use std::fs;
 use std::io::Write;
@@ -25,6 +28,35 @@ const DB_DIR: &str = "db";
 
 /// 设置与浏览状态文件夹
 const SETTINGS_DIR: &str = "settings";
+
+/// 这一份**该不该同步到云端**。
+///
+/// 判据只有一条：**是不是这台机器自己的东西**。默认都同步 —— 工作目录里新长出来的
+/// 东西因此自动跟上，不会因为"同步模块没认得它"而悄悄漏掉（那才是真的丢数据）。
+/// 少数几样是本机专属的，它们在这里点名：
+///
+/// - `settings/preferences.json`：界面偏好（缩放、主题、标签栏）—— 换台机器本来就该重来；
+/// - `settings/browsing.jsonl`：浏览历史；
+/// - `settings/sync.json` 与 `settings/sync-index.json`：同步自己的设置与索引，
+///   里面还有 S3 的密钥；
+/// - `db/drafts/`：写了一半的草稿槽位（每篇一个、会被覆盖），本机的缓冲，不算内容；
+/// - 任何 `.tmp`：那是落盘写到一半的名字（见 [`write_bytes`]），不该传。
+///
+/// 往后往工作目录里加东西的人：**要是不该同步，来这里加一行并说清为什么**；
+/// 该同步的什么都不必做。
+pub fn is_synced(relative: &str) -> bool {
+    let relative = relative.trim_start_matches("./");
+    if relative.is_empty() || relative.ends_with(".tmp") {
+        return false;
+    }
+    !matches!(
+        relative,
+        "settings/preferences.json"
+            | "settings/browsing.jsonl"
+            | "settings/sync.json"
+            | "settings/sync-index.json"
+    ) && !relative.starts_with("db/drafts/")
+}
 
 pub struct Workspace {
     root: PathBuf,

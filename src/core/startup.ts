@@ -22,8 +22,21 @@ export type StartupPhase = "starting" | "ready" | "failed";
 const phase = ref<StartupPhase>("starting");
 const failure = ref<StartupFailure | null>(null);
 
+/**
+ * 现在在做哪一步（加载页上那一行字）。
+ *
+ * 启动不是一瞬间的事：打开目录、读偏好、还要（开着的话）与云端同步一次。
+ * 这行字让等待有内容 —— 尤其同步，它可能要跑十几秒，光转圈会让人以为卡死了。
+ */
+const note = ref("正在打开工作目录…");
+
 export const startupPhase = readonly(phase);
 export const startupFailure = readonly(failure);
+export const startupNote = readonly(note);
+
+export function setStartupNote(text: string): void {
+    note.value = text;
+}
 
 export function markStartupReady(): void {
     phase.value = "ready";

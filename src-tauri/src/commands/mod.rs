@@ -9,7 +9,8 @@
 //! - [`help`] / [`keys`]：帮助页与 GPG 密钥；
 //! - [`maintenance`]：回收站与整理；
 //! - [`namespaces`]：命名空间表；
-//! - [`activity`]：最近更改、浏览历史、特殊页面。
+//! - [`activity`]：最近更改、浏览历史、特殊页面；
+//! - [`sync`]：与 S3 兼容服务的同步。
 
 pub mod activity;
 pub mod files;
@@ -18,4 +19,5 @@ pub mod keys;
 pub mod maintenance;
 pub mod namespaces;
 pub mod notes;
+pub mod sync;
 pub mod workspace;

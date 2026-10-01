@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { flash } from "../../core/notice.ts";
 import { CIPHER_NOTES, COMPRESSION_NOTES, type Cipher, type Compression, type Policy } from "../../ipc/note.ts";
+import { describeReport, type SyncReport, type SyncSettings } from "../../ipc/sync.ts";
 import KeyChooser from "../common/KeyChooser.vue";
 import NamespaceManager from "./NamespaceManager.vue";
 import type { ThemeMode } from "../../ipc/settings.ts";
@@ -188,6 +189,65 @@ function setSign(value: string | null) {
 function setEncrypt(value: string | null) {
   void setProtection({ ...protection.value, gpg_encrypt: value });
 }
+
+// ---------------------------------------------------------------- 云端同步
+
+/**
+ * 同步的设置。
+ *
+ * 它**不进仓库**：`settings/sync.json` 只在这台机器上（里面有 S3 的密钥），
+ * 所以换台机器要重新填一次 —— 密钥跟着机器走，不跟着数据走。
+ */
+const sync = ref<SyncSettings>({ enabled: false, s3: { endpoint: "", region: "", bucket: "", prefix: "", access_key: "", secret_key: "" } });
+const syncBusy = ref(false);
+/** 上一次同步的结果（就在这一页上再说一遍，不必去翻浮条） */
+const lastSync = ref("");
+const syncProblem = ref("");
+
+onMounted(() => {
+  void loadSync();
+});
+
+async function loadSync() {
+  try {
+    sync.value = await invoke<SyncSettings>("sync_settings");
+  } catch (error) {
+    syncProblem.value = String(error);
+  }
+}
+
+/** 存一下（开关、每一栏改动都走它） */
+async function saveSync() {
+  try {
+    sync.value = await invoke<SyncSettings>("set_sync_settings", { settings: sync.value });
+    syncProblem.value = "";
+  } catch (error) {
+    syncProblem.value = String(error);
+  }
+}
+
+/**
+ * 现在同步一次。
+ *
+ * 会跑一会儿（要遍历本地文件、列云端清单、挨个传），所以按钮上写着"正在同步…"，
+ * 进度另外由浮条那一路说 —— 这一页只管结果。
+ */
+async function syncNow() {
+  syncBusy.value = true;
+  syncProblem.value = "";
+  try {
+    const report = await invoke<SyncReport>("sync_now");
+    lastSync.value = describeReport(report);
+    syncSettingsDirty.value = false;
+  } catch (error) {
+    syncProblem.value = String(error);
+  } finally {
+    syncBusy.value = false;
+  }
+}
+
+/** 改过连接信息还没同步过（提示一句"先同步一次看看"） */
+const syncSettingsDirty = ref(false);
 
 /** 从内到外说清这份策略会怎么存；什么都没做就是"原样" */
 function policyLabel(policy: Policy): string {
@@ -537,6 +597,106 @@ watch(
         新建笔记提交时会要求设置口令，此后阅读这些笔记也需要输入。口令不写入磁盘，遗失后无法恢复。
       </span>
     </div>
+    <h2 class="settings__section">云端同步</h2>
+
+    <p class="settings__hint">
+      把<strong>仓库</strong>同步到 S3 兼容的服务上（MinIO、Cloudflare R2、对象存储都可以）：
+      内容块、事件日志、命名空间表，以及仓库自己的设置。
+      <strong>这台机器自己的东西不传</strong>：界面偏好、浏览历史、写了一半的草稿，
+      还有这里的密钥本身。
+    </p>
+
+    <div id="sync-enabled" class="row" :class="{ 'row--target': isFocused('sync-enabled') }">
+      <span class="row__label">启动时同步</span>
+      <code class="row__id">#sync-enabled</code>
+      <label class="row__check">
+        <input
+            type="checkbox"
+            :checked="sync.enabled"
+            @change="sync.enabled = ($event.target as HTMLInputElement).checked; saveSync()"
+        />
+        <span>每次打开程序先同步一次，再摆界面</span>
+      </label>
+    </div>
+
+    <div id="sync-endpoint" class="row" :class="{ 'row--target': isFocused('sync-endpoint') }">
+      <span class="row__label">服务地址</span>
+      <code class="row__id">#sync-endpoint</code>
+      <input
+          v-model="sync.s3.endpoint"
+          class="row__text"
+          type="text"
+          placeholder="https://s3.example.com（不带桶名）"
+          @change="saveSync()"
+      />
+    </div>
+
+    <div id="sync-bucket" class="row" :class="{ 'row--target': isFocused('sync-bucket') }">
+      <span class="row__label">桶与前缀</span>
+      <code class="row__id">#sync-bucket</code>
+      <input
+          v-model="sync.s3.bucket"
+          class="row__text"
+          type="text"
+          placeholder="桶名"
+          @change="saveSync()"
+      />
+      <input
+          v-model="sync.s3.prefix"
+          class="row__text"
+          type="text"
+          placeholder="前缀（可留空，例如 refind-note）"
+          @change="saveSync()"
+      />
+    </div>
+
+    <div id="sync-region" class="row" :class="{ 'row--target': isFocused('sync-region') }">
+      <span class="row__label">区域</span>
+      <code class="row__id">#sync-region</code>
+      <input
+          v-model="sync.s3.region"
+          class="row__text"
+          type="text"
+          placeholder="us-east-1（多数兼容服务不校验）"
+          @change="saveSync()"
+      />
+    </div>
+
+    <div id="sync-keys" class="row" :class="{ 'row--target': isFocused('sync-keys') }">
+      <span class="row__label">密钥</span>
+      <code class="row__id">#sync-keys</code>
+      <input
+          v-model="sync.s3.access_key"
+          class="row__text"
+          type="text"
+          placeholder="Access Key"
+          @change="saveSync()"
+      />
+      <input
+          v-model="sync.s3.secret_key"
+          class="row__text"
+          type="password"
+          placeholder="Secret Key"
+          @change="saveSync()"
+      />
+    </div>
+
+    <div id="sync-run" class="row" :class="{ 'row--target': isFocused('sync-run') }">
+      <span class="row__label">同步</span>
+      <code class="row__id">#sync-run</code>
+      <button class="row__go" type="button" :disabled="syncBusy" @click="syncNow">
+        {{ syncBusy ? "正在同步…" : "立即同步" }}
+      </button>
+      <span v-if="lastSync" class="row__hint">{{ lastSync }}</span>
+    </div>
+
+    <p v-if="syncProblem" class="settings__problem">{{ syncProblem }}</p>
+
+    <p class="settings__hint">
+      密钥只写在<strong>这台机器</strong>的 <code>settings/sync.json</code>（权限只给本人）。
+      两台机器同时改同一份仓库时，靠云端一把自旋锁排队；真撞上了，按修改时间取新的那一版，
+      并在同步报告里说一声。
+    </p>
   </section>
 </template>
 
@@ -627,6 +787,53 @@ watch(
 .row__text:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+.settings__hint {
+  margin: 10px 0;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1.8;
+}
+
+.settings__problem {
+  margin: 10px 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--danger);
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.settings__hint code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--hover);
+  font-family: var(--mono-font);
+}
+
+.row--target {
+  scroll-margin-top: 24px;
+}
+
+.row__go {
+  padding: 5px 12px;
+  border: 1px solid var(--accent-soft);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent-soft);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.row__go:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--text);
+}
+
+.row__go:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .row {

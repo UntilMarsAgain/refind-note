@@ -7,9 +7,13 @@
 
 import { computed, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { applyAppearance } from "./appearance.ts";
 import type { MaintenanceInfo } from "../ipc/maintenance.ts";
 import type { Policy } from "../ipc/note.ts";
+import type { SyncProgress, SyncReport } from "../ipc/sync.ts";
+import { flash } from "./notice.ts";
+import { setStartupNote } from "./startup.ts";
 import type {
     DatabaseMeta,
     Preferences,
@@ -117,6 +121,12 @@ let dirty = false;
  * 界面不再往下走 —— 这种状态继续用下去，可能把东西写进一个不该写的目录。
  */
 export async function openWorkspace(): Promise<void> {
+    // **顺序要紧**：先同步，再打开数据库。
+    //
+    // 反过来的话，新机器上那几张表（titles / namespaces）是打开数据库时当场建出来的
+    // 空表，同步那边会把它当成"本机改过、而且更新"，把云端那份真的盖掉。
+    await syncAtStartup();
+
     try {
         const info = await invoke<WorkspaceInfo>("open_workspace");
         workspaceRoot.value = info.root;
@@ -128,14 +138,56 @@ export async function openWorkspace(): Promise<void> {
         maintenance.value = info.maintenance;
         // 开局的样子照默认值来；之后在标签栏上怎么开合都不再动它
         railCollapsed.value = info.preferences.rail_collapsed;
-        markStartupReady();
     } catch (error) {
         // 这一步包含了建目录与认数据库，所以名字把两件事都说上
         reportStartupFailure("打开工作目录与数据库", error);
+        // 失败时也应用一次：错误页本身也要有对的配色
+        applyAppearance(preferences.value);
+        return;
     }
 
-    // 失败时也应用一次：错误页本身也要有对的配色
     applyAppearance(preferences.value);
+
+    markStartupReady();
+}
+
+/**
+ * 启动时同步一次（开着的话）——**在打开数据库之前**跑，理由见 `openWorkspace`。
+ *
+ * **同步失败不挡启动**：网断了、桶名写错了、锁被别人拿着，都不该让人打不开
+ * 自己的笔记 —— 说一句，接着用本机这份。
+ */
+async function syncAtStartup(): Promise<void> {
+    try {
+        if (!(await invoke<boolean>("sync_ready"))) {
+            return;
+        }
+    } catch (error) {
+        console.warn("问同步状态失败：", error);
+        return;
+    }
+
+    setStartupNote("正在与云端同步…");
+    // 后端每走一步发一条进度：加载页上那行字跟着它走
+    const unlisten = await listen<SyncProgress>("sync-progress", (event) => {
+        const step = event.payload;
+        const counter = step.total > 1 ? `（${step.done + 1}/${step.total}）` : "";
+        setStartupNote(`正在与云端同步：${step.text}${counter}`);
+    });
+
+    try {
+        const report = await invoke<SyncReport>("sync_now");
+        // 一路顺风就不打扰；有合并过的东西才说一句（那是**动过你的东西**）
+        const merged = report.conflicts.length;
+        if (merged > 0) {
+            flash(`同步完成：有 ${merged} 个文件两边都改过，已按时间取了新的那版`);
+        }
+    } catch (error) {
+        flash(`同步没成功：${error}（先用本机的数据，之后可以在设置里再同步一次）`);
+    } finally {
+        unlisten();
+        setStartupNote("正在打开工作目录…");
+    }
 }
 
 export function updatePreferences(patch: Partial<Preferences>): void {
