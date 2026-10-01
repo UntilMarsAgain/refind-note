@@ -513,14 +513,16 @@ fn decide(
             let local_changed = aligned
                 .map(|stamp| stamp.hash != local.hash)
                 .unwrap_or(true);
+            // 比 ETag 不认大小写：它是十六进制，真变了不会只差大小写；而不同的接口
+            // （清单 / GET / HEAD）偶尔就是这么点差别 —— 认成"变了"就会每趟重下一遍
             let remote_changed = aligned
-                .map(|stamp| stamp.etag != remote.etag)
+                .map(|stamp| !stamp.etag.eq_ignore_ascii_case(&remote.etag))
                 .unwrap_or(true);
 
             match (local_changed, remote_changed) {
                 (false, false) => (Decision::Nothing, String::new()),
-                (true, false) => (Decision::Upload, String::new()),
-                (false, true) => (Decision::Download, String::new()),
+                (true, false) => (Decision::Upload, "本机这份变了".to_string()),
+                (false, true) => (Decision::Download, "云端这份变了".to_string()),
                 (true, true) => {
                     // 两边都动过：内容块不会走到这里（内容寻址），
                     // 剩下的用时间定；时间也一样时**偏保守**，留本机的那份
@@ -691,7 +693,7 @@ fn reconcile(
 
     // ---- 动手 ----
     for (done, (path, decision, why)) in work.iter().enumerate() {
-        let text = describe(path, decision);
+        let text = describe(path, decision, why);
         progress(Progress {
             phase: match decision {
                 Decision::Upload | Decision::DeleteRemote => "upload",
@@ -745,7 +747,15 @@ fn reconcile(
                 write_local(root, path, &plain)?;
                 report.downloaded += 1;
                 report.bytes_down += plain.len() as u64;
-                stamp_local(index, root, path, fetched.etag);
+                // 记的是**清单**里的那个 ETag，不是这次 GET 响应头里的：下一趟比的就是
+                // 清单，两边得是同一路读来的。记成另一路的，那两路只要有一点出入
+                // （引号写法、大小写、有没有这个头），每趟都会判"云端变了" —— 于是
+                // 下载完再点同步，又是全量下载一遍。
+                let etag = remote
+                    .get(path)
+                    .map(|held| held.etag.clone())
+                    .unwrap_or_else(|| fetched.etag.clone());
+                stamp_local(index, root, path, etag);
                 if matches!(decision, Decision::TakeNewer(_)) {
                     report.conflicts.push(Conflict {
                         path: path.clone(),
@@ -783,13 +793,18 @@ fn reconcile(
     Ok(report)
 }
 
-fn describe(path: &str, decision: &Decision) -> String {
-    match decision {
+fn describe(path: &str, decision: &Decision, why: &str) -> String {
+    let what = match decision {
         Decision::Upload | Decision::TakeNewer("local") => format!("上传 {path}"),
         Decision::Download | Decision::TakeNewer("remote") => format!("下载 {path}"),
         Decision::DeleteRemote => format!("云端删除 {path}"),
         Decision::DeleteLocal => format!("本机删除 {path}"),
         _ => path.to_string(),
+    };
+    if why.is_empty() {
+        what
+    } else {
+        format!("{what}（{why}）")
     }
 }
 
@@ -1432,10 +1447,13 @@ mod end_to_end {
                     if !name.starts_with(&prefix) {
                         continue;
                     }
+                    // 故意把清单里的 ETag 写成**大写、不带引号**：真有的服务就是这么
+                    // 不讲究（清单一路说法、GET/HEAD 另一路）—— 引擎不该因此每趟
+                    // 都判"云端变了"，把整份仓库重下一遍。
                     xml.push_str(&format!(
-                        "<Contents><Key>{}</Key><LastModified>2026-10-01T10:00:00.000Z</LastModified><ETag>&quot;{}&quot;</ETag><Size>{}</Size></Contents>",
+                        "<Contents><Key>{}</Key><LastModified>2026-10-01T10:00:00.000Z</LastModified><ETag>{}</ETag><Size>{}</Size></Contents>",
                         escape(name),
-                        etag,
+                        etag.to_uppercase(),
                         content.len()
                     ));
                 }
@@ -1575,7 +1593,11 @@ mod end_to_end {
         std::fs::write(first.root().join("settings/preferences.json"), b"{}").unwrap();
         std::fs::write(first.root().join("db/drafts/1"), "写了一半".as_bytes()).unwrap();
         let report = run(&first, &settings, &|_| {}, false).unwrap();
-        assert_eq!(report.uploaded, 0, "没改过就什么都不传：{report:?}");
+        assert_eq!(
+            report.uploaded + report.downloaded,
+            0,
+            "没改过就什么都不动：{report:?}"
+        );
 
         // ---- 把本机删干净（等于换台机器） ----
         let second = workspace("pull");
@@ -1659,6 +1681,30 @@ mod end_to_end {
         let _ = std::fs::remove_dir_all(first.root());
         let _ = std::fs::remove_dir_all(second.root());
         let _ = std::fs::remove_dir_all(third.root());
+    }
+
+    /// 两边的 ETag 只差大小写不算"变了" —— 不然就是每趟全量重下。
+    ///
+    /// 这一条是从真事上来的：清单与 GET/HEAD 是两条路，服务对同一个 ETag 的写法
+    /// 偶尔不一致，而"云端变没变"全靠它比。
+    #[test]
+    fn an_etag_that_only_differs_in_case_is_not_a_change() {
+        let stamp = Stamp {
+            hash: "h".to_string(),
+            mtime: 100,
+            etag: "9F2C4A".to_string(),
+        };
+        let here = Local {
+            hash: "h".to_string(),
+            mtime: 100,
+        };
+        let there = Remote {
+            size: 10,
+            etag: "9f2c4a".to_string(),
+            modified: 100,
+        };
+        let (decision, _) = decide(false, Some(&here), Some(&there), Some(&stamp));
+        assert_eq!(decision, Decision::Nothing, "只差大小写不算云端变了");
     }
 
     /// 云端那把锁还热着：普通同步让你等着，**强制同步**现在就抢过来。

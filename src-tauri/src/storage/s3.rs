@@ -479,9 +479,26 @@ fn header(response: &ureq::http::Response<ureq::Body>, name: &str) -> String {
         .to_string()
 }
 
-/// ETag 两头带着引号，比的时候要去掉
+/// ETag 两头带着引号，比的时候要去掉。
+///
+/// 去不干净是要出事的：云端那一份"变没变"全靠它比。清单走 XML（引号写成 `&quot;`
+/// 或 `&#34;`）、GET/HEAD 走响应头（引号是字面的 `"`），两条路读出来的要是差一个
+/// 字符，每趟都会判成"云端变了" —— 于是每次都把整份仓库重下一遍。
 fn clean_etag(raw: &str) -> String {
-    raw.trim().trim_matches('"').to_string()
+    let mut text = raw.trim().to_string();
+    loop {
+        let before = text.clone();
+        for quote in ["\"", "&quot;", "&#34;", "&#x22;"] {
+            text = text
+                .trim_start_matches(quote)
+                .trim_end_matches(quote)
+                .trim()
+                .to_string();
+        }
+        if text == before {
+            return text;
+        }
+    }
 }
 
 /// 一页清单
@@ -566,6 +583,22 @@ fn unescape_xml(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 同一个 ETag 的几种写法要读成同一个值 —— 清单走 XML、GET/HEAD 走响应头。
+    ///
+    /// 读出来不一样是什么下场：每趟都判"云端变了"，下载完再同步又是全量下载。
+    #[test]
+    fn an_etag_reads_the_same_however_it_is_spelled() {
+        for raw in [
+            "abc",
+            "\"abc\"",
+            "&quot;abc&quot;",
+            "&#34;abc&#34;",
+            "  \"abc\"  ",
+        ] {
+            assert_eq!(clean_etag(raw), "abc", "从 {raw} 里读出来");
+        }
+    }
 
     /// **官方测试向量**：AWS 文档里那个 S3 GET 的例子，逐字节对签名。
     /// 对上了就说明与别家实现互通（MinIO / R2 / OSS 认的都是这一套）。

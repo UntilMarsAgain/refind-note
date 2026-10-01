@@ -92,6 +92,24 @@ pub fn sync_export_key(target: String) -> Result<(), String> {
     crate::storage::workspace::write_bytes(std::path::Path::new(&target), text.as_bytes())
 }
 
+/// 把云端密钥**复制到剪贴板** —— 与 [`sync_export_key`] 同一条路的两个出口。
+///
+/// 一样不经手界面：屏幕上看不到它，但你可以直接粘到另一台机器上。
+/// 要提醒的是剪贴板是**公开**的（同一个桌面里的程序都读得到），所以粘完随手清掉。
+#[tauri::command]
+pub fn sync_copy_key(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt as _;
+
+    let workspace = open_workspace()?;
+    let settings = sync::settings(&workspace);
+    if settings.key.is_empty() {
+        return Err("还没有密钥可复制".to_string());
+    }
+    app.clipboard()
+        .write_text(settings.key.clone())
+        .map_err(|error| format!("写剪贴板失败：{error}"))
+}
+
 /// 现在同步一次，返回这次做了些什么；每一步都会发 `sync-progress` 事件。
 ///
 /// **`(async)` 是必须的**：不加的话这个命令在**主线程**上跑（Tauri 的默认），

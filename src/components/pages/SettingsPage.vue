@@ -343,6 +343,22 @@ async function exportKey() {
   }
 }
 
+/**
+ * 把密钥**复制到剪贴板** —— 导出到文件的近路：不落盘，直接粘到另一台机器上。
+ *
+ * 同样不经手界面（后端直接写进剪贴板，界面上看不到它）。剪贴板是公开的：
+ * 同一个桌面里的程序都读得到，所以粘完记得清掉。
+ */
+async function copyKey() {
+  syncProblem.value = "";
+  try {
+    await invoke("sync_copy_key");
+    flash("密钥已复制 —— 粘到另一台机器上，然后记得清掉剪贴板");
+  } catch (error) {
+    syncProblem.value = String(error);
+  }
+}
+
 /** 从内到外说清这份策略会怎么存；什么都没做就是"原样" */
 function policyLabel(policy: Policy): string {
   const layers: string[] = [];
@@ -793,6 +809,15 @@ watch(
         {{ sync.has_key ? "换一把新密钥" : "生成密钥" }}
       </button>
       <button v-if="sync.has_key" class="row__go" type="button" @click="exportKey">导出到文件…</button>
+      <button
+        v-if="sync.has_key"
+        class="row__go"
+        type="button"
+        title="直接写进剪贴板（屏幕上不显示）—— 粘到另一台机器上之后记得清掉剪贴板：同一个桌面里的程序都读得到它"
+        @click="copyKey"
+      >
+        复制到剪贴板
+      </button>
     </div>
 
     <div class="row">
@@ -813,7 +838,8 @@ watch(
       两把钥匙都按密码框显示（打成点），不摆在屏幕上。
       密钥由本程序生成（32 字节随机），<strong>只存在这台机器上，界面上不显示</strong> ——
       显示出来就不只是"碰到电脑才能偷"了：直播、共享屏幕、随手截个图都可能把它带出去。
-      要带到别的机器上，用「导出到文件」，那份文件就是钥匙本身（别放进会被同步的目录）。
+      要带到别的机器上，用「导出到文件」（那份文件就是钥匙本身，别放进会被同步的目录），
+      或者「复制到剪贴板」直接粘过去 —— 剪贴板是公开的，粘完记得清掉。
       换一把密钥意味着云端那些旧密文解不开了，所以<strong>下一次同步会把本机这份整份重传</strong>。
       这一层防的是存储服务与捡到那个桶的人；笔记自身那几层（GPG / 口令）防的是拿到你这台
       机器的人，两件事各管各的。
