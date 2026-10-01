@@ -875,6 +875,12 @@ watch(markdown, (value) => {
     <div v-else-if="loadProblem" class="editor__problem">
       <p>{{ loadProblem }}</p>
 
+      <!-- 读不出来（例如解锁被取消）也要有出路：重试，或者退回阅读页 -->
+      <div v-if="!locked" class="editor__problem-actions">
+        <button type="button" class="ebtn" @click="load">重试</button>
+        <button type="button" class="ebtn" @click="emit('navigate', props.title)">返回阅读页</button>
+      </div>
+
       <div v-if="locked" class="editor__problem-actions">
         <button
             type="button"
