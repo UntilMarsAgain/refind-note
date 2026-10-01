@@ -6,3 +6,4 @@ pub mod files;
 pub mod help;
 pub mod keys;
 pub mod maintenance;
+pub mod sync;
