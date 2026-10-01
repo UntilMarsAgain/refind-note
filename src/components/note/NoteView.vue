@@ -29,6 +29,8 @@ const props = defineProps<{
     collapsed: boolean;
     /** 被指令带过来时的"从哪儿来" */
     via?: Via | null;
+    /** 这一页星标过没有 */
+    starred?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -50,6 +52,8 @@ const emit = defineEmits<{
      * 页面要留一条走得通的路。
      */
     (e: "leave"): void;
+    /** 加/去星标 */
+    (e: "toggle-star"): void;
 }>();
 
 const note = ref<Note | null>(null);
@@ -161,9 +165,11 @@ watch(
           :collapsed="props.collapsed"
           :actions="headerActions"
           :via="props.via ?? null"
+          :starred="props.starred ?? false"
           @action="onAction"
           @open-parent="emit('navigate', $event)"
           @open-via="emit('navigate', $event)"
+          @toggle-star="emit('toggle-star')"
       />
 
       <!--

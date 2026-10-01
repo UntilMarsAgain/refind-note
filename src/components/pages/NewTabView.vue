@@ -1,17 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { BookOpen } from "@lucide/vue";
+import { Star } from "@lucide/vue";
 import type { HelpPage } from "../../bindings/help.ts";
-import { browsingHistory } from "../../core/browsing.ts";
-import { metaOf } from "../../core/special.ts";
+import { starred, toggleStar } from "../../core/preferences.ts";
 
 /**
  * 新标签页（`special:newtab`）。
  *
- * 它是"从哪儿开始"的那一页：一个输入框（打开或新建），加上几行去处。
- * 摆在前面的只有两样 —— **帮助**（新来的人先看它）与**常用页面**；
- * 其余的收在后面一行，不抢眼。
+ * 一竖排入口 + 一片星标，够用就好：
+ *
+ * - 上面那几行去从是**每个仓库都用得上**的（帮助、全部页面、随机、最近改动、浏览历史），
+ *   所以竖着排、字大一点，点起来不用瞄准；
+ * - 下面的星标是**你自己攒的**：在任意一页的页头点那颗星，它就落到这里。
+ *   星标不设上限，多了这一片自己滚。
  */
 const emit = defineEmits<{
   /** 打开某个地址（笔记名或 `Help:…` / `special:…`） */
@@ -19,19 +21,10 @@ const emit = defineEmits<{
 }>();
 
 const typed = ref("");
-/** 后端说了有哪些特殊页 —— 这一页只负责显示 */
-const pages = ref<string[]>([]);
-/** 帮助页：随程序发布 */
+/** 帮助页：随程序发布。首页取第一篇（文件名的序号就是顺序） */
 const help = ref<HelpPage[]>([]);
 
 onMounted(async () => {
-  try {
-    pages.value = await invoke<string[]>("special_pages");
-  } catch (error) {
-    console.warn("取特殊页面清单失败：", error);
-    pages.value = [];
-  }
-
   try {
     help.value = await invoke<HelpPage[]>("help_pages");
   } catch (error) {
@@ -40,25 +33,18 @@ onMounted(async () => {
   }
 });
 
-/** 摆在第一行的几个：日常最常用 */
-const COMMON = ["all", "changes", "history", "files"];
-
-const common = computed(() =>
-  COMMON.filter((page) => pages.value.includes(page)).map((page) => ({
-    page,
-    ...metaOf(page),
-  })),
+/** 竖排的那几条：固定顺序，缺哪个就不显示哪个 */
+const entries = computed(() =>
+  [
+    help.value[0]
+      ? { key: "help", label: "帮助首页", address: `Help:${help.value[0].slug}` }
+      : null,
+    { key: "all", label: "全部页面", address: "special:all" },
+    { key: "random", label: "随机页面", address: "special:random" },
+    { key: "changes", label: "最近更改", address: "special:changes" },
+    { key: "history", label: "浏览历史", address: "special:history" },
+  ].filter((entry) => entry !== null),
 );
-
-/** 其余的：维护与设置 */
-const upkeep = computed(() =>
-  pages.value
-    .filter((page) => page !== "newtab" && !COMMON.includes(page))
-    .map((page) => ({ page, ...metaOf(page) })),
-);
-
-/** 最近打开：浏览历史的头几条（本身就是按时间倒序、按地址去重的） */
-const recent = computed(() => browsingHistory.value.slice(0, 5));
 
 function submit() {
   const value = typed.value.trim();
@@ -83,74 +69,55 @@ function submit() {
       <button class="newtab__go" type="button" @click="submit">打开</button>
     </div>
 
-    <!-- 帮助摆在最前面：新来的人先看它，比什么都管用 -->
-    <p v-if="help.length > 0" class="newtab__line newtab__line--help">
-      <BookOpen :size="14" :stroke-width="1.9"/>
-      <span class="newtab__label">帮助</span>
+    <nav class="newtab__entries">
       <button
-          v-for="page in help"
-          :key="page.slug"
+          v-for="entry in entries"
+          :key="entry.key"
           type="button"
-          class="newtab__link newtab__link--help"
-          :title="page.display"
-          @click="emit('open', `Help:${page.slug}`)"
+          class="newtab__entry"
+          @click="emit('open', entry.address)"
       >
-        {{ page.title }}
+        {{ entry.label }}
       </button>
-    </p>
+    </nav>
 
-    <p class="newtab__line">
-      <span class="newtab__label">常用</span>
-      <button
-          v-for="item in common"
-          :key="item.page"
-          type="button"
-          class="newtab__link"
-          :title="item.tip"
-          @click="emit('open', `special:${item.page}`)"
-      >
-        {{ item.label }}
-      </button>
-    </p>
-
-    <p v-if="upkeep.length > 0" class="newtab__line newtab__line--dim">
-      <span class="newtab__label">更多</span>
-      <button
-          v-for="item in upkeep"
-          :key="item.page"
-          type="button"
-          class="newtab__link"
-          :title="item.tip"
-          @click="emit('open', `special:${item.page}`)"
-      >
-        {{ item.label }}
-      </button>
-    </p>
-
-    <p v-if="recent.length > 0" class="newtab__line newtab__line--dim">
-      <span class="newtab__label">最近</span>
-      <button
-          v-for="visit in recent"
-          :key="visit.address"
-          type="button"
-          class="newtab__link"
-          :title="visit.address"
-          @click="emit('open', visit.address)"
-      >
-        {{ visit.title || visit.address }}
-      </button>
-    </p>
+    <div v-if="starred.length > 0" class="newtab__stars">
+      <h2 class="newtab__caption">星标</h2>
+      <!-- 星标不设上限：多了就在这一片里滚 -->
+      <ul class="newtab__list">
+        <li v-for="star in starred" :key="star.address" class="newtab__star">
+          <button
+              type="button"
+              class="newtab__star-open"
+              :title="star.address"
+              @click="emit('open', star.address)"
+          >
+            <span class="newtab__star-name">{{ star.title || star.address }}</span>
+            <span class="newtab__star-address">{{ star.address }}</span>
+          </button>
+          <button
+              type="button"
+              class="newtab__star-off"
+              title="取消星标"
+              aria-label="取消星标"
+              @click="toggleStar(star.address, star.title)"
+          >
+            <Star :size="13" :stroke-width="1.8" fill="currentColor"/>
+          </button>
+        </li>
+      </ul>
+    </div>
   </section>
 </template>
 
 <style scoped>
 .newtab {
-  max-width: 560px;
-  margin: 52px auto 0;
+  max-width: 460px;
+  margin: 56px auto 0;
 }
 
 .newtab__title {
-  margin: 0 0 14px;
+  margin: 0 0 16px;
   font-size: 20px;
   font-weight: 600;
   text-align: center;
@@ -164,7 +131,7 @@ function submit() {
 .newtab__input {
   flex: 1;
   min-width: 0;
-  height: 34px;
+  height: 36px;
   padding: 0 12px;
   border: 1px solid var(--border);
   border-radius: 7px;
@@ -184,7 +151,7 @@ function submit() {
 }
 
 .newtab__go {
-  height: 34px;
+  height: 36px;
   padding: 0 16px;
   border: 1px solid var(--accent-soft);
   border-radius: 7px;
@@ -200,51 +167,116 @@ function submit() {
   color: var(--text);
 }
 
-/* 一行去处：标签 + 一串链接，不加框、不加底色 */
-.newtab__line {
+/* 竖排入口：一行一个，字比正文大一点，点起来不用瞄准 */
+.newtab__entries {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-  align-items: baseline;
-  margin: 22px 0 0;
-  font-size: 13px;
-  line-height: 1.9;
+  flex-direction: column;
+  margin-top: 26px;
 }
 
-.newtab__line--help {
-  align-items: center;
-  margin-top: 18px;
-  color: var(--accent-soft);
-}
-
-.newtab__line--dim {
-  font-size: 12.5px;
-}
-
-.newtab__label {
-  flex: 0 0 auto;
-  min-width: 28px;
-  color: var(--text-dim);
-  font-size: 12px;
-}
-
-.newtab__link {
-  padding: 0;
+.newtab__entry {
+  padding: 10px 4px;
   border: 0;
+  border-bottom: 1px solid var(--border);
   background: transparent;
-  color: var(--text-dim);
+  color: var(--text);
   font: inherit;
-  font-size: inherit;
+  font-size: 15px;
+  text-align: left;
   cursor: pointer;
 }
 
-.newtab__link:hover {
-  color: var(--text);
-  text-decoration: underline;
+.newtab__entry:first-child {
+  border-top: 1px solid var(--border);
 }
 
-/* 帮助那一行用主题色：它是这一页唯一"希望你点"的地方 */
-.newtab__link--help {
+.newtab__entry:hover {
+  padding-left: 10px;
+  background: var(--accent-tint);
   color: var(--accent-soft);
+  transition: padding-left 120ms ease;
+}
+
+.newtab__stars {
+  margin-top: 28px;
+}
+
+.newtab__caption {
+  margin: 0 0 6px;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+/* 星标多了就自己滚：这一片有上限，页面整体不被它撑长 */
+.newtab__list {
+  max-height: 232px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.newtab__star {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.newtab__star-open {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  min-width: 0;
+  padding: 7px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.newtab__star-open:hover {
+  background: var(--accent-tint);
+}
+
+.newtab__star-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.newtab__star-address {
+  color: var(--text-dim);
+  font-size: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.newtab__star-off {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--accent-soft);
+  cursor: pointer;
+}
+
+.newtab__star-off:hover {
+  background: var(--hover);
+  color: var(--danger);
 }
 </style>

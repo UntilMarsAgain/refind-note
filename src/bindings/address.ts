@@ -65,6 +65,8 @@ export interface ResolvedAddress {
     address: Address;
     canonical: string;
     outcome: Outcome;
+    /** 这一页能不能改（由后端说了算，界面照它决定摆哪些按钮） */
+    editable: boolean;
     /** 被指令带过来时才有的"从哪儿来" */
     via: Via | null;
 }

@@ -22,6 +22,15 @@ const DEFAULT_ACCENT: &str = "#5b8dd6";
 /// 认得的深浅色。其余值一律当「跟随系统」
 const THEMES: [&str; 3] = ["system", "light", "dark"];
 
+/// 星标（收藏）的一页
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Star {
+    /// 规范地址：这一页在哪儿
+    pub address: String,
+    /// 记下来时的标题 —— 地址记不住，界面上显示的是它
+    pub title: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Preferences {
@@ -40,8 +49,10 @@ pub struct Preferences {
     pub rail_collapsed: bool,
     /// 代码块是否显示行号
     pub code_line_numbers: bool,
-    /// 记不记浏览历史（记下来的在 `settings/browsing.json`，随时可以单独清空）
+    /// 记不记浏览历史（记下来的在 `settings/browsing.jsonl`，随时可以单独清空）
     pub record_history: bool,
+    /// 星标过的页面（新标签页上那一片）
+    pub starred: Vec<Star>,
 }
 
 impl Default for Preferences {
@@ -54,6 +65,7 @@ impl Default for Preferences {
             rail_collapsed: false,
             code_line_numbers: true,
             record_history: true,
+            starred: Vec::new(),
         }
     }
 }
@@ -64,6 +76,17 @@ impl Preferences {
     /// 文件是用户看得见、手改得了的，前端送来的值也不值得全信；与其让界面带着一个
     /// 没法用的值跑起来，不如在这里悄悄纠正。读与写都过这一道，于是落盘的一定合法。
     fn sanitized(mut self) -> Self {
+        // 星标：去掉空地址与重复项（同一个地址只留一条）。
+        // **不设上限** —— 星标多少是用户的事，新标签页那边用滚动条接住
+        self.starred.retain(|star| !star.address.trim().is_empty());
+        let mut seen: Vec<String> = Vec::new();
+        self.starred.retain(|star| {
+            if seen.iter().any(|kept| kept == &star.address) {
+                return false;
+            }
+            seen.push(star.address.clone());
+            true
+        });
         self.zoom = if self.zoom.is_finite() {
             self.zoom.clamp(ZOOM_MIN, ZOOM_MAX)
         } else {

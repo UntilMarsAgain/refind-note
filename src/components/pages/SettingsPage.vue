@@ -353,6 +353,10 @@ watch(
       class="row row--stack"
       :class="{ 'row--target': isFocused('namespaces') }"
     >
+      <div class="row__head">
+        <span class="row__label">命名空间</span>
+        <code class="row__id">#namespaces</code>
+      </div>
       <NamespaceManager/>
     </div>
 
@@ -620,6 +624,15 @@ watch(
 /* 整块内容占一行的（命名空间表这类）：不要那两道缩进 */
 .row--stack {
   display: block;
+}
+
+/* 这类行自己排头：标签 + 锚点提示，与别的行对齐 */
+.row__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 8px;
 }
 
 /* 设置页里偶尔要用按钮（如"忘掉口令"）：它长得像编辑器工具栏上那些 */

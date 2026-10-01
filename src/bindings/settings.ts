@@ -20,8 +20,18 @@ export interface Preferences {
     rail_collapsed: boolean;
     /** 代码块是否显示行号 */
     code_line_numbers: boolean;
-    /** 记不记浏览历史（记下来的在 settings/browsing.json，可单独清空） */
+    /** 记不记浏览历史（记下来的在 settings/browsing.jsonl，可单独清空） */
     record_history: boolean;
+    /** 星标过的页面（新标签页上那一片） */
+    starred: Star[];
+}
+
+/** 星标（收藏）的一页 */
+export interface Star {
+    /** 规范地址：这一页在哪儿 */
+    address: string;
+    /** 记下来时的标题（地址记不住，界面上显示的是它） */
+    title: string;
 }
 
 /** 数据库的认领标记与版本 */

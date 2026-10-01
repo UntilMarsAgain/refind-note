@@ -52,6 +52,9 @@ pub struct ResolvedAddress {
     pub address: Address,
     pub canonical: String,
     pub outcome: Outcome,
+    /// **这一页能不能改**。由仓库说了算 —— 界面照它决定摆哪些按钮，
+    /// 而不是自己按页面种类特判（帮助页不可改、将来的文件页也不可改）。
+    pub editable: bool,
     /// 被指令带过来时才有的"从哪儿来"
     pub via: Option<Via>,
 }
@@ -104,6 +107,8 @@ impl Database {
                     title: format!("{}:{page}", found.name),
                     url,
                 },
+                // 别人家的页面：本程序改不了
+                editable: false,
                 via,
             }));
         }
@@ -133,6 +138,8 @@ impl Database {
                     page: found.slug.clone(),
                     title: found.display.clone(),
                 },
+                // 帮助随程序发布：这里改不了（`@edit` 是看源码）
+                editable: false,
                 via,
             }));
         }
@@ -145,8 +152,10 @@ impl Database {
             return Ok(Some(ResolvedAddress {
                 address,
                 canonical,
-                via,
                 outcome: Outcome::Special { page },
+                // 特殊页面是程序自己的界面，没有"改它的正文"这回事
+                editable: false,
+                via,
             }));
         }
 
@@ -179,6 +188,8 @@ impl Database {
                 address,
                 canonical,
                 outcome: Outcome::Note { title },
+                // 仓库里的笔记：改得了
+                editable: true,
                 via,
             }));
         }
@@ -193,6 +204,8 @@ impl Database {
             address: cropped,
             canonical,
             outcome: Outcome::Missing { title },
+            // 还不存在：建起来就是一篇可改的笔记
+            editable: true,
             via,
         }))
     }

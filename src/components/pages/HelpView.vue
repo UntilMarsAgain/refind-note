@@ -24,11 +24,16 @@ const props = defineProps<{
   source: boolean;
   /** 正文滚下去了：页头收起 */
   collapsed: boolean;
+  /** 这一页能不能改 —— 由后端给（帮助页给的是"不能"） */
+  editable: boolean;
+  /** 这一页星标过没有 */
+  starred?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: "navigate", input: string): void;
   (e: "section", id: string): void;
+  (e: "toggle-star"): void;
 }>();
 
 const entry = ref<HelpPage | null>(null);
@@ -50,7 +55,12 @@ async function load() {
 
 watch(() => props.page, () => void load(), { immediate: true });
 
-/** 页头上的动作：在"看"与"看源码"之间来回 */
+/**
+ * 页头上的动作：在"看"与"看源码"之间来回。
+ *
+ * 能不能改由后端给（`editable`）—— 改得了的页面本就走阅读视图那条路，
+ * 走到这里的是**改不了**的那些（帮助页）：所以这里只切"看"与"看源码"。
+ */
 const actions = computed<PageAction[]>(() => [
   props.source
     ? { name: "read", label: "返回阅读", icon: BookOpen }
@@ -78,10 +88,12 @@ function onAction() {
           parent=""
           :collapsed="props.collapsed"
           :actions="actions"
+          :starred="props.starred ?? false"
           @action="onAction"
+          @toggle-star="emit('toggle-star')"
       />
 
-      <p class="help__note">
+      <p v-if="!props.editable" class="help__note">
         帮助内容随程序发布，无法在这里编辑。
       </p>
 

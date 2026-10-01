@@ -1,18 +1,19 @@
 //! 浏览历史：**我看过哪些页面**。
 //!
-//! 它不属于仓库内容，属于"这台机器上这个人" —— 所以落在 `settings/browsing.json`，
+//! 它不属于仓库内容，属于"这台机器上这个人" —— 所以落在 `settings/browsing.jsonl`，
 //! 与偏好放在一处（那边还有"记不记"这个开关）。换一份仓库读的是另一份历史，
 //! 这也对：就像浏览器历史不属于某个网站。
 //!
 //! 按**地址**去重：再访问一次只是把它挪到最前面、换个时间，不新增一行。
 
+use std::collections::HashSet;
 use std::fs;
 
 use serde::{Deserialize, Serialize};
 
 use crate::vault::database::{now, Database};
 
-const BROWSING_FILE: &str = "browsing.json";
+const BROWSING_FILE: &str = "browsing.jsonl";
 
 /// 最多记这么多条（再来的把最旧的挤掉）
 pub const HISTORY_LIMIT: usize = 300;
@@ -35,34 +36,59 @@ impl Database {
 
     /// 全部记录，**新的在前**
     pub fn browsing(&self) -> Vec<Visit> {
-        crate::storage::workspace::read_json::<Vec<Visit>>(&self.browsing_path())
+        let text = match fs::read_to_string(self.browsing_path()) {
+            Ok(text) => text,
+            // 还没记过：空清单不是错误
+            Err(_) => return Vec::new(),
+        };
+
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut visits: Vec<Visit> = Vec::new();
+        // 倒着读：越靠后越新，于是"第一次遇到的那个"就是最新的那条
+        for line in text.lines().rev() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let Ok(visit) = serde_json::from_str::<Visit>(line) else {
+                // 半行（写到一半断电）：跳过这一行，别的照读
+                continue;
+            };
+            if !seen.insert(visit.address.clone()) {
+                continue;
+            }
+            visits.push(visit);
+            if visits.len() >= HISTORY_LIMIT {
+                break;
+            }
+        }
+        visits
     }
 
-    fn save_browsing(&self, visits: &[Visit]) -> Result<(), String> {
-        crate::storage::workspace::write_json(&self.browsing_path(), &visits.to_vec())
-    }
-
-    /// 记一次访问：同一地址只留一条，挪到最前面。返回记完之后的整份清单。
+    /// 记一次访问：往文件尾**追加一行**，不重写整份。
     pub fn record_visit(&self, address: &str, title: &str) -> Result<Vec<Visit>, String> {
         let address = address.trim();
         if address.is_empty() {
             return Ok(self.browsing());
         }
 
-        let mut visits = self.browsing();
-        visits.retain(|visit| visit.address != address);
-        visits.insert(
-            0,
-            Visit {
-                address: address.to_string(),
-                title: title.to_string(),
-                at: now(),
-            },
-        );
-        visits.truncate(HISTORY_LIMIT);
+        let visit = Visit {
+            address: address.to_string(),
+            title: title.to_string(),
+            at: now(),
+        };
+        let line =
+            serde_json::to_string(&visit).map_err(|error| format!("写不进浏览历史：{error}"))?;
 
-        self.save_browsing(&visits)?;
-        Ok(visits)
+        let path = self.browsing_path();
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(|error| format!("打不开 {}：{error}", path.display()))?;
+        use std::io::Write as _;
+        writeln!(file, "{line}").map_err(|error| format!("写不进 {}：{error}", path.display()))?;
+
+        Ok(self.browsing())
     }
 
     /// 清空（记不记那个开关不动：关掉只是不再记新的）
@@ -94,6 +120,42 @@ mod tests {
         if let Some(root) = database.root().parent() {
             let _ = fs::remove_dir_all(root);
         }
+    }
+
+    /// 文件是追加的：再看一次是**再写一行**，读的时候才去重
+    #[test]
+    fn revisits_append_a_line_and_dedupe_on_read() {
+        let database = scratch("append");
+        database.record_visit("甲", "甲").unwrap();
+        database.record_visit("乙", "乙").unwrap();
+        database.record_visit("甲", "甲").unwrap();
+
+        // 文件里三行（一行一条），读出来两条
+        let raw = std::fs::read_to_string(database.settings_dir().join("browsing.jsonl")).unwrap();
+        assert_eq!(raw.lines().count(), 3, "每次访问都该追加一行：{raw}");
+
+        let visits = database.browsing();
+        assert_eq!(visits.len(), 2);
+        assert_eq!(visits[0].address, "甲", "新的在前");
+
+        cleanup(&database);
+    }
+
+    /// 半行（写到一半断电）跳过，别的照读
+    #[test]
+    fn a_broken_line_does_not_break_the_rest() {
+        let database = scratch("broken-line");
+        database.record_visit("甲", "甲").unwrap();
+
+        let path = database.settings_dir().join("browsing.jsonl");
+        let raw = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, format!("{raw}{{\"address\":\"半行\n")).unwrap();
+
+        let visits = database.browsing();
+        assert_eq!(visits.len(), 1);
+        assert_eq!(visits[0].address, "甲");
+
+        cleanup(&database);
     }
 
     #[test]

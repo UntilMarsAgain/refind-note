@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { History, Pencil, Trash2, type LucideIcon } from "@lucide/vue";
+import { History, Pencil, Star, Trash2, type LucideIcon } from "@lucide/vue";
 import { computed } from "vue";
 import type { Via } from "../../bindings/address.ts";
 import ViaHint from "./ViaHint.vue";
@@ -23,6 +23,8 @@ const props = defineProps<{
   actions?: PageAction[];
   /** 被指令带过来时的"从哪儿来"（`$$COMMAND$$` 那一页） */
   via?: Via | null;
+  /** 这一页星标过没有 */
+  starred?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -31,6 +33,8 @@ const emit = defineEmits<{
   (e: "open-parent", title: string): void;
   /** 点了"从哪儿来"那一行里的来源 */
   (e: "open-via", input: string): void;
+  /** 加/去星标；地址与标题由持有当前页的一方给 */
+  (e: "toggle-star"): void;
 }>();
 
 export interface PageAction {
@@ -71,6 +75,19 @@ const shown = computed(() => props.actions ?? STANDARD);
     </div>
 
     <div class="page-actions">
+      <!-- 星标：一枚图标按钮，加没加过一眼看得出 -->
+      <button
+          class="page-action page-action--star"
+          :class="{ 'page-action--starred': starred }"
+          type="button"
+          :title="starred ? '取消星标' : '加星标（会出现在新标签页上）'"
+          :aria-label="starred ? '取消星标' : '加星标'"
+          :aria-pressed="starred ? 'true' : 'false'"
+          @click="emit('toggle-star')"
+      >
+        <Star :size="16" :stroke-width="1.75" :fill="starred ? 'currentColor' : 'none'"/>
+      </button>
+
       <button
           v-for="action in shown"
           :key="action.name"
@@ -191,6 +208,15 @@ const shown = computed(() => props.actions ?? STANDARD);
 
 .page-action:active {
   background: var(--press);
+}
+
+/* 星标：加过的那一枚用主题色、实心，没加过是空心 */
+.page-action--starred {
+  color: var(--accent-soft);
+}
+
+.page-action--star {
+  padding: 6px 8px;
 }
 
 /* 只有破坏性的那个用危险色，免得一串按钮里看不出哪个是 */

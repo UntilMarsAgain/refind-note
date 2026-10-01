@@ -5,12 +5,18 @@
  * 组件不直接问后端，都走这里 —— 「谁在用这份偏好」只有一处。
  */
 
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { applyAppearance } from "./appearance.ts";
 import type { MaintenanceInfo } from "../bindings/maintenance.ts";
 import type { Policy } from "../bindings/note.ts";
-import type { DatabaseMeta, Preferences, ThemeMode, WorkspaceInfo } from "../bindings/settings.ts";
+import type {
+    DatabaseMeta,
+    Preferences,
+    Star,
+    ThemeMode,
+    WorkspaceInfo,
+} from "../bindings/settings.ts";
 import { markStartupReady, reportStartupFailure, startupPhase } from "./startup.ts";
 
 /** 默认值要与 Rust 端 `Preferences::default()` 一致 */
@@ -22,6 +28,7 @@ export const preferences = ref<Preferences>({
     rail_collapsed: false,
     code_line_numbers: true,
     record_history: true,
+    starred: [],
 });
 
 /** 工作目录与数据库的位置（诊断页显示"东西存在哪"） */
@@ -139,6 +146,29 @@ export function updatePreferences(patch: Partial<Preferences>): void {
     } else {
         void persist();
     }
+}
+
+/** 星标过的页面（新标签页显示它） */
+export const starred = computed(() => preferences.value.starred);
+
+export function isStarred(address: string): boolean {
+    return preferences.value.starred.some((star) => star.address === address);
+}
+
+/**
+ * 加/去星标。地址是**规范地址** —— 星标说的是"这一页"，不是"这一串字"，
+ * 所以标题改了、命名空间改名了，星标都还认得。
+ */
+export function toggleStar(address: string, title: string): void {
+    if (!address) {
+        return;
+    }
+    const kept = preferences.value.starred.filter((star) => star.address !== address);
+    const next: Star[] =
+        kept.length === preferences.value.starred.length
+            ? [...kept, { address, title }]
+            : kept;
+    updatePreferences({ starred: next });
 }
 
 /** 循环切换的顺序：跟随系统 → 浅色 → 深色 → 跟随系统 */

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 import type { ResolvedAddress } from "../bindings/address.ts";
-import { preferences } from "../core/preferences.ts";
+import { isStarred, preferences, toggleStar } from "../core/preferences.ts";
+import { labelOf } from "../core/special.ts";
 import type { TabState } from "../core/tabs.ts";
 import AllPages from "./pages/AllPages.vue";
 import ChangesPage from "./pages/ChangesPage.vue";
@@ -123,6 +124,34 @@ watch(
     { immediate: true },
 );
 
+/** 页头显示的名字（笔记用标题，特殊页与帮助页用后端给的显示名） */
+const currentTitle = computed(() => {
+    const found = route.value;
+    if (!found) {
+        return "";
+    }
+    switch (found.outcome.kind) {
+        case "note":
+        case "missing":
+        case "help":
+        case "cross-site":
+            return found.outcome.title;
+        case "special":
+            return labelOf(found.outcome.page);
+    }
+});
+
+/** 当前页的星标状态与切换：星标说的是"这一页"，所以用**规范地址**与显示标题 */
+const starredHere = computed(() => isStarred(route.value?.canonical ?? ""));
+
+function onToggleStar() {
+    const current = route.value;
+    if (!current) {
+        return;
+    }
+    toggleStar(current.canonical, currentTitle.value);
+}
+
 function onScroll() {
     if (props.tab && scroller.value) {
         props.tab.scroll = scroller.value.scrollTop;
@@ -181,9 +210,12 @@ defineExpose({
           :page="helpPage.page"
           :display="helpPage.title"
           :source="mode?.kind === 'edit'"
+          :editable="route?.editable ?? false"
+          :starred="starredHere"
           :collapsed="collapsed"
           @navigate="emit('navigate', $event)"
           @section="emit('section', $event)"
+          @toggle-star="onToggleStar"
       />
 
       <NewTabView v-else-if="isNewTab" @open="emit('navigate', $event)"/>
@@ -196,7 +228,9 @@ defineExpose({
             :reference="mode.ref"
             :collapsed="collapsed"
             :via="route?.via ?? null"
+            :starred="starredHere"
             @navigate="emit('navigate', $event)"
+            @toggle-star="onToggleStar"
             @redirect="emit('redirect', $event)"
             @leave="emit('leave')"
             @navigate-new-tab="emit('navigate-new-tab', $event)"
