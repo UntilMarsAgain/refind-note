@@ -9,6 +9,8 @@ use serde::Serialize;
 use features::{browsing, changes, files, keys, maintenance};
 use settings::Preferences;
 use storage::{codec::Policy, session, workspace::Workspace};
+use tauri::{Emitter, Manager};
+use tauri_plugin_deep_link::DeepLinkExt;
 use vault::address::{self, ParsedAddress};
 use vault::database::{Database, Meta};
 use vault::namespace::Namespace;
@@ -162,6 +164,49 @@ fn parse_range(header: Option<&str>, total: u64) -> Option<(u64, u64)> {
         return None;
     }
     Some((start, end))
+}
+
+#[cfg(test)]
+mod deep_link_tests {
+    use super::address_from_argument;
+
+    /// 地址是从**原始参数**里认出来的，不走 URL 解析器
+    #[test]
+    fn an_address_is_read_from_the_raw_argument() {
+        assert_eq!(
+            address_from_argument("refind://Help:首页").as_deref(),
+            Some("Help:首页")
+        );
+        // 多一道斜杠（`refind:///…`）也常见，一样认
+        assert_eq!(
+            address_from_argument("refind:///Help:首页").as_deref(),
+            Some("Help:首页")
+        );
+        // 桌面环境多半把中文百分号编码过来
+        assert_eq!(
+            address_from_argument("refind://Help:%E9%A6%96%E9%A1%B5").as_deref(),
+            Some("Help:首页")
+        );
+        assert_eq!(
+            address_from_argument("  refind://运河  ").as_deref(),
+            Some("运河")
+        );
+        // 协议名大小写不挑
+        assert_eq!(
+            address_from_argument("REFIND://运河").as_deref(),
+            Some("运河")
+        );
+
+        // 不是这条协议、或者压根没给地址
+        assert_eq!(address_from_argument("/home/u/笔记.md"), None);
+        assert_eq!(address_from_argument("refind://"), None);
+        assert_eq!(address_from_argument("https://example.com"), None);
+        // 内部取字节的地址不是"要打开哪一页"
+        assert_eq!(
+            address_from_argument("refind://localhost/file/%E6%A1%A5.png"),
+            None
+        );
+    }
 }
 
 #[cfg(test)]
@@ -335,6 +380,51 @@ fn protection_arg(request: &tauri::ipc::Request<'_>) -> Option<Policy> {
 /// 请求头里的口令
 fn passphrase_arg(request: &tauri::ipc::Request<'_>) -> Option<String> {
     header_arg(request, "x-passphrase").filter(|value| !value.is_empty())
+}
+
+/// 被 `refind://…` 唤起时，参数里那个地址（`refind://Help:首页` → `Help:首页`）。
+///
+/// **不走 URL 解析器**：地址里的 `:` 是命名空间分隔符，而 URL 会把它当成"端口"，
+/// 端口只认数字 —— `refind://Help:首页` 在 URL 眼里根本不是个合法地址（这也正是
+/// Tauri 那个 deep-link 插件收不下它的原因）。所以只认前缀，其余照原样收下。
+///
+/// 认两种写法：`refind://Help:首页` 与 `refind:///Help:首页`（多一道斜杠也常见）。
+/// 取字节用的 `refind://localhost/file/…` 不是"要打开哪一页"，不当地址收。
+fn address_from_argument(argument: &str) -> Option<String> {
+    const PREFIX: &str = "refind://";
+    let argument = argument.trim();
+    // `get(..n)` 而不是 `[..n]`：参数可能是 `/home/u/笔记.md` 这种，
+    // 第 9 个字节正落在某个字的中间，切片会当场 panic
+    let head = argument.get(..PREFIX.len())?;
+    if !head.eq_ignore_ascii_case(PREFIX) {
+        return None;
+    }
+    let rest = argument[PREFIX.len()..].trim_start_matches('/').trim();
+    if rest.is_empty() || rest.starts_with("localhost/") {
+        return None;
+    }
+    // 命令行里中文多半是百分号编码过来的，交出去之前还它原样
+    Some(decode_percent(rest))
+}
+
+/// 窗口可能还没建好（冷启动就是这条路），所以先记下来让界面起来之后来取；
+/// 已经在跑的实例则直接收到事件（界面那会儿已经在听了）
+fn deliver_address(app: &tauri::AppHandle, address: String) {
+    if let Some(pending) = app.try_state::<PendingAddress>() {
+        if let Ok(mut slot) = pending.0.lock() {
+            *slot = Some(address.clone());
+        }
+    }
+    let _ = app.emit("open-address", address);
+}
+
+/// 这一进程是被 `refind-note refind://…` 拉起来的吗
+fn deliver_from_arguments<I: IntoIterator<Item = String>>(app: &tauri::AppHandle, args: I) {
+    for argument in args {
+        if let Some(address) = address_from_argument(&argument) {
+            deliver_address(app, address);
+        }
+    }
 }
 
 /// 查询串里的一个值（`rev=3` → `3`）；没有就是 `None`
@@ -654,6 +744,12 @@ fn list_notes() -> Result<Vec<NoteSummary>, String> {
     database.list()
 }
 
+/// 启动时被 `refind://…` 唤起的话，把那个地址交给界面（取走就清掉）
+#[tauri::command]
+fn take_pending_address(state: tauri::State<'_, PendingAddress>) -> Option<String> {
+    state.0.lock().ok()?.take()
+}
+
 /// 现有的特殊页面（菜单据此生成）
 #[tauri::command]
 fn special_pages() -> Vec<String> {
@@ -699,12 +795,34 @@ fn forget_passphrase(title: String) -> Result<(), String> {
     Ok(())
 }
 
+/// 等着被打开的地址（冷启动时窗口还没建好，先寄存在这里）
+#[derive(Default)]
+struct PendingAddress(std::sync::Mutex<Option<String>>);
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // 单实例：同一个登录会话里只跑一个重逢笔记。
+        //
+        // 必须**第一个**注册：第二次启动要在别的插件初始化之前就退出，
+        // 只把已有窗口拉到前面 —— 两个进程去抢同一个仓库可不是闹着玩的。
+        // 顺带承接 `refind://…`：系统是"再拉起一个实例、把 URL 当参数给它"，
+        // 那个参数只有这里收得到。
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+            deliver_from_arguments(app, args);
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        // `refind://` 既是**我们内部**取字节用的协议（下一行那个），
+        // 也是**系统认的**协议：注册之后 `refind://Help:首页` 就能把程序拉起来。
+        // 内网那两个用途不冲突：内部地址写的是 `refind://localhost/file/…`，
+        // 那个形式不会被当"要打开哪一页"（见 `address_from_argument`）。
+        .plugin(tauri_plugin_deep_link::init())
         .register_uri_scheme_protocol("refind", |_context, request| serve_file(&request))
         .invoke_handler(tauri::generate_handler![
             open_workspace,
@@ -761,7 +879,20 @@ pub fn run() {
             lock,
             passphrase_stored,
             forget_passphrase,
+            take_pending_address,
         ])
+        .setup(|app| {
+            // 把 `refind://` 交给系统认下来：Linux 上写一份 .desktop 到用户的应用目录，
+            // 再让 xdg 认这个 mime（需要 `xdg-mime` 与 `update-desktop-database` 这两条命令）。
+            // 失败只记一笔：注册不上不该让程序起不来（没装那两条命令的机器就是这种）
+
+            if let Err(error) = app.deep_link().register_all() {
+                eprintln!("[deep-link] 注册 refind:// 失败：{error}");
+            }
+            // 冷启动：这一进程就是被 `refind-note refind://…` 拉起来的
+            deliver_from_arguments(app.handle(), std::env::args().skip(1));
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

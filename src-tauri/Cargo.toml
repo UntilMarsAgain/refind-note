@@ -53,6 +53,8 @@ time = { version = "0.3", features = ["formatting", "parsing"] }
 markdown-it = { version = "0.6", default-features = false, features = ["linkify"] }
 tauri-plugin-dialog = "2.8.1"
 include_dir = "0.7.4"
+tauri-plugin-single-instance = "2.5.2"
+tauri-plugin-deep-link = "2.6.1"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

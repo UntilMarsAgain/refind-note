@@ -12,6 +12,7 @@ import StartupLoading from "./components/shell/StartupLoading.vue";
 import TabRail from "./components/shell/TabRail.vue";
 import WindowResizeHandles from "./components/shell/WindowResizeHandles.vue";
 import WindowTitleBar from "./components/shell/WindowTitleBar.vue";
+import { listen } from "@tauri-apps/api/event";
 import { withSection } from "./core/address.ts";
 import type { HelpPage } from "./bindings/help.ts";
 import { loadBrowsing } from "./core/browsing.ts";
@@ -396,14 +397,34 @@ async function runMaintenanceOnce() {
  * 它在启动跑完之前只是一只空壳（解析要问后端，那时后端还没准备好）；
  * 一旦准备好了就落到 `special:newtab` —— 于是地址栏一开始就写着自己在哪。
  */
+/**
+ * 启动时先看一件事：**是不是被 `refind://…` 唤起**。
+ *
+ * 是（冷启动）：那地址就是这一趟的目的地，直接导航过去 —— 此时窗口刚建好，
+ * 后端把地址寄存在那里等着人来取（见 `take_pending_address`）；
+ * 不是：才落到新标签页。两件事都做就成了"先开一页再跳走"，后退键里多一条冤枉路。
+ */
+async function openStartupAddress() {
+  let address: string | null = null;
+  try {
+    address = await invoke<string | null>("take_pending_address");
+  } catch (error) {
+    console.warn("取待打开地址失败：", error);
+  }
+
+  const tab = active.value;
+  if (address) {
+    await navigate(address, "push");
+  } else if (tab && !tab.address && !tab.route) {
+    await navigate("special:newtab", "push");
+  }
+}
+
 watch(
   startupPhase,
   (phase) => {
-    const tab = active.value;
     if (phase === "ready") {
-      if (tab && !tab.address && !tab.route) {
-        void navigate("special:newtab", "push");
-      }
+      void openStartupAddress();
       void runMaintenanceOnce();
       // 浏览历史读回来一次：那一页要显示它，不必等打开那一页才读
       void loadBrowsing();
@@ -412,16 +433,26 @@ watch(
   { immediate: true },
 );
 
+/** 停在"已经在跑的实例收到 refind:// 地址"这个监听上，卸载时要摘掉 */
+let unlistenAddress: (() => void) | undefined;
+
 onMounted(() => {
   window.addEventListener("keydown", onKeydown);
   window.addEventListener("beforeunload", flushOnUnload);
   installWheelZoom();
   // 正文右键里的"在新标签页打开"与 Ctrl+点击走同一个实现
   setOpenInNewTab(openTabWith);
+  // 已经在跑时被 `refind://…` 唤起：后端把地址发过来，这里当场导航
+  void listen<string>("open-address", (event) => {
+    void navigate(event.payload, "push");
+  }).then((unlisten) => {
+    unlistenAddress = unlisten;
+  });
 });
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
   window.removeEventListener("beforeunload", flushOnUnload);
+  unlistenAddress?.();
 });
 </script>
 
