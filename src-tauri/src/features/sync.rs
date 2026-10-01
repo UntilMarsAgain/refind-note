@@ -86,6 +86,13 @@ impl SyncTransform for Plaintext {
 pub struct SyncSettings {
     /// 启动时自动同步一次
     pub enabled: bool,
+    /// 传上去之前要不要再套一层（钥匙就是下面这一把）
+    pub encrypt: bool,
+    /// **软件生成的**那把钥匙（base64，32 字节）。
+    ///
+    /// 它只在这台机器上（`settings/sync.json`，权限只给本人）——换台机器要把这串抄过去，
+    /// 抄不过去，云端那一份就解不开了。丢了也没有后路：那是这把钥匙的意义所在。
+    pub key: String,
     pub s3: S3Config,
 }
 
@@ -93,6 +100,191 @@ impl SyncSettings {
     /// 能同步吗：开着、而且该填的都填了
     pub fn is_ready(&self) -> bool {
         self.enabled && self.s3.is_usable()
+    }
+
+    /// 这一份设置里那把钥匙（认得出才给）
+    pub fn cipher(&self) -> Result<CloudCipher, String> {
+        CloudCipher::from_key(&self.key)
+    }
+}
+
+/// 生成一把新的云端钥匙：32 字节随机，写成 base64 给人抄
+pub fn generate_key() -> Result<String, String> {
+    use base64::Engine as _;
+
+    let mut bytes = [0u8; 32];
+    getrandom::getrandom(&mut bytes).map_err(|error| format!("取随机数失败：{error}"))?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
+// ---------------------------------------------------------------- 云端那一层
+
+/// 传上去的每一份都过这一层：**整份仓库**因此一起被保护起来 ——
+/// 日志、标题表、命名空间表，以及那些没单独加密的笔记，都在内。
+///
+/// 与笔记自身那几层（gpg / 口令）是**两件事**：那几层防的是"拿到你这台机器的人"，
+/// 这一层防的是"存储服务、以及捡到那个桶的人"。两者不重叠，各管各的。
+///
+/// 封出来的东西自带说明（见 [`CloudEnvelope`]）：没有这一层的老对象（明文传上去的）
+/// 读的时候原样放行 —— 换了设置不至于把已经传上去的东西读废。
+pub struct CloudCipher {
+    key: [u8; 32],
+    cipher: crate::storage::codec::Cipher,
+}
+
+/// 云端的封装：`RNDS` + 版本 + 这一档算法 + nonce + 密文。
+///
+/// 头上写着用哪一档算法，是为了"以后换了算法还读得回旧的"——与 blob 那边同一个道理。
+struct CloudEnvelope;
+
+impl CloudEnvelope {
+    const MAGIC: &'static [u8; 4] = b"RNDS";
+    const VERSION: u8 = 1;
+    /// magic(4) + version(1) + cipher(1) + nonce(12)
+    const HEADER: usize = 18;
+
+    /// 这一串字节是不是我们封出来的
+    fn matches(bytes: &[u8]) -> bool {
+        bytes.len() >= Self::HEADER && &bytes[..4] == Self::MAGIC && bytes[4] == Self::VERSION
+    }
+
+    fn cipher_byte(cipher: crate::storage::codec::Cipher) -> u8 {
+        use crate::storage::codec::Cipher;
+        match cipher {
+            Cipher::Aes256Gcm => 1,
+            Cipher::Sm4Gcm => 2,
+        }
+    }
+
+    fn cipher_of(byte: u8) -> Option<crate::storage::codec::Cipher> {
+        use crate::storage::codec::Cipher;
+        match byte {
+            1 => Some(Cipher::Aes256Gcm),
+            2 => Some(Cipher::Sm4Gcm),
+            _ => None,
+        }
+    }
+}
+
+impl CloudCipher {
+    /// 从 base64 那把钥匙做出来；空串（没设）返回 `Err`
+    pub fn from_key(key: &str) -> Result<Self, String> {
+        use base64::Engine as _;
+        let raw = base64::engine::general_purpose::STANDARD
+            .decode(key.trim())
+            .map_err(|_| "云端密钥不是一串 base64，抄的时候可能少了几个字".to_string())?;
+        if raw.len() != 32 {
+            return Err(format!("云端密钥应该是 32 字节，这把是 {} 字节", raw.len()));
+        }
+        let mut bytes = [0u8; 32];
+        bytes.copy_from_slice(&raw);
+        Ok(Self {
+            key: bytes,
+            // 用仓库默认那一档（与笔记那边一致：选了国密就都是国密）
+            cipher: crate::storage::codec::Cipher::default(),
+        })
+    }
+
+    /// 换一档算法（同步层与笔记那边用同一档，界面上不单独问）
+    pub fn with_cipher(mut self, cipher: crate::storage::codec::Cipher) -> Self {
+        self.cipher = cipher;
+        self
+    }
+}
+
+impl SyncTransform for CloudCipher {
+    fn seal(&self, relative: &str, bytes: Vec<u8>) -> Result<Vec<u8>, String> {
+        // 每个对象一条独立的 nonce：同一份内容传两次，密文也不一样
+        let mut nonce = [0u8; 12];
+        getrandom::getrandom(&mut nonce).map_err(|error| format!("取随机数失败：{error}"))?;
+        let sealed = seal_bytes(self.cipher, &self.key, &nonce, &bytes)
+            .map_err(|error| format!("加密 {relative} 失败：{error}"))?;
+
+        let mut out = Vec::with_capacity(CloudEnvelope::HEADER + sealed.len());
+        out.extend_from_slice(CloudEnvelope::MAGIC);
+        out.push(CloudEnvelope::VERSION);
+        out.push(CloudEnvelope::cipher_byte(self.cipher));
+        out.extend_from_slice(&nonce);
+        out.extend_from_slice(&sealed);
+        Ok(out)
+    }
+
+    fn open(&self, relative: &str, bytes: Vec<u8>) -> Result<Vec<u8>, String> {
+        // 不是我们封的（没开加密时传上去的老对象）：原样放行
+        if !CloudEnvelope::matches(&bytes) {
+            return Ok(bytes);
+        }
+        let cipher = CloudEnvelope::cipher_of(bytes[5])
+            .ok_or_else(|| format!("{relative} 用了本程序不认识的加密档"))?;
+        let nonce = &bytes[6..CloudEnvelope::HEADER];
+        open_bytes(cipher, &self.key, nonce, &bytes[CloudEnvelope::HEADER..])
+            .map_err(|error| format!("解开 {relative} 失败（密钥对不对？）：{error}"))
+    }
+}
+
+/// 用这一档算法封上（与笔记那边同一套 AEAD，只是头不同 —— 这里要的是"自带说明"）
+fn seal_bytes(
+    cipher: crate::storage::codec::Cipher,
+    key: &[u8; 32],
+    nonce: &[u8],
+    content: &[u8],
+) -> Result<Vec<u8>, String> {
+    use crate::storage::codec::Cipher;
+    use aes_gcm::aead::{Aead, KeyInit};
+
+    match cipher {
+        Cipher::Aes256Gcm => {
+            let cipher = aes_gcm::Aes256Gcm::new_from_slice(key)
+                .map_err(|error| format!("密钥长度不对：{error}"))?;
+            let nonce =
+                aes_gcm::Nonce::try_from(nonce).map_err(|_| "nonce 长度不对".to_string())?;
+            cipher
+                .encrypt(&nonce, content)
+                .map_err(|_| "加密失败".to_string())
+        }
+        Cipher::Sm4Gcm => {
+            let cipher =
+                aes_gcm::AesGcm::<sm4::Sm4, aes_gcm::aead::consts::U12>::new_from_slice(&key[..16])
+                    .map_err(|error| format!("密钥长度不对：{error}"))?;
+            let nonce =
+                aes_gcm::Nonce::try_from(nonce).map_err(|_| "nonce 长度不对".to_string())?;
+            cipher
+                .encrypt(&nonce, content)
+                .map_err(|_| "加密失败".to_string())
+        }
+    }
+}
+
+/// 照头里那一档算法解开
+fn open_bytes(
+    cipher_kind: crate::storage::codec::Cipher,
+    key: &[u8; 32],
+    nonce: &[u8],
+    payload: &[u8],
+) -> Result<Vec<u8>, String> {
+    use crate::storage::codec::Cipher;
+    use aes_gcm::aead::{Aead, KeyInit};
+
+    match cipher_kind {
+        Cipher::Aes256Gcm => {
+            let cipher = aes_gcm::Aes256Gcm::new_from_slice(key)
+                .map_err(|error| format!("密钥长度不对：{error}"))?;
+            let nonce =
+                aes_gcm::Nonce::try_from(nonce).map_err(|_| "nonce 长度不对".to_string())?;
+            cipher
+                .decrypt(&nonce, payload)
+                .map_err(|_| "口令不对，或者内容被改过".to_string())
+        }
+        Cipher::Sm4Gcm => {
+            let cipher =
+                aes_gcm::AesGcm::<sm4::Sm4, aes_gcm::aead::consts::U12>::new_from_slice(&key[..16])
+                    .map_err(|error| format!("密钥长度不对：{error}"))?;
+            let nonce =
+                aes_gcm::Nonce::try_from(nonce).map_err(|_| "nonce 长度不对".to_string())?;
+            cipher
+                .decrypt(&nonce, payload)
+                .map_err(|_| "口令不对，或者内容被改过".to_string())
+        }
     }
 }
 
@@ -275,12 +467,17 @@ fn decide(
 pub fn run(
     workspace: &Workspace,
     settings: &SyncSettings,
-    transform: &dyn SyncTransform,
     progress: &dyn Fn(Progress),
 ) -> Result<SyncReport, String> {
     if !settings.is_ready() {
         return Err("同步没开着，或者 S3 的配置还没填全".to_string());
     }
+    // 加密开着、钥匙也在：传上去的每一份都过一道；否则原样
+    let transform: Box<dyn SyncTransform> = if settings.encrypt {
+        Box::new(settings.cipher()?)
+    } else {
+        Box::new(Plaintext)
+    };
     let s3 = S3::new(settings.s3.clone())?;
     let root = workspace.root().to_path_buf();
     let mut index = read_json::<Index>(&index_path(workspace));
@@ -294,7 +491,7 @@ pub fn run(
     });
     let lock = acquire(&s3)?;
 
-    let outcome = reconcile(&s3, &root, &mut index, transform, progress);
+    let outcome = reconcile(&s3, &root, &mut index, transform.as_ref(), progress);
 
     // 不管成没成，锁都要放掉：留着它，别的机器要等过期才能动
     let _ = lock.release(&s3);
@@ -673,6 +870,51 @@ mod tests {
             mtime,
             etag: etag.to_string(),
         }
+    }
+
+    /// 云端那一层：封了能解、封出来的每一次都不一样、换了钥匙解不开
+    #[test]
+    fn the_cloud_layer_round_trips() {
+        let key = generate_key().unwrap();
+        let cipher = CloudCipher::from_key(&key).unwrap();
+
+        let sealed = cipher.seal("db/titles.json", b"hello".to_vec()).unwrap();
+        assert_ne!(sealed, b"hello", "传上去的不该是明文");
+        assert!(CloudEnvelope::matches(&sealed), "自带说明：这是本程序封的");
+        assert_eq!(
+            cipher.open("db/titles.json", sealed.clone()).unwrap(),
+            b"hello"
+        );
+
+        // 同一份内容封两次：nonce 不同，密文就不同
+        let again = cipher.seal("db/titles.json", b"hello".to_vec()).unwrap();
+        assert_ne!(sealed, again);
+
+        // 换一把钥匙：解不开（而且说得清是钥匙的问题）
+        let other = CloudCipher::from_key(&generate_key().unwrap()).unwrap();
+        let error = other.open("db/titles.json", sealed).unwrap_err();
+        assert!(error.contains("密钥"), "{error}");
+    }
+
+    /// 没封过的（开加密之前传上去的那些）：原样放行 ——
+    /// 换了设置不该把已经躺在云端的东西读废
+    #[test]
+    fn a_plain_object_still_comes_back() {
+        let cipher = CloudCipher::from_key(&generate_key().unwrap()).unwrap();
+        let plain = br#"{"kind":"x"}"#.to_vec();
+        assert_eq!(
+            cipher.open("db/meta.json", plain.clone()).unwrap(),
+            plain,
+            "不是我们封的，就照原样用"
+        );
+    }
+
+    /// 抄错的钥匙当场说清楚（少几个字、多几个字都要认得出）
+    #[test]
+    fn a_mistyped_key_is_refused_early() {
+        assert!(CloudCipher::from_key("这不是 base64").is_err());
+        assert!(CloudCipher::from_key("AAAA").is_err(), "长度不对也要拦下");
+        assert!(CloudCipher::from_key(&generate_key().unwrap()).is_ok());
     }
 
     #[test]

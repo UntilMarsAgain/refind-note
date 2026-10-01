@@ -10,6 +10,7 @@ import { fileReferenceOf } from "../../dom/file-links.ts";
 import { saveVaultFile } from "../../dom/file-save.ts";
 import { flash } from "../../core/notice.ts";
 import { protection } from "../../core/preferences.ts";
+import { requestSyncAfterCommit } from "../../core/sync.ts";
 import type { Policy } from "../../ipc/note.ts";
 import StoragePicker from "../common/StoragePicker.vue";
 import { clipboardFiles, uploadPasted } from "../../dom/paste-files.ts";
@@ -115,6 +116,8 @@ async function collect(picked: File[]) {
     });
     flash(`已上传：${names.join("、")}`);
     await load();
+    // 上传/更新都是一版提交：顺手叫一次同步
+    requestSyncAfterCommit();
   } catch (reason) {
     problem.value = String(reason);
   } finally {
@@ -144,6 +147,8 @@ async function pick() {
     }
     flash(`已上传：${names.join("、")}`);
     await load();
+    // 上传/更新都是一版提交：顺手叫一次同步
+    requestSyncAfterCommit();
   } catch (reason) {
     problem.value = String(reason);
   } finally {
@@ -169,6 +174,8 @@ async function update(file: FileEntry) {
     });
     flash(`已更新「${file.name}」到第 ${uploaded.entry.rev} 版（旧版仍在历史里）`);
     await load();
+    // 上传/更新都是一版提交：顺手叫一次同步
+    requestSyncAfterCommit();
   } catch (reason) {
     problem.value = String(reason);
   } finally {

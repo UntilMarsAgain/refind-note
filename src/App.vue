@@ -17,6 +17,8 @@ import { withSection } from "./core/address.ts";
 import type { HelpPage } from "./ipc/help.ts";
 import { loadBrowsing } from "./core/browsing.ts";
 import { dismissNotice, flash, notice } from "./core/notice.ts";
+import { syncBeforeClose, syncClosing, syncProgress } from "./core/sync.ts";
+import { currentWindow } from "./core/window-api.ts";
 import { setOpenInNewTab } from "./dom/note-html.ts";
 import {
   cycleTheme,
@@ -442,6 +444,7 @@ onMounted(() => {
   installWheelZoom();
   // 正文右键里的"在新标签页打开"与 Ctrl+点击走同一个实现
   setOpenInNewTab(openTabWith);
+  void interceptClose();
   // 已经在跑时被 `refind://…` 唤起：后端把地址发过来，这里当场导航
   void listen<string>("open-address", (event) => {
     void navigate(event.payload, "push");
@@ -454,6 +457,27 @@ onBeforeUnmount(() => {
   window.removeEventListener("beforeunload", flushOnUnload);
   unlistenAddress?.();
 });
+
+/**
+ * 关窗前先把这一趟送出去。
+ *
+ * 这一层拦的是**所有**关闭的路子：标题栏那颗×、窗口管理器、Alt+F4 ——
+ * 它们都走 Tauri 的 `closeRequested`，拦一处就够。
+ *
+ * 拿不到锁、网断了也照关：东西在本机，下次同步还在。真等不下去时，
+ * 遮罩上那颗"不等了"是**直接销毁窗口**（正在跑的那一趟只能由它被中断）。
+ */
+async function interceptClose() {
+  const appWindow = currentWindow();
+  if (!appWindow) {
+    return;
+  }
+  await appWindow.onCloseRequested(async (event) => {
+    event.preventDefault();
+    await syncBeforeClose();
+    await appWindow.destroy();
+  });
+}
 </script>
 
 <template>
@@ -532,6 +556,20 @@ onBeforeUnmount(() => {
     />
   </div>
 
+  <!-- 关窗前的同步：摆一块遮罩，别让人对着没反应的窗口再点一次 -->
+  <div v-if="syncClosing" class="closing-sync" role="status">
+    <div class="closing-sync__box">
+      <span class="closing-sync__spinner" aria-hidden="true"/>
+      <p class="closing-sync__text">
+        {{ syncProgress ? `正在同步：${syncProgress.text}` : "正在同步…" }}
+      </p>
+      <button class="closing-sync__skip" type="button" @click="currentWindow()?.destroy()">
+        不等了，直接关闭
+      </button>
+      <p class="closing-sync__hint">没传完的东西留在本机，下次同步会接着传。</p>
+    </div>
+  </div>
+
   <ImageViewer/>
 
   <ContextMenu/>
@@ -587,6 +625,73 @@ onBeforeUnmount(() => {
   .app__main {
     flex-direction: column;
   }
+}
+
+/* 关窗前的同步：盖住整窗，但留一条"不等了"的路 */
+.closing-sync {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+}
+
+.closing-sync__box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  max-width: 420px;
+  padding: 20px 24px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  text-align: center;
+}
+
+.closing-sync__spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: closing-sync-spin 700ms linear infinite;
+}
+
+@keyframes closing-sync-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.closing-sync__text {
+  margin: 0;
+  color: var(--text);
+  font-size: 13.5px;
+}
+
+.closing-sync__skip {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.closing-sync__skip:hover {
+  border-color: var(--accent-soft);
+  color: var(--text);
+}
+
+.closing-sync__hint {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 12px;
 }
 
 /* 右下角那一堆：按钮与它上方的调试信息框 */

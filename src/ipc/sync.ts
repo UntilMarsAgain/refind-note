@@ -23,6 +23,15 @@ export interface S3Config {
 export interface SyncSettings {
     /** 启动时自动同步一次 */
     enabled: boolean;
+    /** 传上去之前要不要再套一层（钥匙就是下面这一把） */
+    encrypt: boolean;
+    /**
+     * **软件生成的**那把云端密钥（base64，32 字节）。
+     *
+     * 它只在这台机器上；换台机器同步同一份仓库，要把这一串抄过去 ——
+     * 抄不过去，云端那一份就解不开了。
+     */
+    key: string;
     s3: S3Config;
 }
 

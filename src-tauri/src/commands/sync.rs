@@ -6,7 +6,7 @@
 
 use tauri::{AppHandle, Emitter};
 
-use crate::features::sync::{self, Plaintext, Progress, SyncReport, SyncSettings};
+use crate::features::sync::{self, Progress, SyncReport, SyncSettings};
 use crate::storage::workspace::Workspace;
 
 /// 打开工作目录（同步的设置不在数据库里，但也住在工作目录下）
@@ -36,10 +36,40 @@ pub fn sync_ready() -> bool {
         .unwrap_or(false)
 }
 
+/// 生成一把云端密钥（32 字节随机，写成 base64）并**存进设置**里。
+///
+/// 界面上要把这串抄给别的机器 —— 换台机器同步同一份仓库，靠的就是它。
+#[tauri::command]
+pub fn sync_generate_key() -> Result<String, String> {
+    let workspace = open_workspace()?;
+    let mut settings = sync::settings(&workspace);
+    let key = sync::generate_key()?;
+    settings.key = key.clone();
+    settings.encrypt = true;
+    sync::save_settings(&workspace, &settings)?;
+    Ok(key)
+}
+
+/// 换一把云端密钥（从别的机器抄过来的那一串）
+#[tauri::command]
+pub fn sync_set_key(key: String) -> Result<SyncSettings, String> {
+    let workspace = open_workspace()?;
+    let mut settings = sync::settings(&workspace);
+    let trimmed = key.trim().to_string();
+    // 抄错了当场说出来，别等到同步时才炸
+    if !trimmed.is_empty() {
+        sync::CloudCipher::from_key(&trimmed)?;
+    }
+    settings.key = trimmed;
+    settings.encrypt = !settings.key.is_empty();
+    sync::save_settings(&workspace, &settings)?;
+    Ok(settings)
+}
+
 /// 现在同步一次，返回这次做了些什么；每一步都会发 `sync-progress` 事件。
 ///
-/// 云端那一份要不要再套一层加密：引擎那边留了钩子（`SyncTransform`），
-/// 现在传的是"原样"；等那一层做出来，这里换成带口令的实现即可。
+/// 云端那一份要不要套一层加密，由设置里的那把钥匙说了算（见 `SyncSettings`）——
+/// 这里不必再过问。
 #[tauri::command]
 pub fn sync_now(app: AppHandle) -> Result<SyncReport, String> {
     let workspace = open_workspace()?;
@@ -50,7 +80,7 @@ pub fn sync_now(app: AppHandle) -> Result<SyncReport, String> {
         let _ = emitter.emit("sync-progress", step);
     };
 
-    let report = sync::run(&workspace, &settings, &Plaintext, &progress)?;
+    let report = sync::run(&workspace, &settings, &progress)?;
     let _ = app.emit("sync-finished", &report);
     Ok(report)
 }

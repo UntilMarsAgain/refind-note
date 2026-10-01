@@ -15,6 +15,7 @@ import StoragePicker from "../common/StoragePicker.vue";
 import { fileReferenceOf } from "../../dom/file-links.ts";
 import { clipboardFiles, uploadPasted } from "../../dom/paste-files.ts";
 import { protection } from "../../core/preferences.ts";
+import { requestSyncAfterCommit } from "../../core/sync.ts";
 import { applyLineNumbers, codeLineNumbers, highlightCode } from "../../dom/code-blocks.ts";
 import { decorateNoteHtml } from "../../dom/note-html.ts";
 // `codemirror` 是元包（提供 basicSetup 等），EditorState 由 @codemirror/state 提供 ——
@@ -315,6 +316,8 @@ async function commit() {
         });
         passphraseDraft.value = "";
         status.value = "";
+        // 提交之后顺手叫一次同步（攒一会儿再跑，连提几次只同步一次）
+        requestSyncAfterCommit();
         emit("navigate", committed.title);
     } catch (error) {
         // 提交失败时不动正在编辑的内容，只把原因写在状态行

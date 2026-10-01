@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { flash } from "../../core/notice.ts";
 import { CIPHER_NOTES, COMPRESSION_NOTES, type Cipher, type Compression, type Policy } from "../../ipc/note.ts";
 import { describeReport, type SyncReport, type SyncSettings } from "../../ipc/sync.ts";
@@ -198,7 +199,12 @@ function setEncrypt(value: string | null) {
  * 它**不进仓库**：`settings/sync.json` 只在这台机器上（里面有 S3 的密钥），
  * 所以换台机器要重新填一次 —— 密钥跟着机器走，不跟着数据走。
  */
-const sync = ref<SyncSettings>({ enabled: false, s3: { endpoint: "", region: "", bucket: "", prefix: "", access_key: "", secret_key: "" } });
+const sync = ref<SyncSettings>({
+  enabled: false,
+  encrypt: false,
+  key: "",
+  s3: { endpoint: "", region: "", bucket: "", prefix: "", access_key: "", secret_key: "" },
+});
 const syncBusy = ref(false);
 /** 上一次同步的结果（就在这一页上再说一遍，不必去翻浮条） */
 const lastSync = ref("");
@@ -248,6 +254,52 @@ async function syncNow() {
 
 /** 改过连接信息还没同步过（提示一句"先同步一次看看"） */
 const syncSettingsDirty = ref(false);
+
+/** 刚从"生成密钥"那里拿到的钥匙：摆在页面上让人抄走 */
+const freshKey = ref("");
+/** 从别的机器抄过来的那一串（粘贴进来） */
+const pastedKey = ref("");
+
+/**
+ * 生成一把新的云端密钥。
+ *
+ * 生成之后**摆在页面上**，要抄到别的机器上去 —— 换台机器同步同一份仓库，
+ * 靠的就是这一串。丢了没有后路：那是这一层加密的意义所在。
+ */
+async function generateSyncKey() {
+  syncProblem.value = "";
+  try {
+    freshKey.value = await invoke<string>("sync_generate_key");
+    sync.value.key = freshKey.value;
+    sync.value.encrypt = true;
+    flash("已生成云端密钥：抄下来，换机器时要用它");
+  } catch (error) {
+    syncProblem.value = String(error);
+  }
+}
+
+/** 抄一把钥匙回来（另一台机器上生成的那一串） */
+async function usePastedKey() {
+  syncProblem.value = "";
+  try {
+    sync.value = await invoke<SyncSettings>("sync_set_key", { key: pastedKey.value });
+    pastedKey.value = "";
+    freshKey.value = "";
+    flash(sync.value.encrypt ? "已用这把钥匙" : "已清掉云端加密");
+  } catch (error) {
+    syncProblem.value = String(error);
+  }
+}
+
+/** 复制到剪贴板（与别处同一个插件：webview 里的剪贴板 API 不保证可用） */
+async function copyKey(key: string) {
+  try {
+    await writeText(key);
+    flash("密钥已复制");
+  } catch (error) {
+    flash(`复制失败：${error}`);
+  }
+}
 
 /** 从内到外说清这份策略会怎么存；什么都没做就是"原样" */
 function policyLabel(policy: Policy): string {
@@ -680,6 +732,46 @@ watch(
           @change="saveSync()"
       />
     </div>
+
+    <div id="sync-key" class="row" :class="{ 'row--target': isFocused('sync-key') }">
+      <span class="row__label">云端加密</span>
+      <code class="row__id">#sync-key</code>
+      <span class="row__hint">
+        {{ sync.encrypt && sync.key ? "已开启 —— 传上去的每一份都是加密的" : "未开启 —— 传上去的是明文" }}
+      </span>
+      <button class="row__go" type="button" @click="generateSyncKey">
+        {{ sync.key ? "换一把新密钥" : "生成密钥" }}
+      </button>
+    </div>
+
+    <div v-if="sync.key" class="row">
+      <span class="row__label">密钥</span>
+      <code class="row__id">#sync-key-copy</code>
+      <input class="row__text" type="text" :value="sync.key" readonly @focus="($event.target as HTMLInputElement).select()"/>
+      <button class="row__go" type="button" @click="copyKey(sync.key)">复制</button>
+    </div>
+
+    <div class="row">
+      <span class="row__label">用别的密钥</span>
+      <code class="row__id">#sync-key-paste</code>
+      <input
+          v-model="pastedKey"
+          class="row__text"
+          type="text"
+          placeholder="把另一台机器上生成的那一串粘在这里"
+      />
+      <button class="row__go" type="button" :disabled="!pastedKey.trim()" @click="usePastedKey">
+        用这一把
+      </button>
+    </div>
+
+    <p class="settings__hint">
+      密钥是<strong>这台机器上生成的</strong>（32 字节随机，base64 写出来就是那一串），
+      只存在本机。换台机器同步同一份仓库时，把这串抄过去 ——
+      <strong>抄丢了就解不开云端那一份了</strong>，所以趁早抄。
+      这一层防的是存储服务与捡到那个桶的人；笔记自身那几层（GPG / 口令）防的是拿到你这台
+      机器的人，两件事各管各的。
+    </p>
 
     <div id="sync-run" class="row" :class="{ 'row--target': isFocused('sync-run') }">
       <span class="row__label">同步</span>
