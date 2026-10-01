@@ -21,7 +21,7 @@ const emit = defineEmits<{
 }>();
 
 const typed = ref("");
-/** 帮助页：随程序发布。首页取第一篇（文件名的序号就是顺序） */
+/** 帮助页：随程序发布 */
 const help = ref<HelpPage[]>([]);
 
 onMounted(async () => {
@@ -33,11 +33,14 @@ onMounted(async () => {
   }
 });
 
+/** 帮助首页：就叫「首页」那一页（文件名与页面名是同一个，所以这里按名字找） */
+const helpHome = computed(() => help.value.find((page) => page.slug === "首页"));
+
 /** 竖排的那几条：固定顺序，缺哪个就不显示哪个 */
 const entries = computed(() =>
   [
-    help.value[0]
-      ? { key: "help", label: "帮助首页", address: `Help:${help.value[0].slug}` }
+    helpHome.value
+      ? { key: "help", label: "帮助首页", address: `Help:${helpHome.value.slug}` }
       : null,
     { key: "all", label: "全部页面", address: "special:all" },
     { key: "random", label: "随机页面", address: "special:random" },

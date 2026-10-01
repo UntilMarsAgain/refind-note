@@ -149,7 +149,7 @@ const groups = computed(() =>
               @click="openHelp($event, page)"
             >
               <BookOpen :size="16" :stroke-width="1.75" />
-              <span>{{ page.title }}</span>
+              <span>{{ page.slug }}</span>
             </button>
           </nav>
 

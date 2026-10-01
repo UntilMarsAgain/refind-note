@@ -97,6 +97,43 @@ impl BlobStore {
     }
 }
 
+impl BlobStore {
+    /// 全部落到盘上的地址与体积（GC 要据此找出没人引用的那些）。
+    ///
+    /// 目录不存在就是空的：新仓库还没有 blob 很正常，不是错误。
+    pub fn list(&self) -> Result<Vec<(String, u64)>, String> {
+        let mut out = Vec::new();
+        let shards = match fs::read_dir(&self.root) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(out),
+            Err(error) => return Err(format!("读不出 {}：{error}", self.root.display())),
+        };
+
+        for shard in shards {
+            let shard = shard.map_err(|error| format!("读不出分片目录：{error}"))?;
+            if !shard.path().is_dir() {
+                continue;
+            }
+            for entry in fs::read_dir(shard.path())
+                .map_err(|error| format!("读不出 {}：{error}", shard.path().display()))?
+            {
+                let entry = entry.map_err(|error| format!("读不出条目：{error}"))?;
+                let address = entry.file_name().to_string_lossy().to_string();
+                // `.tmp` 是写一半留下的渣：它没有地址，也算不上引用
+                let size = entry.metadata().map(|meta| meta.len()).unwrap_or_default();
+                out.push((address, size));
+            }
+        }
+        Ok(out)
+    }
+
+    /// 删掉一个 blob（GC 专用：调用方负责确认它真的没人引用）
+    pub fn remove(&self, address: &str) -> Result<(), String> {
+        let path = self.path_of(address);
+        fs::remove_file(&path).map_err(|error| format!("删不掉 {}：{error}", path.display()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -228,42 +265,5 @@ mod tests {
         assert_ne!(hash_hex(&file), address);
 
         let _ = fs::remove_dir_all(workspace.root());
-    }
-}
-
-impl BlobStore {
-    /// 全部落到盘上的地址与体积（GC 要据此找出没人引用的那些）。
-    ///
-    /// 目录不存在就是空的：新仓库还没有 blob 很正常，不是错误。
-    pub fn list(&self) -> Result<Vec<(String, u64)>, String> {
-        let mut out = Vec::new();
-        let shards = match fs::read_dir(&self.root) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(out),
-            Err(error) => return Err(format!("读不出 {}：{error}", self.root.display())),
-        };
-
-        for shard in shards {
-            let shard = shard.map_err(|error| format!("读不出分片目录：{error}"))?;
-            if !shard.path().is_dir() {
-                continue;
-            }
-            for entry in fs::read_dir(shard.path())
-                .map_err(|error| format!("读不出 {}：{error}", shard.path().display()))?
-            {
-                let entry = entry.map_err(|error| format!("读不出条目：{error}"))?;
-                let address = entry.file_name().to_string_lossy().to_string();
-                // `.tmp` 是写一半留下的渣：它没有地址，也算不上引用
-                let size = entry.metadata().map(|meta| meta.len()).unwrap_or_default();
-                out.push((address, size));
-            }
-        }
-        Ok(out)
-    }
-
-    /// 删掉一个 blob（GC 专用：调用方负责确认它真的没人引用）
-    pub fn remove(&self, address: &str) -> Result<(), String> {
-        let path = self.path_of(address);
-        fs::remove_file(&path).map_err(|error| format!("删不掉 {}：{error}", path.display()))
     }
 }

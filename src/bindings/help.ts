@@ -5,10 +5,8 @@
  */
 
 export interface HelpPage {
-    /** 页面名（地址里写的那一段，例如 `Help:入门` 里的「入门」） */
+    /** 页面名（地址里写的那一段，例如 `Help:入门` 里的「入门」）—— 就是文件名去掉 `.md` */
     slug: string;
-    /** 标题：正文第一个 `# ` 行 */
-    title: string;
     /** 显示标题（`Help:入门`） */
     display: string;
     /** 正文源码 */

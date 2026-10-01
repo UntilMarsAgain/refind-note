@@ -123,9 +123,12 @@ impl Database {
             meta,
         };
 
+        // 表里缺的内建命名空间补上（老仓库可能还没有 `File:` / `Help:`），
         // 默认的跨站命名空间只在新仓库上播一次（见 `sow_defaults`）
         let mut table = database.namespaces();
-        if table.sow_defaults() {
+        let filled = table.ensure_builtins();
+        let sown = table.sow_defaults();
+        if filled || sown {
             database.save_namespaces(&table)?;
         }
 

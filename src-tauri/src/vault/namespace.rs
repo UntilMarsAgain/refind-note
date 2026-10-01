@@ -165,6 +165,23 @@ impl NamespaceTable {
         self.get(id).is_some_and(|item| !item.storable)
     }
 
+    /// 把缺的**内建**命名空间补上（老仓库的 `namespaces.json` 里可能还没有它们）。
+    ///
+    /// 内建的那几个是程序认得的东西（`File:` 的文件、`Help:` 的帮助），仓库里缺了它们，
+    /// 用户就会撞上"没有这个命名空间"—— 而这几个本来也不该由用户来建。
+    /// 只按**标识**补，不碰任何已有的条目（名字、别名、跨站配置都原样）。
+    /// 返回表有没有变（变了调用方要落盘）。
+    pub fn ensure_builtins(&mut self) -> bool {
+        let mut changed = false;
+        for builtin in Self::builtin().items {
+            if self.get(&builtin.id).is_none() {
+                self.items.push(builtin);
+                changed = true;
+            }
+        }
+        changed
+    }
+
     /// 种下两个默认的**跨站**命名空间（只在没播种过、且名字没被占用时）。
     ///
     /// 它们是给人**写链接**用的：`[[zhwiki:条目]]` 画成绿链，点了交给浏览器。
@@ -752,6 +769,39 @@ mod tests {
         assert!(!database.exists("manual:入门"));
 
         cleanup(&database);
+    }
+
+    /// 老仓库的表里可能缺内建命名空间（`File` 是后加的）：打开时补上，且不动已有条目
+    #[test]
+    fn missing_builtins_are_filled_in_without_touching_the_rest() {
+        // 手工造一张"老表"：只有主命名空间与一个用户自己建的
+        let mut table = NamespaceTable {
+            items: vec![
+                NamespaceTable::builtin().items[0].clone(),
+                Namespace {
+                    id: "ns1".to_string(),
+                    name: "笔记".to_string(),
+                    aliases: vec!["notes".to_string()],
+                    storable: true,
+                    site: None,
+                },
+            ],
+            defaults_sown: true,
+        };
+        assert!(table.get("file").is_none(), "一开始确实缺");
+
+        assert!(table.ensure_builtins(), "应当补上了东西");
+        assert!(table.get(FILE_ID).is_some(), "补上了 File");
+        assert!(table.get(HELP_ID).is_some());
+        assert!(table.get(TEMPLATE_ID).is_some());
+
+        // 用户自己那条一个字节没动
+        let mine = table.get("ns1").unwrap();
+        assert_eq!(mine.name, "笔记");
+        assert_eq!(mine.aliases, vec!["notes".to_string()]);
+
+        // 再补一次：没有变化
+        assert!(!table.ensure_builtins());
     }
 
     #[test]

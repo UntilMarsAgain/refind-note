@@ -10,6 +10,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Copy,
+  House,
   Menu,
   Minus,
   Monitor,
@@ -44,6 +45,8 @@ const address = defineModel<string>({ required: true });
 const emit = defineEmits<{
   (e: "back"): void;
   (e: "forward"): void;
+  /** 回新标签页：从哪儿都回得去的那一个地方 */
+  (e: "home"): void;
   (e: "menu"): void;
   /** 换到下一个深浅色；具体怎么换由上层决定 */
   (e: "theme"): void;
@@ -129,6 +132,17 @@ function onBlur() {
           @click="emit('forward')"
       >
         <ArrowRight :size="16" :stroke-width="1.75"/>
+      </button>
+
+      <button
+          v-if="ready !== false"
+          class="tbtn"
+          type="button"
+          aria-label="首页"
+          title="首页（新标签页）"
+          @click="emit('home')"
+      >
+        <House :size="16" :stroke-width="1.75"/>
       </button>
 
       <button

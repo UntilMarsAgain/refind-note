@@ -95,6 +95,11 @@ function onSubmit(value: string) {
   void navigate(value, "push");
 }
 
+/** 标题栏那颗首页按钮：回新标签页（它也是一个地址，走同一条导航） */
+function openHome() {
+  void navigate("special:newtab", "push");
+}
+
 /** 标签栏底下的入口：它也是地址（`special:xxx`），算一次跳转 */
 function openSpecial(page: string) {
   void navigate(`special:${page}`, "push");
@@ -432,6 +437,7 @@ onBeforeUnmount(() => {
         :can-forward="canGoForward"
         @back="goBack"
         @forward="goForward"
+        @home="openHome"
         @menu="onMenu"
         @theme="cycleTheme"
         @submit="onSubmit"
