@@ -1,7 +1,9 @@
 import {computed, ref, watch} from "vue";
 import {ThemeMode} from "../bindings/settings.ts";
-import logoLight from "../assets/logo-light.svg";
-import logoDark from "../assets/logo.svg";
+/* 两个 logo 是 `public/` 里的静态文件：按路径引用，不走打包器 —— 它们是**图标**，
+   参与打包器的哈希改名没有好处（换 logo 就是换那个文件） */
+const logoLight = "/logo-light.svg";
+const logoDark = "/logo.svg";
 
 // 深浅色主题
 
