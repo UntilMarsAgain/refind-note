@@ -191,7 +191,11 @@ fn list_files() -> Result<Vec<files::FileEntry>, String> {
 
 /// 从系统文件对话框选的路径收一个文件（字节由后端自己读，不走 IPC）
 #[tauri::command]
-fn upload_file(path: String) -> Result<files::Uploaded, String> {
+fn upload_file(
+    path: String,
+    protection: Option<Policy>,
+    passphrase: Option<String>,
+) -> Result<files::Uploaded, String> {
     let (_, database) = open_database()?;
     let source = std::path::PathBuf::from(&path);
     let bytes = std::fs::read(&source).map_err(|error| format!("读不到这个文件：{error}"))?;
@@ -200,19 +204,24 @@ fn upload_file(path: String) -> Result<files::Uploaded, String> {
         .map(|name| name.to_string_lossy().to_string())
         .unwrap_or_else(|| "未命名".to_string());
     let mime = files::mime_of(&name);
-    database.add_file(&name, &bytes, mime)
+    database.add_file(&name, &bytes, mime, protection, passphrase)
 }
 
 /// 给一个**已经存在的文件页面**传新版（更新）
 #[tauri::command]
-fn update_file(title: String, path: String) -> Result<files::Uploaded, String> {
+fn update_file(
+    title: String,
+    path: String,
+    protection: Option<Policy>,
+    passphrase: Option<String>,
+) -> Result<files::Uploaded, String> {
     let (_, database) = open_database()?;
     let source = std::path::PathBuf::from(&path);
     let bytes = std::fs::read(&source).map_err(|error| format!("读不到这个文件：{error}"))?;
     // 名字沿用页面名：更新不该顺手改名
     let name = database.parse_title(&title)?.page;
     let mime = files::mime_of(&name);
-    database.add_file(&name, &bytes, mime)
+    database.add_file(&name, &bytes, mime, protection, passphrase)
 }
 
 /// 粘贴进来的字节直接走二进制通道（名字放在头里）。
@@ -225,15 +234,40 @@ fn upload_bytes(request: tauri::ipc::Request<'_>) -> Result<files::Uploaded, Str
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err("粘贴上传要走二进制通道，但没收到字节".to_string());
     };
-    let name = request
-        .headers()
-        .get("x-file-name")
-        .and_then(|value| value.to_str().ok())
-        .map(decode_percent)
+    // 走二进制通道时，请求体整个是**字节**，别的参数塞不进去 —— 只能放头里（见下）
+    let name = header_arg(&request, "x-file-name")
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| "粘贴的文件".to_string());
     let mime = files::mime_of(&name);
-    database.add_file(&name, bytes, mime)
+    database.add_file(
+        &name,
+        bytes,
+        mime,
+        protection_arg(&request),
+        passphrase_arg(&request),
+    )
+}
+
+/// 请求头里的一个参数（值按百分号编码过：头里只放得下 ASCII）。
+///
+/// 只在**原始字节**那条通道上用：那条通道的请求体是文件内容本身，
+/// 命令的其余参数没有别的地方可放（与 `x-file-name` 同一个道理）。
+fn header_arg(request: &tauri::ipc::Request<'_>, name: &str) -> Option<String> {
+    request
+        .headers()
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(decode_percent)
+}
+
+/// 请求头里的"怎么存"（JSON）；没给就是照这一页当前的
+fn protection_arg(request: &tauri::ipc::Request<'_>) -> Option<Policy> {
+    serde_json::from_str(&header_arg(request, "x-protection")?).ok()
+}
+
+/// 请求头里的口令
+fn passphrase_arg(request: &tauri::ipc::Request<'_>) -> Option<String> {
+    header_arg(request, "x-passphrase").filter(|value| !value.is_empty())
 }
 
 /// 一个文件的现状（怎么存的、现在读不读得动）—— 界面据此决定"直接显示还是先解锁"

@@ -9,7 +9,7 @@
 
 use serde::Serialize;
 
-use crate::storage::codec::{Inspection, Meta, Protection};
+use crate::storage::codec::{Inspection, Meta, Policy, Protection};
 use crate::storage::session;
 use crate::storage::workspace::write_bytes;
 use crate::vault::database::Database;
@@ -90,8 +90,18 @@ impl Database {
         Ok(out)
     }
 
-    /// 收一个文件：没有这一页就建一页，有就**加一版**（这就是"更新"）
-    pub fn add_file(&self, name: &str, bytes: &[u8], mime: &str) -> Result<Uploaded, String> {
+    /// 收一个文件：没有这一页就建一页，有就**加一版**（这就是"更新"）。
+    ///
+    /// `protection` 是这一版**怎么存**：不给就照这一页当前的（新建的页面就是仓库默认）——
+    /// 文件进的是同一套 blob 仓，压缩、签名、加密、口令因此都成立，与笔记完全一样。
+    pub fn add_file(
+        &self,
+        name: &str,
+        bytes: &[u8],
+        mime: &str,
+        protection: Option<Policy>,
+        passphrase: Option<String>,
+    ) -> Result<Uploaded, String> {
         let name = clean_name(name)?;
         if bytes.len() as u64 > MAX_FILE_BYTES {
             return Err(format!(
@@ -106,14 +116,14 @@ impl Database {
             self.create(&display)?;
         }
 
-        // 保护策略照这一页当前的（新页面就是仓库默认）——与笔记完全同一条规矩
+        // 保护策略照这一页当前的（新页面就是仓库默认）；显式给了就换，从这一版起粘住
         let note = self.commit_bytes(
             &display,
             bytes,
             mime,
             Some("上传文件".to_string()),
-            None,
-            None,
+            protection,
+            passphrase,
         )?;
         let _ = note;
 
@@ -304,7 +314,9 @@ mod tests {
     #[test]
     fn a_file_is_a_page_in_the_file_namespace() {
         let database = scratch("upload");
-        let uploaded = database.add_file("桥 图.png", b"PNG", "image/png").unwrap();
+        let uploaded = database
+            .add_file("桥 图.png", b"PNG", "image/png", None, None)
+            .unwrap();
 
         assert!(!uploaded.updated);
         assert_eq!(uploaded.entry.title, "File:桥 图.png");
@@ -323,10 +335,10 @@ mod tests {
     fn uploading_again_keeps_the_old_version() {
         let database = scratch("update");
         database
-            .add_file("图.png", "第一版".as_bytes(), "image/png")
+            .add_file("图.png", "第一版".as_bytes(), "image/png", None, None)
             .unwrap();
         let again = database
-            .add_file("图.png", "第二版更长".as_bytes(), "image/png")
+            .add_file("图.png", "第二版更长".as_bytes(), "image/png", None, None)
             .unwrap();
 
         assert!(again.updated, "同一个名字再传一次是**更新**");
@@ -345,7 +357,7 @@ mod tests {
     fn deleting_a_file_goes_through_the_trash() {
         let database = scratch("delete");
         database
-            .add_file("图.png", "字节".as_bytes(), "image/png")
+            .add_file("图.png", "字节".as_bytes(), "image/png", None, None)
             .unwrap();
         database.delete_file("File:图.png").unwrap();
 
@@ -363,7 +375,7 @@ mod tests {
     fn renaming_moves_no_bytes_but_changes_the_name() {
         let database = scratch("rename");
         database
-            .add_file("旧名.png", "字节".as_bytes(), "image/png")
+            .add_file("旧名.png", "字节".as_bytes(), "image/png", None, None)
             .unwrap();
 
         let renamed = database.rename_file("File:旧名.png", "新名.png").unwrap();
@@ -381,7 +393,7 @@ mod tests {
     fn the_file_namespace_is_where_they_live_and_refs_use_the_name() {
         let database = scratch("url");
         let uploaded = database
-            .add_file("桥 图.png", "字节".as_bytes(), "image/png")
+            .add_file("桥 图.png", "字节".as_bytes(), "image/png", None, None)
             .unwrap();
         assert_eq!(
             uploaded.entry.url,
@@ -390,11 +402,23 @@ mod tests {
 
         // 名字里的路径与首尾的点都去掉
         let uploaded = database
-            .add_file("/tmp/…/照片.jpg", "字节".as_bytes(), "image/jpeg")
+            .add_file(
+                "/tmp/…/照片.jpg",
+                "字节".as_bytes(),
+                "image/jpeg",
+                None,
+                None,
+            )
             .unwrap();
         assert_eq!(uploaded.entry.name, "照片.jpg");
         assert!(database
-            .add_file("...", "字节".as_bytes(), "application/octet-stream")
+            .add_file(
+                "...",
+                "字节".as_bytes(),
+                "application/octet-stream",
+                None,
+                None
+            )
             .is_err());
 
         cleanup(&database);
@@ -455,6 +479,40 @@ mod tests {
         cleanup(&database);
     }
 
+    /// 上传时能指定"怎么存"：给了口令层，这一版就按它落盘（与笔记同一条规矩）
+    #[test]
+    fn a_file_can_be_stored_with_its_own_protection() {
+        // 碰会话口令的用例要串行（锁是全局那一把）
+        let _guard = crate::storage::session::test_lock::guard();
+        let database = scratch("policy");
+        let policy = crate::storage::codec::Policy {
+            compress: true,
+            symmetric: true,
+            ..Default::default()
+        };
+        database
+            .add_file(
+                "秘密.txt",
+                "字节".as_bytes(),
+                "text/plain; charset=utf-8",
+                Some(policy),
+                Some("口令".to_string()),
+            )
+            .unwrap();
+
+        // 头里写着有口令层，读得动是因为口令还在这次会话里
+        let info = database.file_info("秘密.txt").unwrap();
+        assert!(info.needs_passphrase, "上传时指定的口令层没落上");
+        assert!(info.entry.needs_unlock);
+        let (bytes, _) = database.read_file("File:秘密.txt", None).unwrap();
+        assert_eq!(bytes, "字节".as_bytes());
+
+        crate::storage::session::forget_all();
+        assert!(database.read_file("File:秘密.txt", None).is_err());
+
+        cleanup(&database);
+    }
+
     #[test]
     fn oversize_files_are_refused_by_size() {
         let database = scratch("oversize");
@@ -463,6 +521,8 @@ mod tests {
                 "大.bin",
                 &vec![0u8; (MAX_FILE_BYTES + 1) as usize],
                 "application/octet-stream",
+                None,
+                None,
             )
             .unwrap_err();
         assert!(error.contains("文件太大"), "{error}");

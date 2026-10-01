@@ -9,6 +9,9 @@ import { formatBytes, formatTime } from "../../bindings/maintenance.ts";
 import { fileReferenceOf } from "../../view/file-links.ts";
 import { saveVaultFile } from "../../view/file-save.ts";
 import { flash } from "../../core/notice.ts";
+import { protection } from "../../core/preferences.ts";
+import type { Policy } from "../../bindings/note.ts";
+import StoragePicker from "../StoragePicker.vue";
 import { clipboardFiles, uploadPasted } from "../../view/paste-files.ts";
 
 /**
@@ -27,6 +30,37 @@ const files = ref<FileEntry[]>([]);
 const loading = ref(false);
 const busy = ref(false);
 const problem = ref("");
+
+/**
+ * 这次上传怎么存。
+ *
+ * 文件进的是与笔记**同一个** blob 仓，所以压缩、签名、加密、口令一样成立；
+ * 开局照仓库默认填好，改了就从这一版起粘住（与笔记里那一栏是同一套）。
+ */
+const uploadPolicy = ref<Policy>({ ...protection.value });
+/** 口令层的口令：只活在这次会话里，交给后端之后就不留了 */
+const uploadPassphrase = ref("");
+
+/** 这一版要套口令层时才把口令递过去 */
+function passphraseFor(policy: Policy): string | null {
+  return policy.symmetric ? uploadPassphrase.value || null : null;
+}
+
+/**
+ * 二进制通道那几个参数：名字、存储方式、口令。
+ *
+ * 这条通道的请求体整个是文件字节，所以其余参数只能走请求头（后端从头上取）；
+ * 头里只放得下 ASCII，值一律百分号编码。
+ */
+function uploadHeaders(name: string): Record<string, string> {
+  const headers: Record<string, string> = { "x-file-name": encodeURIComponent(name) };
+  headers["x-protection"] = JSON.stringify(uploadPolicy.value);
+  const passphrase = passphraseFor(uploadPolicy.value);
+  if (passphrase) {
+    headers["x-passphrase"] = encodeURIComponent(passphrase);
+  }
+  return headers;
+}
 
 /** 正在改名的那个（标题）与草稿名 */
 const renaming = ref("");
@@ -74,7 +108,8 @@ async function collect(picked: File[]) {
     const names: string[] = [];
     await uploadPasted(picked, async (bytes, name) => {
       const uploaded = await invoke<Uploaded>("upload_bytes", bytes, {
-        headers: { "x-file-name": encodeURIComponent(name) },
+        // 走二进制通道时请求体整个是字节，参数只能放头里（后端从头上取）
+        headers: uploadHeaders(name),
       });
       names.push(uploaded.entry.name);
     });
@@ -100,7 +135,11 @@ async function pick() {
   try {
     const names: string[] = [];
     for (const path of paths) {
-      const uploaded = await invoke<Uploaded>("upload_file", { path });
+      const uploaded = await invoke<Uploaded>("upload_file", {
+        path,
+        protection: uploadPolicy.value,
+        passphrase: passphraseFor(uploadPolicy.value),
+      });
       names.push(uploaded.entry.name);
     }
     flash(`已上传：${names.join("、")}`);
@@ -122,7 +161,12 @@ async function update(file: FileEntry) {
   updating.value = file.title;
   busy.value = true;
   try {
-    const uploaded = await invoke<Uploaded>("update_file", { title: file.title, path });
+    const uploaded = await invoke<Uploaded>("update_file", {
+      title: file.title,
+      path,
+      protection: uploadPolicy.value,
+      passphrase: passphraseFor(uploadPolicy.value),
+    });
     flash(`已更新「${file.name}」到第 ${uploaded.entry.rev} 版（旧版仍在历史里）`);
     await load();
   } catch (reason) {
@@ -204,6 +248,11 @@ async function saveAs(file: FileEntry) {
     <div class="files__head">
       <h1 class="files__title">文件</h1>
       <span class="files__count">{{ files.length }} 个</span>
+      <StoragePicker
+          class="files__storage"
+          v-model:policy="uploadPolicy"
+          v-model:passphrase="uploadPassphrase"
+      />
       <button class="files__upload" type="button" :disabled="busy" @click="pick">
         <Upload :size="14" :stroke-width="2"/>
         {{ busy ? "上传中…" : "上传文件" }}
@@ -212,7 +261,8 @@ async function saveAs(file: FileEntry) {
 
     <p class="files__lead">
       文件保存在仓库里，与笔记同一条路：<strong>同一个名字再传一次就是更新</strong>，
-      旧版留在历史里；删除进回收站。笔记里按<strong>名称</strong>引用：
+      旧版留在历史里；删除进回收站。上传时可以指定<strong>怎么存</strong>（压缩、签名、
+      加密、口令），加密的那些会先摆一个解锁按钮。笔记里按<strong>名称</strong>引用：
       <code>![名称](名称)</code>，或使用图片排版语法
       <code>::image src=名称 align=right width=320</code>。也可以在此页直接按
       <strong>Ctrl+V</strong> 粘贴上传。
@@ -321,11 +371,15 @@ async function saveAs(file: FileEntry) {
   font-size: 13px;
 }
 
+/* 存储方式与上传按钮挨在一起：它们说的是同一件事（这次上传怎么存） */
+.files__storage {
+  margin-left: auto;
+}
+
 .files__upload {
   display: inline-flex;
   gap: 6px;
   align-items: center;
-  margin-left: auto;
   padding: 6px 12px;
   border: 1px solid var(--accent-soft);
   border-radius: 6px;
