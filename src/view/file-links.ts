@@ -8,8 +8,13 @@
 
 import type { FileEntry } from "../bindings/files.ts";
 
-/** 附件字节的地址前缀（Rust 侧注册的协议） */
-export const FILE_SCHEME = "refind://localhost/files/";
+/**
+ * 文件字节的地址前缀（Rust 侧注册的协议）。
+ *
+ * 路径里写的是**页面名**（`桥.png`）；后端接上 `File:` 前缀去取那一页的最新一版 ——
+ * 于是"笔记里写的名字"与"文件存在哪"仍然是分开的两件事。
+ */
+export const FILE_SCHEME = "refind://localhost/file/";
 
 /** 一段引用：图片用 `![]()`，其余用 `[]()` */
 export function fileReferenceOf(file: { name: string; mime: string }): string {

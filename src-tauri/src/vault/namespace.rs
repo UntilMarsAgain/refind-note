@@ -27,6 +27,10 @@ pub const TEMPLATE_ID: &str = "template";
 pub const HELP_ID: &str = "help";
 /// 它的规范名（地址里写 `Help:入门`）
 pub const HELP_NAME: &str = "Help";
+/// 命名空间 `File` 的标识：里面的页面**正文是字节**（附件、图片）。
+pub const FILE_ID: &str = "file";
+/// 它的规范名（地址里写 `File:桥.png`）
+pub const FILE_NAME: &str = "File";
 
 /// 一个命名空间。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -94,6 +98,15 @@ impl NamespaceTable {
                     name: SPECIAL_ID.to_string(),
                     aliases: Vec::new(),
                     storable: false,
+                    site: None,
+                },
+                Namespace {
+                    id: FILE_ID.to_string(),
+                    name: FILE_NAME.to_string(),
+                    // 中文里也认「文件:桥.png」
+                    aliases: vec!["文件".to_string()],
+                    // 它是可存储的：文件就是页面，正文是字节
+                    storable: true,
                     site: None,
                 },
                 Namespace {

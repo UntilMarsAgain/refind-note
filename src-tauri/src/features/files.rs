@@ -1,91 +1,97 @@
-//! 附件：上传、改名、列出、删除。
+//! 文件：附件也是**页面**，只不过正文是字节。
 //!
-//! 一条笔记引用一个附件，写的是**名字**（`![桥](桥.png)`），而磁盘上存的是**标识** ——
-//! 这样改名不会牵动任何一篇笔记里的字，名字里也能有中文、空格、大写。
+//! 以前附件另立了一套（`files/` 目录 + 一张表），于是版本、加密、回收站、整理
+//! 全都要再做一遍。现在它们就是 `File:` 命名空间里的页面（`File:桥.png`）：
+//! 走的是与笔记**同一条路** —— 一版一个 blob、保护策略照旧、删除进回收站、
+//! 整理按引用回收 —— 区别只在"读出来是字节而不是文本"。
 //!
-//! ```text
-//! db/
-//!   files/<标识>[.<后缀>]   附件的字节
-//!   files.json              { "items": [ { id, name, extension, size, sha256, uploaded, mime } ] }
-//! ```
-//!
-//! 表是**唯一的真相**：从键（标识或名字）到路径只有一条路 —— 查表。
-//! 所以 `../` 这类东西没有出场的机会。
-//!
-//! 附件**不进内容块仓库**：那是笔记正文的地盘，它按内容寻址、会在整理时被回收；
-//! 附件的字节是"用户自己放进去的东西"，不该有任何一轮整理去动它。
+//! 于是"更新一个文件"就是**再提交一版**：历史留着，旧版随时能取回来。
 
-use std::fs;
-use std::path::PathBuf;
+use serde::Serialize;
 
-use serde::{Deserialize, Serialize};
-
-use crate::storage::store::hash_hex;
+use crate::storage::codec::{Inspection, Meta, Protection};
+use crate::storage::session;
 use crate::storage::workspace::write_bytes;
-use crate::vault::database::{now, Database};
+use crate::vault::database::Database;
+use crate::vault::namespace::{FILE_ID, FILE_NAME};
 
-/// 单个附件的体积上限（64 MiB：够放截图与文档，又不至于把内存撑爆）
+/// 单个文件的体积上限（64 MiB：够放截图与文档，又不至于把内存撑爆）
 pub const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 
-/// 表里的一个附件
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// 列表里的一项
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct FileEntry {
-    /// 标识：文件名与地址都用它
-    pub id: String,
-    /// 显示名（笔记里引用的就是它）
+    /// 显示标题（`File:桥.png`）
+    pub title: String,
+    /// 页面名（`桥.png`）—— 笔记里引用的就是它
     pub name: String,
-    /// 后缀（没有就是空串）；只影响 `mime`，改名不动它
-    #[serde(default)]
-    pub extension: String,
-    pub size: u64,
-    pub sha256: String,
-    pub uploaded: String,
     pub mime: String,
+    pub size: u64,
+    pub rev: u64,
+    pub modified: String,
+    /// 取字节的地址（`refind://…`）
+    pub url: String,
+    /// 这一版是怎么存的（**明文头里就有**，所以不解锁也报得出来）
+    pub protection: Protection,
+    /// 读它要不要先解锁（口令层或 gpg 加密层）—— 列表据此决定"是摆图还是摆锁"
+    pub needs_unlock: bool,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct FileTable {
-    #[serde(default)]
-    pub items: Vec<FileEntry>,
+/// 一个文件的现状：元信息 + 现在读不读得动
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FileInfo {
+    #[serde(flatten)]
+    pub entry: FileEntry,
+    /// 口令正躺在本次会话里：为真时**不用再问**
+    pub passphrase_ready: bool,
+    /// 这一版需要口令才能读（对称层）
+    pub needs_passphrase: bool,
+    /// 这一版是 gpg 加密的（本机有没有私钥，真要读的时候才知道）
+    pub needs_secret_key: bool,
 }
 
-/// 一次上传的结果：新收的、还是原本就有一份一样的
+/// 一次上传的结果
 #[derive(Debug, Serialize)]
 pub struct Uploaded {
     pub entry: FileEntry,
-    /// 内容与后缀都一样，直接复用了已有的那一份
-    pub reused: bool,
+    /// 这一版是更新（之前已经有这一页）还是新建
+    pub updated: bool,
 }
 
 impl Database {
-    pub fn files_dir(&self) -> PathBuf {
-        self.root().join("files")
-    }
-
-    fn files_table_path(&self) -> PathBuf {
-        self.root().join("files.json")
-    }
-
-    pub fn files(&self) -> FileTable {
-        crate::storage::workspace::read_json(&self.files_table_path())
-    }
-
-    fn save_files(&self, table: &FileTable) -> Result<(), String> {
-        crate::storage::workspace::write_json(&self.files_table_path(), table)
-    }
-
-    /// 全部附件，**新的在前**
+    /// 全部文件，**新的在前**
     pub fn list_files(&self) -> Result<Vec<FileEntry>, String> {
-        let mut items = self.files().items;
-        items.reverse();
-        Ok(items)
+        let titles = self.titles()?;
+        let mut out = Vec::new();
+
+        for (id, display) in &titles.notes {
+            let Ok(parsed) = crate::vault::title::parse(display, &self.namespaces()) else {
+                continue;
+            };
+            if parsed.ns != FILE_ID {
+                continue;
+            }
+            let state = self.state_of(id)?;
+            let inspection = self.inspect_rev(&state.blob)?;
+            out.push(FileEntry {
+                title: display.clone(),
+                name: parsed.page.clone(),
+                mime: inspection.meta.mime.clone(),
+                size: state.bytes,
+                rev: state.rev,
+                modified: state.modified.clone(),
+                url: url_of(&parsed.page),
+                needs_unlock: Self::needs_unlock(&inspection.protection),
+                protection: inspection.protection,
+            });
+        }
+
+        out.sort_by(|a, b| b.modified.cmp(&a.modified));
+        Ok(out)
     }
 
-    /// 收一个附件。
-    ///
-    /// 内容与后缀都一样就直接复用已有那一份（同一个标识、同一个名字）——
-    /// 重复粘贴同一张图不该在仓库里留下第二份。
-    pub fn add_file(&self, name: &str, bytes: &[u8]) -> Result<Uploaded, String> {
+    /// 收一个文件：没有这一页就建一页，有就**加一版**（这就是"更新"）
+    pub fn add_file(&self, name: &str, bytes: &[u8], mime: &str) -> Result<Uploaded, String> {
         let name = clean_name(name)?;
         if bytes.len() as u64 > MAX_FILE_BYTES {
             return Err(format!(
@@ -94,151 +100,138 @@ impl Database {
             ));
         }
 
-        let sha256 = hash_hex(bytes);
-        let extension = extension_of(&name);
-
-        let mut table = self.files();
-        if let Some(found) = table
-            .items
-            .iter()
-            .find(|item| item.sha256 == sha256 && item.extension == extension)
-        {
-            return Ok(Uploaded {
-                entry: found.clone(),
-                reused: true,
-            });
+        let display = format!("{FILE_NAME}:{name}");
+        let updated = self.exists(&display);
+        if !updated {
+            self.create(&display)?;
         }
 
-        let id = file_id(&sha256, &name);
-        let entry = FileEntry {
-            id: id.clone(),
-            name: unique_name(&table, &name),
-            extension: extension.clone(),
-            size: bytes.len() as u64,
-            sha256,
-            uploaded: now(),
-            mime: mime_of(&extension).to_string(),
-        };
+        // 保护策略照这一页当前的（新页面就是仓库默认）——与笔记完全同一条规矩
+        let note = self.commit_bytes(
+            &display,
+            bytes,
+            mime,
+            Some("上传文件".to_string()),
+            None,
+            None,
+        )?;
+        let _ = note;
 
-        fs::create_dir_all(self.files_dir()).map_err(|error| format!("建不出附件目录：{error}"))?;
-        write_bytes(&self.files_dir().join(disk_name(&id, &extension)), bytes)?;
+        let entry = self
+            .list_files()?
+            .into_iter()
+            .find(|entry| entry.title == display)
+            .ok_or_else(|| format!("刚写下的文件不见了：{display}"))?;
+        Ok(Uploaded { entry, updated })
+    }
 
-        table.items.push(entry.clone());
-        self.save_files(&table)?;
-        Ok(Uploaded {
-            entry,
-            reused: false,
+    /// 改名：页面名变了，别的都不动（`File:旧名` → `File:新名`）
+    pub fn rename_file(&self, title: &str, name: &str) -> Result<FileEntry, String> {
+        let name = clean_name(name)?;
+        let display = self.rename(title, &format!("{FILE_NAME}:{name}"))?;
+        self.list_files()?
+            .into_iter()
+            .find(|entry| entry.title == display)
+            .ok_or_else(|| format!("刚改名的文件不见了：{display}"))
+    }
+
+    /// 删一个文件：与删笔记是同一条路 —— 进回收站，随时捞得回来
+    pub fn delete_file(&self, title: &str) -> Result<(), String> {
+        self.delete(title)
+    }
+
+    /// 读一个文件的字节与 mime
+    pub fn read_file(
+        &self,
+        title: &str,
+        reference: Option<&str>,
+    ) -> Result<(Vec<u8>, String), String> {
+        self.read_bytes(title, reference)
+    }
+
+    /// 另存为：把某一版复制到用户选的位置
+    pub fn export_file(&self, title: &str, target: &str) -> Result<(), String> {
+        let (bytes, _mime) = self.read_file(title, None)?;
+        write_bytes(std::path::Path::new(target), &bytes)
+    }
+
+    /// 这一版的头：mime + 存储方式。**不需要口令** —— 头本来就是明文。
+    fn inspect_rev(&self, blob: &str) -> Result<Inspection, String> {
+        if blob.is_empty() {
+            return Ok(Inspection {
+                protection: Protection {
+                    compress: false,
+                    sign: None,
+                    encrypt: None,
+                    symmetric: false,
+                },
+                meta: Meta::default(),
+            });
+        }
+        self.blobs().inspect(blob)
+    }
+
+    /// 这一头的读法：要不要先解锁
+    fn needs_unlock(protection: &Protection) -> bool {
+        protection.symmetric || protection.encrypt.is_some()
+    }
+
+    /// 一个文件的现状（`key` 可以是页面名，也可以是 `File:名字` 这样的标题）。
+    ///
+    /// 它回答的是"这一版怎么存的、现在读不读得动" —— 于是界面可以在**不去读字节**的
+    /// 前提下决定：直接显示，还是先摆一个"解锁"的按钮。
+    pub fn file_info(&self, key: &str) -> Result<FileInfo, String> {
+        let title = self.file_title(key);
+        let id = self.locate(&title)?;
+        let state = self.state_of(&id)?;
+        let inspection = self.inspect_rev(&state.blob)?;
+        let page = crate::vault::title::parse(&title, &self.namespaces())?.page;
+
+        Ok(FileInfo {
+            entry: FileEntry {
+                title: title.clone(),
+                name: page.clone(),
+                mime: inspection.meta.mime.clone(),
+                size: state.bytes,
+                rev: state.rev,
+                modified: state.modified.clone(),
+                url: url_of(&page),
+                needs_unlock: Self::needs_unlock(&inspection.protection),
+                protection: inspection.protection.clone(),
+            },
+            passphrase_ready: session::passphrase_for(&id, state.rev).is_some(),
+            needs_passphrase: inspection.protection.symmetric,
+            needs_secret_key: inspection.protection.encrypt.is_some(),
         })
     }
 
-    /// 改名。**只改表**：磁盘上的文件名是标识，笔记里写的是这个名字 ——
-    /// 两处都不会因为改名而动。
-    pub fn rename_file(&self, id: &str, name: &str) -> Result<FileEntry, String> {
-        let name = clean_name(name)?;
-        let mut table = self.files();
-
-        if table
-            .items
-            .iter()
-            .any(|item| item.id != id && item.name == name)
-        {
-            return Err(format!("「{name}」已经存在，换一个名字"));
+    /// `桥.png` 与 `File:桥.png` 都认：前者补上前缀，后者原样用
+    pub fn file_title(&self, key: &str) -> String {
+        let table = self.namespaces();
+        match crate::vault::title::parse(key, &table) {
+            Ok(parsed) if parsed.ns == FILE_ID => parsed.display(&table),
+            _ => format!("{FILE_NAME}:{}", key.trim()),
         }
-
-        let Some(item) = table.items.iter_mut().find(|item| item.id == id) else {
-            return Err(format!("没有这个附件：{id}"));
-        };
-        item.name = name;
-        let updated = item.clone();
-        self.save_files(&table)?;
-        Ok(updated)
-    }
-
-    /// 删一个附件：先改表，再删文件。
-    ///
-    /// 顺序不能反 —— 反过来的话，中间崩了会留下"表里还记着、文件已经没了"的死条目。
-    /// 这一版反着留的是"文件还在、没人认识"，那是整理那一轮的事。
-    pub fn delete_file(&self, id: &str) -> Result<(), String> {
-        let mut table = self.files();
-        let Some(index) = table.items.iter().position(|item| item.id == id) else {
-            return Err(format!("没有这个附件：{id}"));
-        };
-
-        let entry = table.items.remove(index);
-        self.save_files(&table)?;
-
-        let path = self
-            .files_dir()
-            .join(disk_name(&entry.id, &entry.extension));
-        match fs::remove_file(&path) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(format!("删不掉 {}：{error}", path.display())),
-        }
-    }
-
-    /// 键（标识或名字）→ 表里的那一条。**认不出就是认不出**，不去猜路径。
-    pub fn find_file(&self, key: &str) -> Option<FileEntry> {
-        let key = decode_key(key);
-        if key.is_empty() {
-            return None;
-        }
-        self.files()
-            .items
-            .into_iter()
-            .find(|item| item.id == key || item.name == key)
-    }
-
-    /// 键 → 磁盘上的路径
-    pub fn file_path(&self, key: &str) -> Option<PathBuf> {
-        let entry = self.find_file(key)?;
-        let path = self
-            .files_dir()
-            .join(disk_name(&entry.id, &entry.extension));
-        path.is_file().then_some(path)
-    }
-
-    /// 读一个附件的内容（另存为用）
-    pub fn read_file(&self, key: &str) -> Result<Vec<u8>, String> {
-        let path = self
-            .file_path(key)
-            .ok_or_else(|| format!("没有这个附件：{key}"))?;
-        fs::read(&path).map_err(|error| format!("读不出 {}：{error}", path.display()))
-    }
-
-    /// 附件表里那些**文件已经不在**的条目（诊断页用得上）
-    pub fn missing_files(&self) -> Vec<FileEntry> {
-        self.files()
-            .items
-            .into_iter()
-            .filter(|item| {
-                !self
-                    .files_dir()
-                    .join(disk_name(&item.id, &item.extension))
-                    .is_file()
-            })
-            .collect()
     }
 }
 
-/// 磁盘上的文件名：标识 + 后缀。后缀只是为了 `serve` 时报得准 mime
-fn disk_name(id: &str, extension: &str) -> String {
-    if extension.is_empty() {
-        id.to_string()
-    } else {
-        format!("{id}.{extension}")
-    }
+/// 取字节的地址：`refind://localhost/file/<页面名>`（Rust 侧注册的协议）
+pub fn url_of(name: &str) -> String {
+    format!("refind://localhost/file/{}", encode_key(name))
 }
 
-/// 标识：内容哈希 + 名字 + 时间一起哈希，取前 16 位。
-///
-/// 为什么不直接用内容哈希：那样两个**同名不同内容**的文件会拿到两个不同的标识，
-/// 名字撞车就得改名；这里带上名字，同一个名字重复上传也能各归各的。
-fn file_id(sha256: &str, name: &str) -> String {
-    hash_hex(format!("{sha256}:{name}:{}", now()).as_bytes())
-        .chars()
-        .take(16)
-        .collect()
+/// 地址里的键：只转义必要时的那几个字符，中文原样（便于排障时一眼看懂）
+fn encode_key(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for byte in name.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
 }
 
 /// 去掉路径部分与首尾的点，剩下的就是名字
@@ -250,7 +243,6 @@ fn clean_name(name: &str) -> Result<String, String> {
         .trim()
         .trim_matches('.')
         .trim();
-
     let cleaned: String = tail.chars().filter(|ch| !ch.is_control()).collect();
     let cleaned = cleaned.trim().to_string();
     if cleaned.is_empty() {
@@ -259,45 +251,14 @@ fn clean_name(name: &str) -> Result<String, String> {
     Ok(cleaned)
 }
 
-/// 后缀：小写，只留 1–8 个 ASCII 字母数字（`tar.gz` 只认最后一个）
-fn extension_of(name: &str) -> String {
-    let Some((_, extension)) = name.rsplit_once('.') else {
-        return String::new();
-    };
-    let extension = extension.to_lowercase();
-    if !extension.is_empty()
-        && extension.len() <= 8
-        && extension.chars().all(|ch| ch.is_ascii_alphanumeric())
-    {
-        extension
-    } else {
-        String::new()
-    }
-}
-
-/// 同名不同内容的附件不覆盖，排到 `名字-1.png` 去
-fn unique_name(table: &FileTable, wanted: &str) -> String {
-    if !table.items.iter().any(|item| item.name == wanted) {
-        return wanted.to_string();
-    }
-
-    let (stem, extension) = match wanted.rsplit_once('.') {
-        Some((stem, extension)) if !stem.is_empty() => (stem.to_string(), format!(".{extension}")),
-        _ => (wanted.to_string(), String::new()),
-    };
-
-    for index in 1..10_000 {
-        let candidate = format!("{stem}-{index}{extension}");
-        if !table.items.iter().any(|item| item.name == candidate) {
-            return candidate;
-        }
-    }
-    format!("{stem}-{}", now())
-}
-
 /// 后缀 → MIME。认不出的一律当二进制流：宁可让浏览器不预览，也不要猜错类型。
-pub fn mime_of(extension: &str) -> &'static str {
-    match extension {
+pub fn mime_of(name: &str) -> &'static str {
+    let extension = name
+        .rsplit_once('.')
+        .map(|(_, extension)| extension.to_lowercase())
+        .unwrap_or_default();
+
+    match extension.as_str() {
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
         "gif" => "image/gif",
@@ -319,37 +280,10 @@ pub fn mime_of(extension: &str) -> &'static str {
     }
 }
 
-/// 解码一个 URL 里的键。**宽容**：解不开就按原样用（表里去查，查不到就是没有）。
-pub fn decode_key(key: &str) -> String {
-    percent_decode(key)
-}
-
-/// 只认 `%XX` 的手写解码：不做 `+` → 空格那种表单语义
-fn percent_decode(text: &str) -> String {
-    let bytes = text.as_bytes();
-    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-
-    while index < bytes.len() {
-        if bytes[index] == b'%' && index + 2 < bytes.len() {
-            let high = (bytes[index + 1] as char).to_digit(16);
-            let low = (bytes[index + 2] as char).to_digit(16);
-            if let (Some(high), Some(low)) = (high, low) {
-                out.push((high * 16 + low) as u8);
-                index += 3;
-                continue;
-            }
-        }
-        out.push(bytes[index]);
-        index += 1;
-    }
-
-    String::from_utf8_lossy(&out).to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     fn scratch(name: &str) -> Database {
         let dir = std::env::temp_dir().join(format!(
@@ -368,127 +302,156 @@ mod tests {
     }
 
     #[test]
-    fn an_uploaded_file_lands_in_the_table_and_on_disk() {
+    fn a_file_is_a_page_in_the_file_namespace() {
         let database = scratch("upload");
-        let uploaded = database
-            .add_file("桥 图.png", "PNG 数据".as_bytes())
-            .unwrap();
+        let uploaded = database.add_file("桥 图.png", b"PNG", "image/png").unwrap();
 
-        assert!(!uploaded.reused);
+        assert!(!uploaded.updated);
+        assert_eq!(uploaded.entry.title, "File:桥 图.png");
         assert_eq!(uploaded.entry.name, "桥 图.png");
         assert_eq!(uploaded.entry.mime, "image/png");
-        assert_eq!(uploaded.entry.size, "PNG 数据".len() as u64);
-        assert!(
-            database.file_path("桥 图.png").is_some(),
-            "按键（名字）找得到"
-        );
-        assert!(
-            database.file_path(&uploaded.entry.id).is_some(),
-            "按键（标识）也找得到"
-        );
+        assert_eq!(uploaded.entry.size, 3);
 
-        let listed = database.list_files().unwrap();
-        assert_eq!(listed.len(), 1);
+        // 它是一篇**笔记**：查得到、有历史（一次提交）
+        assert!(database.exists("File:桥 图.png"));
+        assert_eq!(database.revisions_of("File:桥 图.png").unwrap().len(), 1);
+
         cleanup(&database);
     }
 
     #[test]
-    fn the_same_bytes_under_the_same_extension_are_reused() {
-        let database = scratch("dedupe");
-        let first = database
-            .add_file("图.png", "同样的字节".as_bytes())
+    fn uploading_again_keeps_the_old_version() {
+        let database = scratch("update");
+        database
+            .add_file("图.png", "第一版".as_bytes(), "image/png")
             .unwrap();
         let again = database
-            .add_file("另起的名字.png", "同样的字节".as_bytes())
+            .add_file("图.png", "第二版更长".as_bytes(), "image/png")
             .unwrap();
 
-        assert!(again.reused, "内容与后缀都一样，复用已有那一份");
-        assert_eq!(again.entry.id, first.entry.id);
-        assert_eq!(database.list_files().unwrap().len(), 1);
+        assert!(again.updated, "同一个名字再传一次是**更新**");
+        assert_eq!(again.entry.rev, 2);
+
+        // 旧版还在，取得到
+        let (first, _) = database.read_file("File:图.png", Some("1")).unwrap();
+        assert_eq!(first, "第一版".as_bytes());
+        let (latest, _) = database.read_file("File:图.png", None).unwrap();
+        assert_eq!(latest, "第二版更长".as_bytes());
+
         cleanup(&database);
     }
 
     #[test]
-    fn a_different_file_with_the_same_name_gets_a_suffix() {
-        let database = scratch("collide");
-        database.add_file("图.png", "第一份".as_bytes()).unwrap();
-        let second = database.add_file("图.png", "第二份".as_bytes()).unwrap();
-
-        assert_eq!(second.entry.name, "图-1.png");
-        assert_eq!(database.list_files().unwrap().len(), 2);
-        cleanup(&database);
-    }
-
-    #[test]
-    fn only_the_name_part_survives_and_dots_are_trimmed() {
-        let database = scratch("names");
-        let uploaded = database
-            .add_file("/tmp/某个目录/…/照片.jpg", "字节".as_bytes())
-            .unwrap();
-        assert_eq!(
-            uploaded.entry.name, "照片.jpg",
-            "路径部分与开头的点都该去掉"
-        );
-
-        assert!(database.add_file("...", "字节".as_bytes()).is_err());
-        assert!(database.add_file("", "字节".as_bytes()).is_err());
-        cleanup(&database);
-    }
-
-    #[test]
-    fn renaming_touches_neither_the_bytes_nor_the_notes() {
-        let database = scratch("rename");
-        let uploaded = database.add_file("旧名.png", "字节".as_bytes()).unwrap();
-        let before = database.file_path(&uploaded.entry.id);
-
-        let renamed = database
-            .rename_file(&uploaded.entry.id, "新名.png")
-            .unwrap();
-        assert_eq!(renamed.name, "新名.png");
-        assert_eq!(renamed.extension, "png", "后缀跟着内容走，改名不动它");
-        assert_eq!(
-            database.file_path(&uploaded.entry.id),
-            before,
-            "磁盘上纹丝不动"
-        );
-        assert!(database.find_file("旧名.png").is_none());
-        assert!(database.find_file("新名.png").is_some());
-
-        // 撞名要报错，不能悄悄覆盖
-        database.add_file("别的.png", "另一份".as_bytes()).unwrap();
-        assert!(database
-            .rename_file(&uploaded.entry.id, "别的.png")
-            .is_err());
-        cleanup(&database);
-    }
-
-    #[test]
-    fn deleting_removes_the_row_then_the_bytes() {
+    fn deleting_a_file_goes_through_the_trash() {
         let database = scratch("delete");
-        let uploaded = database.add_file("图.png", "字节".as_bytes()).unwrap();
-        let path = database.file_path(&uploaded.entry.id).unwrap();
+        database
+            .add_file("图.png", "字节".as_bytes(), "image/png")
+            .unwrap();
+        database.delete_file("File:图.png").unwrap();
 
-        database.delete_file(&uploaded.entry.id).unwrap();
-        assert!(!path.is_file());
+        assert!(!database.exists("File:图.png"));
         assert!(database.list_files().unwrap().is_empty());
-        assert!(
-            database.delete_file(&uploaded.entry.id).is_err(),
-            "再删一次要说没有"
-        );
+        // 回收站里躺着，能还原
+        assert_eq!(database.list_trash().unwrap().len(), 1);
+        database.restore("File:图.png").unwrap();
+        assert!(database.exists("File:图.png"));
+
         cleanup(&database);
     }
 
     #[test]
-    fn path_tricks_never_reach_the_disk() {
-        let database = scratch("traversal");
-        database.add_file("图.png", "字节".as_bytes()).unwrap();
+    fn renaming_moves_no_bytes_but_changes_the_name() {
+        let database = scratch("rename");
+        database
+            .add_file("旧名.png", "字节".as_bytes(), "image/png")
+            .unwrap();
 
-        for key in ["..", "../vault.json", "..%2Fvault.json", "", "图.png/../x"] {
-            assert!(
-                database.file_path(key).is_none(),
-                "{key:?} 不该找到任何东西"
-            );
-        }
+        let renamed = database.rename_file("File:旧名.png", "新名.png").unwrap();
+        assert_eq!(renamed.title, "File:新名.png");
+        assert_eq!(renamed.rev, 1, "改名不是新的一版");
+
+        let (bytes, _) = database.read_file("File:新名.png", None).unwrap();
+        assert_eq!(bytes, "字节".as_bytes());
+        assert!(!database.exists("File:旧名.png"));
+
+        cleanup(&database);
+    }
+
+    #[test]
+    fn the_file_namespace_is_where_they_live_and_refs_use_the_name() {
+        let database = scratch("url");
+        let uploaded = database
+            .add_file("桥 图.png", "字节".as_bytes(), "image/png")
+            .unwrap();
+        assert_eq!(
+            uploaded.entry.url,
+            "refind://localhost/file/%E6%A1%A5%20%E5%9B%BE.png"
+        );
+
+        // 名字里的路径与首尾的点都去掉
+        let uploaded = database
+            .add_file("/tmp/…/照片.jpg", "字节".as_bytes(), "image/jpeg")
+            .unwrap();
+        assert_eq!(uploaded.entry.name, "照片.jpg");
+        assert!(database
+            .add_file("...", "字节".as_bytes(), "application/octet-stream")
+            .is_err());
+
+        cleanup(&database);
+    }
+
+    /// 加密的文件：**不解锁也报得出"要口令"**（头是明文），而读它要口令
+    #[test]
+    fn an_encrypted_file_reports_that_it_needs_unlocking() {
+        // 碰会话口令的用例要串行（锁是全局那一把）
+        let _guard = crate::storage::session::test_lock::guard();
+        let database = scratch("locked");
+        // 让这一页以"口令加密"存
+        let policy = crate::storage::codec::Policy {
+            compress: true,
+            symmetric: true,
+            ..Default::default()
+        };
+        database.create("File:秘密.png").unwrap();
+        database
+            .commit_bytes(
+                "File:秘密.png",
+                "字节".as_bytes(),
+                "image/png",
+                None,
+                Some(policy),
+                Some("口令".to_string()),
+            )
+            .unwrap();
+
+        // 刚用过口令：它还躺在本次会话里，所以"读得动"
+        let info = database.file_info("秘密.png").unwrap();
+        assert!(info.needs_passphrase, "头里写着有口令层");
+        assert!(info.entry.needs_unlock);
+        assert!(info.passphrase_ready, "刚用过的口令还在这次会话里");
+        assert!(!info.needs_secret_key, "不是 gpg 那一层");
+
+        // 名字与标题两种写法都认
+        assert_eq!(
+            database.file_info("File:秘密.png").unwrap().entry.name,
+            "秘密.png"
+        );
+
+        // 忘掉之后：**报得出"要口令"，但读不出来** —— 界面据此摆那个解锁按钮
+        crate::storage::session::forget_all();
+        let info = database.file_info("秘密.png").unwrap();
+        assert!(!info.passphrase_ready, "忘掉之后要重新问");
+        assert!(database.read_file("File:秘密.png", None).is_err());
+
+        crate::storage::session::unlock(
+            &database.id_of("File:秘密.png").unwrap(),
+            1,
+            "口令".to_string(),
+        );
+        let (bytes, _mime) = database.read_file("File:秘密.png", None).unwrap();
+        assert_eq!(bytes, "字节".as_bytes());
+
+        crate::storage::session::forget_all();
         cleanup(&database);
     }
 
@@ -496,31 +459,21 @@ mod tests {
     fn oversize_files_are_refused_by_size() {
         let database = scratch("oversize");
         let error = database
-            .add_file("大.png", &vec![0u8; (MAX_FILE_BYTES + 1) as usize])
+            .add_file(
+                "大.bin",
+                &vec![0u8; (MAX_FILE_BYTES + 1) as usize],
+                "application/octet-stream",
+            )
             .unwrap_err();
         assert!(error.contains("文件太大"), "{error}");
         cleanup(&database);
     }
 
     #[test]
-    fn the_extension_decides_the_mime_and_unknown_ones_are_binary() {
-        let database = scratch("mime");
-        assert_eq!(
-            database.add_file("a.png", b"1").unwrap().entry.mime,
-            "image/png"
-        );
-        assert_eq!(
-            database
-                .add_file("a.unknownthing", b"2")
-                .unwrap()
-                .entry
-                .mime,
-            "application/octet-stream"
-        );
-        assert_eq!(
-            database.add_file("没有后缀", b"3").unwrap().entry.mime,
-            "application/octet-stream"
-        );
-        cleanup(&database);
+    fn the_extension_decides_the_mime() {
+        assert_eq!(mime_of("a.png"), "image/png");
+        assert_eq!(mime_of("a.JPEG"), "image/jpeg");
+        assert_eq!(mime_of("不带后缀"), "application/octet-stream");
+        assert_eq!(mime_of("a.unknownthing"), "application/octet-stream");
     }
 }

@@ -2,7 +2,7 @@
 import { computed } from "vue";
 import { X } from "@lucide/vue";
 import { closeImage, viewingImage } from "../../view/image-viewer.ts";
-import { saveVaultFile, savableKey } from "../../view/file-save.ts";
+import { saveNameOf, saveVaultFile, savableTitle } from "../../view/file-save.ts";
 import { flash } from "../../core/notice.ts";
 
 /**
@@ -13,16 +13,16 @@ import { flash } from "../../core/notice.ts";
  */
 const image = computed(() => viewingImage.value);
 
-/** 能另存为的才给按钮：仓库里的附件可以，外链图片不揽这件事 */
-const key = computed(() => (image.value ? savableKey(image.value.url) : null));
+/** 能另存为的才给按钮：本仓库的文件可以，外链图片不揽这件事 */
+const title = computed(() => (image.value ? savableTitle(image.value.url) : null));
 
 async function saveAs() {
-  const current = key.value;
+  const current = title.value;
   if (!current) {
     return;
   }
   try {
-    const target = await saveVaultFile(current);
+    const target = await saveVaultFile(current, image.value ? saveNameOf(image.value.url) : current);
     if (target) {
       flash(`已另存为：${target}`);
     }
@@ -50,7 +50,7 @@ async function saveAs() {
       <img class="viewer__image" :src="image.url" :alt="image.alt"/>
       <figcaption class="viewer__caption">
         <span v-if="image.alt" class="viewer__alt">{{ image.alt }}</span>
-        <button v-if="key" class="viewer__save" type="button" @click="saveAs">另存为…</button>
+        <button v-if="title" class="viewer__save" type="button" @click="saveAs">另存为…</button>
       </figcaption>
     </figure>
   </div>

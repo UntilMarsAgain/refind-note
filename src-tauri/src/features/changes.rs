@@ -60,6 +60,14 @@ impl Database {
                             delta,
                         });
                     }
+                    Event::Rename { at, title } => out.push(ChangeEntry {
+                        title: title.clone(),
+                        kind: "rename".to_string(),
+                        rev: 0,
+                        at: at.clone(),
+                        bytes: 0,
+                        delta: 0,
+                    }),
                     Event::Del { at } => out.push(ChangeEntry {
                         title: display.clone(),
                         kind: "delete".to_string(),

@@ -4,8 +4,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { applyLineNumbers, codeLineNumbers, highlightCode } from "../../view/code-blocks.ts";
 import { decorateNoteHtml } from "../../view/note-html.ts";
-import { vaultKeyOf } from "../../view/file-links.ts";
-import { saveVaultFile } from "../../view/file-save.ts";
+import { saveNameOf, saveVaultFile, savableTitle } from "../../view/file-save.ts";
 import { flash } from "../../core/notice.ts";
 
 /**
@@ -194,10 +193,10 @@ function onClick(event: MouseEvent) {
         return;
     }
 
-    // 附件（`refind://…`）：它不是一个能"打开"的网址，点一下给"另存为"
-    const key = vaultKeyOf(href);
-    if (key) {
-        void saveVaultFile(key)
+    // 本仓库的文件（`refind://…`）：它不是一个能"打开"的网址，点一下给"另存为"
+    const title = savableTitle(href);
+    if (title) {
+        void saveVaultFile(title, saveNameOf(href))
             .then((target) => {
                 if (target) {
                     flash(`已另存为：${target}`);

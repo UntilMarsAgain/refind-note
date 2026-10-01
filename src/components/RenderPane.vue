@@ -8,6 +8,7 @@ import AllPages from "./pages/AllPages.vue";
 import ChangesPage from "./pages/ChangesPage.vue";
 import CrossSiteView from "./pages/CrossSiteView.vue";
 import DebugPage from "./pages/DebugPage.vue";
+import FileView from "./pages/FileView.vue";
 import FilesPage from "./pages/FilesPage.vue";
 import GcPage from "./pages/GcPage.vue";
 import DeleteView from "./note/DeleteView.vue";
@@ -79,6 +80,8 @@ const specialPage = computed(() =>
 const helpPage = computed(() => (outcome.value?.kind === "help" ? outcome.value : null));
 /** 跨站命名空间里的页面：本仓库没有它，交给浏览器 */
 const crossSite = computed(() => (outcome.value?.kind === "cross-site" ? outcome.value : null));
+/** 文件页面（`File:桥.png`）：正文是字节 */
+const filePage = computed(() => (outcome.value?.kind === "file" ? outcome.value : null));
 
 /** 「什么状态」：浏览状态在语法层，落到仓库上之后照样有效 */
 const mode = computed(() => route.value?.address.mode ?? null);
@@ -135,6 +138,7 @@ const currentTitle = computed(() => {
         case "missing":
         case "help":
         case "cross-site":
+        case "file":
             return found.outcome.title;
         case "special":
             return labelOf(found.outcome.page);
@@ -180,7 +184,10 @@ defineExpose({
 
       <DebugPage v-else-if="specialPage === 'debug'"/>
 
-      <FilesPage v-else-if="specialPage === 'files'"/>
+      <FilesPage
+          v-else-if="specialPage === 'files'"
+          @navigate="emit('navigate', $event)"
+      />
 
       <ChangesPage v-else-if="specialPage === 'changes'" @open="emit('navigate', $event)"/>
 
@@ -196,6 +203,16 @@ defineExpose({
       <GcPage v-else-if="specialPage === 'gc'" @navigate="emit('navigate', $event)"/>
 
       <AllPages v-else-if="specialPage === 'all'" @navigate="emit('navigate', $event)"/>
+
+      <FileView
+          v-else-if="filePage"
+          :key="filePage.title"
+          :title="filePage.title"
+          :collapsed="collapsed"
+          :starred="starredHere"
+          @navigate="emit('navigate', $event)"
+          @toggle-star="onToggleStar"
+      />
 
       <CrossSiteView
           v-else-if="crossSite"

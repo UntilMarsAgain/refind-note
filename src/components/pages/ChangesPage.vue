@@ -26,6 +26,7 @@ const problem = ref("");
 const KIND_LABELS: Record<string, string> = {
   commit: "提交",
   draft: "草稿",
+  rename: "改名",
   delete: "删除",
 };
 
@@ -235,7 +236,8 @@ function deltaOf(entry: ChangeEntry): string {
   color: var(--danger);
 }
 
-.changes__kind--draft {
+.changes__kind--draft,
+.changes__kind--rename {
   color: var(--text-dim);
 }
 

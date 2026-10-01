@@ -98,23 +98,23 @@ fn serve_file(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<
             .expect("空响应总是拼得出来")
     };
 
-    let Some(key) = request.uri().path().strip_prefix("/files/") else {
+    let Some(name) = request.uri().path().strip_prefix("/file/") else {
         return missing();
     };
     let Ok((_, database)) = open_database() else {
         return missing();
     };
-    let Some(path) = database.file_path(key) else {
-        return missing();
-    };
-    let Ok(bytes) = std::fs::read(&path) else {
+    let title = format!("{}:{}", vault::namespace::FILE_NAME, decode_percent(name));
+    // 读不出来（没有这一页、上了锁、内容坏了）都是 404：这里只说"取不到"
+    let Ok((bytes, mime)) = database.read_file(&title, None) else {
         return missing();
     };
 
-    let mime = path
-        .extension()
-        .map(|extension| files::mime_of(&extension.to_string_lossy().to_lowercase()))
-        .unwrap_or("application/octet-stream");
+    let mime = if mime.is_empty() {
+        "application/octet-stream".to_string()
+    } else {
+        mime
+    };
     tauri::http::Response::builder()
         .header("Content-Type", mime)
         .body(bytes)
@@ -189,7 +189,7 @@ fn list_files() -> Result<Vec<files::FileEntry>, String> {
     database.list_files()
 }
 
-/// 从系统文件对话框选的路径收一个附件（字节由后端自己读，不走 IPC）
+/// 从系统文件对话框选的路径收一个文件（字节由后端自己读，不走 IPC）
 #[tauri::command]
 fn upload_file(path: String) -> Result<files::Uploaded, String> {
     let (_, database) = open_database()?;
@@ -199,7 +199,20 @@ fn upload_file(path: String) -> Result<files::Uploaded, String> {
         .file_name()
         .map(|name| name.to_string_lossy().to_string())
         .unwrap_or_else(|| "未命名".to_string());
-    database.add_file(&name, &bytes)
+    let mime = files::mime_of(&name);
+    database.add_file(&name, &bytes, mime)
+}
+
+/// 给一个**已经存在的文件页面**传新版（更新）
+#[tauri::command]
+fn update_file(title: String, path: String) -> Result<files::Uploaded, String> {
+    let (_, database) = open_database()?;
+    let source = std::path::PathBuf::from(&path);
+    let bytes = std::fs::read(&source).map_err(|error| format!("读不到这个文件：{error}"))?;
+    // 名字沿用页面名：更新不该顺手改名
+    let name = database.parse_title(&title)?.page;
+    let mime = files::mime_of(&name);
+    database.add_file(&name, &bytes, mime)
 }
 
 /// 粘贴进来的字节直接走二进制通道（名字放在头里）。
@@ -216,32 +229,60 @@ fn upload_bytes(request: tauri::ipc::Request<'_>) -> Result<files::Uploaded, Str
         .headers()
         .get("x-file-name")
         .and_then(|value| value.to_str().ok())
-        .map(files::decode_key)
+        .map(decode_percent)
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| "粘贴的文件".to_string());
-    database.add_file(&name, bytes)
+    let mime = files::mime_of(&name);
+    database.add_file(&name, bytes, mime)
 }
 
-/// 改附件的显示名
+/// 一个文件的现状（怎么存的、现在读不读得动）—— 界面据此决定"直接显示还是先解锁"
 #[tauri::command]
-fn rename_file(id: String, name: String) -> Result<files::FileEntry, String> {
+fn file_info(key: String) -> Result<files::FileInfo, String> {
     let (_, database) = open_database()?;
-    database.rename_file(&id, &name)
+    database.file_info(&key)
 }
 
-/// 删一个附件
+/// 改文件的名字（页面名跟着改）
 #[tauri::command]
-fn delete_file(id: String) -> Result<(), String> {
+fn rename_file(title: String, name: String) -> Result<files::FileEntry, String> {
     let (_, database) = open_database()?;
-    database.delete_file(&id)
+    database.rename_file(&title, &name)
 }
 
-/// 另存为：把一个附件复制到用户选的位置
+/// 删一个文件（进回收站）
 #[tauri::command]
-fn export_file(key: String, target: String) -> Result<(), String> {
+fn delete_file(title: String) -> Result<(), String> {
     let (_, database) = open_database()?;
-    let bytes = database.read_file(&key)?;
-    std::fs::write(&target, bytes).map_err(|error| format!("写不进 {target}：{error}"))
+    database.delete_file(&title)
+}
+
+/// 另存为：把某一版复制到用户选的位置
+#[tauri::command]
+fn export_file(title: String, target: String) -> Result<(), String> {
+    let (_, database) = open_database()?;
+    database.export_file(&title, &target)
+}
+
+/// 按百分比解码一个键（粘贴上传时名字走 HTTP 头，只能是 ASCII）
+fn decode_percent(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            let high = (bytes[index + 1] as char).to_digit(16);
+            let low = (bytes[index + 2] as char).to_digit(16);
+            if let (Some(high), Some(low)) = (high, low) {
+                out.push((high * 16 + low) as u8);
+                index += 3;
+                continue;
+            }
+        }
+        out.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&out).to_string()
 }
 
 /// 回收站里的条目（新的在前）
@@ -530,6 +571,8 @@ pub fn run() {
             clear_history,
             list_files,
             upload_file,
+            update_file,
+            file_info,
             upload_bytes,
             rename_file,
             delete_file,

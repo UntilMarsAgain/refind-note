@@ -63,6 +63,8 @@ function outcomeLabel(resolved: ResolvedAddress | null): string {
       return `帮助页「${resolved.outcome.title}」`;
     case "cross-site":
       return `跨站页面「${resolved.outcome.title}」（本仓库没有它）`;
+    case "file":
+      return `文件「${resolved.outcome.title}」`;
   }
 }
 

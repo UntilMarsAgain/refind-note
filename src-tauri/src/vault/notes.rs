@@ -61,6 +61,11 @@ pub enum Event {
         ns: String,
         title: String,
     },
+    /// 改名：标题变了，标识与目录都不动
+    ///
+    /// 标题在日志里（`Meta` 写的那一次），所以改名也得在这里留一条 ——
+    /// 光改 `titles.json` 的话，重放日志会把旧名字又读回来。
+    Rename { at: String, title: String },
     /// 删除标记：日志挪进回收站**之前**写的一条
     ///
     /// 它不改内容，只是把"什么时候删的"记在日志自己身上 ——
@@ -184,6 +189,9 @@ pub fn fold(events: &[Event]) -> NoteState {
                 state.title = title.clone();
                 state.created = at.clone();
                 state.modified = at.clone();
+            }
+            Event::Rename { title, .. } => {
+                state.title = title.clone();
             }
             Event::Del { at } => {
                 state.deleted_at = Some(at.clone());
@@ -406,6 +414,29 @@ impl Database {
         protection: Option<Policy>,
         passphrase: Option<String>,
     ) -> Result<Note, String> {
+        self.commit_bytes(
+            title,
+            markdown.as_bytes(),
+            DEFAULT_MIME,
+            summary,
+            protection,
+            passphrase,
+        )
+    }
+
+    /// 提交**任意字节**（文件页面走这条：正文不是文本，但它同样是一版内容）。
+    ///
+    /// 与文本提交共用同一条路 —— 于是版本、封装、回收站、整理都自动接上，
+    /// 区别只在 `mime` 与"读出来是字节而不是文本"。
+    pub fn commit_bytes(
+        &self,
+        title: &str,
+        content: &[u8],
+        mime: &str,
+        summary: Option<String>,
+        protection: Option<Policy>,
+        passphrase: Option<String>,
+    ) -> Result<Note, String> {
         let id = self.locate(title)?;
         let state = self.state_of(&id)?;
         let rev = state.rev + 1;
@@ -417,8 +448,10 @@ impl Database {
         let passphrase = passphrase.or_else(|| session::passphrase_for(&id, state.rev));
 
         let blob = self.blobs().put(
-            markdown.as_bytes(),
-            &body_meta(),
+            content,
+            &Meta {
+                mime: mime.to_string(),
+            },
             &policy,
             passphrase.as_deref(),
         )?;
@@ -434,13 +467,84 @@ impl Database {
                 at: now(),
                 rev,
                 blob,
-                bytes: markdown.len() as u64,
-                mime: DEFAULT_MIME.to_string(),
+                bytes: content.len() as u64,
+                mime: mime.to_string(),
                 summary,
             },
         )?;
 
         self.read(title)
+    }
+
+    /// 读一篇**文件页面**的最新一版：字节 + 它自述的 mime。
+    ///
+    /// 与 [`Self::read`] 分开，是因为正文页面读出来必须是文本（不是文本就是坏了），
+    /// 而文件页面读出来本来就是字节。
+    pub fn read_bytes(
+        &self,
+        title: &str,
+        reference: Option<&str>,
+    ) -> Result<(Vec<u8>, String), String> {
+        let id = self.locate(title)?;
+        let (rev, blob, mime) = match reference {
+            None => {
+                let state = self.state_of(&id)?;
+                let mime = if state.blob.is_empty() {
+                    String::new()
+                } else {
+                    self.blobs().inspect(&state.blob)?.meta.mime
+                };
+                (state.rev, state.blob, mime)
+            }
+            Some(token) => {
+                let rev: u64 = token
+                    .parse()
+                    .map_err(|_| format!("版本要写数字（拿到的是「{token}」）"))?;
+                let (_at, blob, _bytes, _summary) = self.event_at(&id, title, rev)?;
+                let mime = self.blobs().inspect(&blob)?.meta.mime;
+                (rev, blob, mime)
+            }
+        };
+        if blob.is_empty() {
+            return Err(format!("「{title}」还没有内容"));
+        }
+
+        let passphrase = session::passphrase_for(&id, rev);
+        let bytes = self.blobs().get(
+            &blob,
+            &Secrets {
+                passphrase: passphrase.as_deref(),
+            },
+        )?;
+        Ok((bytes, mime))
+    }
+
+    /// 改名：标题变了，别的一个不动。
+    ///
+    /// 两处都要写 —— 日志里留一条 `Rename`（否则重放会把旧名字读回来），
+    /// `titles.json` 换成新显示标题（查表走的是它）。
+    pub fn rename(&self, title: &str, new_title: &str) -> Result<String, String> {
+        let id = self.locate(title)?;
+        let table = self.namespaces();
+        let parsed = crate::vault::title::parse(new_title, &table)?;
+        let display = parsed.display(&table);
+
+        if display != self.display_of(title)? && self.exists(&display) {
+            return Err(format!("已经有一篇叫「{display}」的笔记"));
+        }
+
+        self.append(
+            &id,
+            &Event::Rename {
+                at: now(),
+                title: display.clone(),
+            },
+        )?;
+
+        let mut titles = self.titles()?;
+        titles.notes.insert(id, display.clone());
+        self.save_titles(&titles)?;
+        Ok(display)
     }
 
     /// 读一篇笔记的**最新一版**。口令从这次会话里取。
@@ -953,14 +1057,9 @@ mod tests {
         }
     }
 
-    /// 口令是**进程内共享**的（`session`），几个用例同时跑会互相踩。
-    /// 碰它的用例先拿这把锁。
-    static SESSION_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
+    /// 口令是**进程内共享**的（`session`）：用那把全局的锁，别的模块也一样拿它
     fn session_guard() -> std::sync::MutexGuard<'static, ()> {
-        SESSION_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        crate::storage::session::test_lock::guard()
     }
 
     /// 数一数字节仓里有几个 blob。

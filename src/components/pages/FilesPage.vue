@@ -3,33 +3,38 @@ import { onBeforeUnmount, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { Upload } from "@lucide/vue";
-import { formatBytes, formatTime } from "../../bindings/maintenance.ts";
+import { Lock, Upload } from "@lucide/vue";
 import type { FileEntry, Uploaded } from "../../bindings/files.ts";
-import { fileReferenceOf, isImage } from "../../view/file-links.ts";
+import { formatBytes, formatTime } from "../../bindings/maintenance.ts";
+import { fileReferenceOf } from "../../view/file-links.ts";
 import { saveVaultFile } from "../../view/file-save.ts";
 import { flash } from "../../core/notice.ts";
 import { clipboardFiles, uploadPasted } from "../../view/paste-files.ts";
 
 /**
- * 附件页（`special:files`）。
+ * 文件（`special:files`）。
  *
- * 上传有三条路：**选文件**（系统对话框）、**粘贴**（这一页上按 Ctrl+V）、
- * **编辑器里插入**（编辑器自己那一行按钮）。字节都可以不走 IPC（选文件时后端自己读），
- * 粘贴的才递过去 —— 而且走的是二进制通道，不做 base64。
- *
- * 笔记里引用的写法就摆在每一行上：复制引用即可。
+ * 文件就是 `File:` 命名空间里的页面（`File:桥.png`）：传一次是新的一版，
+ * **同一个名字再传就是更新**，旧版留在历史里；删除进回收站。所以这一页只管
+ * 上传、更新、改名、另存为与删除 —— 版本与删除后的那些事，走的是与笔记同一条路。
  */
+const emit = defineEmits<{
+  /** 去别的页面（打开某个文件页面） */
+  (e: "navigate", input: string): void;
+}>();
+
 const files = ref<FileEntry[]>([]);
 const loading = ref(false);
 const busy = ref(false);
 const problem = ref("");
 
-/** 正在改名的那个（标识）与草稿名 */
+/** 正在改名的那个（标题）与草稿名 */
 const renaming = ref("");
 const renameText = ref("");
-/** 正在"确认删除"的那个（标识）；两步确认 */
+/** 正在"确认删除"的那个（标题）；两步确认 */
 const confirming = ref("");
+/** 正在"更新"的那个（标题）：更新要选一个文件，选之前先把名字记下来 */
+const updating = ref("");
 
 async function load() {
   loading.value = true;
@@ -61,7 +66,7 @@ function onPaste(event: ClipboardEvent) {
   void collect(picked);
 }
 
-/** 收一批文件（粘贴来的） */
+/** 收一批粘贴来的文件 */
 async function collect(picked: File[]) {
   busy.value = true;
   problem.value = "";
@@ -107,6 +112,27 @@ async function pick() {
   }
 }
 
+/** 给一个已有的文件传新版：这就等于"更新"，旧版留在历史里 */
+async function update(file: FileEntry) {
+  const path = await open({ multiple: false, title: `选择「${file.name}」的新内容` });
+  if (!path || Array.isArray(path)) {
+    return;
+  }
+
+  updating.value = file.title;
+  busy.value = true;
+  try {
+    const uploaded = await invoke<Uploaded>("update_file", { title: file.title, path });
+    flash(`已更新「${file.name}」到第 ${uploaded.entry.rev} 版（旧版仍在历史里）`);
+    await load();
+  } catch (reason) {
+    problem.value = String(reason);
+  } finally {
+    updating.value = "";
+    busy.value = false;
+  }
+}
+
 async function copyReference(file: FileEntry) {
   const reference = fileReferenceOf(file);
   try {
@@ -118,7 +144,7 @@ async function copyReference(file: FileEntry) {
 }
 
 function startRename(file: FileEntry) {
-  renaming.value = file.id;
+  renaming.value = file.title;
   renameText.value = file.name;
 }
 
@@ -131,8 +157,8 @@ async function saveRename(file: FileEntry) {
 
   busy.value = true;
   try {
-    await invoke("rename_file", { id: file.id, name });
-    flash(`已重命名为「${name}」；笔记中已写下的旧名称不会随之更改`);
+    await invoke("rename_file", { title: file.title, name });
+    flash(`已改名为「${name}」；笔记里已写下的旧名称不会随之更改`);
     renaming.value = "";
     await load();
   } catch (reason) {
@@ -143,15 +169,15 @@ async function saveRename(file: FileEntry) {
 }
 
 async function remove(file: FileEntry) {
-  if (confirming.value !== file.id) {
-    confirming.value = file.id;
+  if (confirming.value !== file.title) {
+    confirming.value = file.title;
     return;
   }
 
   busy.value = true;
   try {
-    await invoke("delete_file", { id: file.id });
-    flash(`已删除「${file.name}」`);
+    await invoke("delete_file", { title: file.title });
+    flash(`已删除「${file.name}」，可在回收站还原`);
     confirming.value = "";
     await load();
   } catch (reason) {
@@ -163,7 +189,7 @@ async function remove(file: FileEntry) {
 
 async function saveAs(file: FileEntry) {
   try {
-    const target = await saveVaultFile(file.id);
+    const target = await saveVaultFile(file.title, file.name);
     if (target) {
       flash(`已另存为：${target}`);
     }
@@ -185,10 +211,11 @@ async function saveAs(file: FileEntry) {
     </div>
 
     <p class="files__lead">
-      附件保存在当前仓库中，在笔记里按<strong>名称</strong>引用：
+      文件保存在仓库里，与笔记同一条路：<strong>同一个名字再传一次就是更新</strong>，
+      旧版留在历史里；删除进回收站。笔记里按<strong>名称</strong>引用：
       <code>![名称](名称)</code>，或使用图片排版语法
-      <code>::image src=名称 align=right width=320</code>。
-      也可以在此页直接按 <strong>Ctrl+V</strong> 粘贴上传。
+      <code>::image src=名称 align=right width=320</code>。也可以在此页直接按
+      <strong>Ctrl+V</strong> 粘贴上传。
     </p>
 
     <p v-if="problem" class="files__problem">{{ problem }}</p>
@@ -198,14 +225,26 @@ async function saveAs(file: FileEntry) {
     </p>
 
     <ol v-else class="files__list">
-      <li v-for="file in files" :key="file.id" class="files__item">
-        <span class="files__thumb">
-          <img v-if="isImage(file)" :src="`refind://localhost/files/${file.id}`" :alt="file.name"/>
-          <span v-else class="files__ext">{{ (file.extension || "?").toUpperCase() }}</span>
-        </span>
+      <li v-for="file in files" :key="file.title" class="files__item">
+        <button
+            class="files__thumb"
+            type="button"
+            :title="`打开「${file.name}」这一页`"
+            @click="emit('navigate', file.title)"
+        >
+          <img
+              v-if="file.mime.startsWith('image/') && !file.needs_unlock"
+              :src="file.url"
+              :alt="file.name"
+          />
+          <span v-else-if="file.needs_unlock" class="files__lock" title="加密存的：打开这一页解锁">
+            <Lock :size="13" :stroke-width="1.9"/>
+          </span>
+          <span v-else class="files__ext">{{ (file.name.split(".").pop() ?? "?").toUpperCase() }}</span>
+        </button>
 
         <span class="files__body">
-          <template v-if="renaming === file.id">
+          <template v-if="renaming === file.title">
             <input
                 v-model="renameText"
                 class="files__rename"
@@ -214,22 +253,30 @@ async function saveAs(file: FileEntry) {
                 @keydown.esc="renaming = ''"
             />
           </template>
-          <span v-else class="files__name">{{ file.name }}</span>
+          <button
+              v-else
+              type="button"
+              class="files__name"
+              @click="emit('navigate', file.title)"
+          >
+            {{ file.name }}
+          </button>
 
           <span class="files__meta">
-            {{ formatBytes(file.size) }} · {{ file.mime }} · {{ formatTime(file.uploaded) }}
+            第 {{ file.rev }} 版 · {{ formatBytes(file.size) }} · {{ file.mime }} ·
+            改于 {{ formatTime(file.modified) }}
           </span>
           <code class="files__ref">{{ fileReferenceOf(file) }}</code>
         </span>
 
         <span class="files__actions">
-          <template v-if="renaming === file.id">
+          <template v-if="renaming === file.title">
             <button type="button" class="files__btn files__btn--go" :disabled="busy" @click="saveRename(file)">
               确认改名
             </button>
             <button type="button" class="files__btn" @click="renaming = ''">取消</button>
           </template>
-          <template v-else-if="confirming === file.id">
+          <template v-else-if="confirming === file.title">
             <button type="button" class="files__btn files__btn--danger" :disabled="busy" @click="remove(file)">
               确认删除
             </button>
@@ -237,6 +284,9 @@ async function saveAs(file: FileEntry) {
           </template>
           <template v-else>
             <button type="button" class="files__btn" @click="copyReference(file)">复制引用</button>
+            <button type="button" class="files__btn" :disabled="busy" @click="update(file)">
+              {{ updating === file.title ? "更新中…" : "更新" }}
+            </button>
             <button type="button" class="files__btn" @click="startRename(file)">重命名</button>
             <button type="button" class="files__btn" @click="saveAs(file)">另存为…</button>
             <button type="button" class="files__btn files__btn--danger" @click="remove(file)">
@@ -356,16 +406,28 @@ async function saveAs(file: FileEntry) {
   justify-content: center;
   width: 44px;
   height: 44px;
+  padding: 0;
   border: 1px solid var(--border);
   border-radius: 6px;
   overflow: hidden;
   background: var(--bg);
+  cursor: pointer;
+}
+
+.files__thumb:hover {
+  border-color: var(--accent-soft);
 }
 
 .files__thumb img {
   max-width: 100%;
   max-height: 100%;
   object-fit: cover;
+}
+
+.files__lock {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent-soft);
 }
 
 .files__ext {
@@ -380,12 +442,25 @@ async function saveAs(file: FileEntry) {
   flex-direction: column;
   gap: 3px;
   min-width: 0;
+  align-items: flex-start;
 }
 
 .files__name {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
   font-size: 13.5px;
   font-weight: 600;
+  text-align: left;
   overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.files__name:hover {
+  color: var(--accent-soft);
+  text-decoration: underline;
 }
 
 .files__rename {

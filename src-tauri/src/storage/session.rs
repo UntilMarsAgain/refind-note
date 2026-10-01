@@ -62,14 +62,25 @@ fn shared() -> std::sync::MutexGuard<'static, HashMap<Key, String>> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// 口令是**进程内共享**的：碰它的用例要串行。
+///
+/// 锁放在这里而不是各个测试模块里 —— 它保护的是**同一份**共享状态，
+/// 每个模块各拿一把锁等于没锁（两个模块的用例照样会撞上）。
+#[cfg(test)]
+pub mod test_lock {
+    /// 碰会话口令的用例先拿它
+    pub fn guard() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// 口令是**进程内共享**的，几个用例同时跑会互相踩 —— 碰它的用例先拿这把锁。
     fn guard() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        test_lock::guard()
     }
 
     #[test]

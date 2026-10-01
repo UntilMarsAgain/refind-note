@@ -29,6 +29,8 @@ pub enum Outcome {
     Help { page: String, title: String },
     /// 跨站命名空间里的页面：本仓库没有它，地址在 `url`
     CrossSite { title: String, url: String },
+    /// 文件页面（`File:桥.png`）：正文是字节，不是给人读的文本
+    File { title: String },
 }
 
 /// 这一页是**被哪条指令带过来的**（`$$COMMAND$$` 那一页）
@@ -169,6 +171,27 @@ impl Database {
 
         // "在不在"问的就是链接解析那张索引：一处回答，两处一样
         if index.contains(&address.namespace.id, &address.page) {
+            // 文件页面：正文是字节。它也有历史、也能删，但没有"编辑正文"这回事，
+            // 所以 `@edit` 裁成阅读（改了正文的编辑从哪里来？从"传新版"来）
+            if address.namespace.id == crate::vault::namespace::FILE_ID {
+                let mode = match address.mode {
+                    Mode::View { reference } => Mode::View { reference },
+                    Mode::History => Mode::History,
+                    Mode::Delete => Mode::Delete,
+                    _ => Mode::View { reference: None },
+                };
+                let address = Address { mode, ..address };
+                let canonical = address::compose(&address);
+                return Ok(Some(ResolvedAddress {
+                    address,
+                    canonical,
+                    outcome: Outcome::File { title },
+                    // 正文（字节）不在这里改；改名与传新版另有其路
+                    editable: false,
+                    via,
+                }));
+            }
+
             // 指令页面：**只有"看最新版"这一路跟跳**。
             // 编辑 / 历史 / 删除 / 看旧版操作的都是这一页本身，跟着跳走会让人改错页面。
             if matches!(address.mode, Mode::View { reference: None }) {

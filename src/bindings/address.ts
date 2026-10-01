@@ -50,7 +50,9 @@ export type Outcome =
     /** 帮助页（虚拟命名空间 `Help`）：页面随程序发布，不在仓库里 */
     | { kind: "help"; page: string; title: string }
     /** 跨站命名空间里的页面：本仓库没有它，交给浏览器打开 */
-    | { kind: "cross-site"; title: string; url: string };
+    | { kind: "cross-site"; title: string; url: string }
+    /** 文件页面（`File:桥.png`）：正文是字节 */
+    | { kind: "file"; title: string };
 
 /** 这一页是被哪条指令带过来的（`$$COMMAND$$` 那一页） */
 export interface Via {

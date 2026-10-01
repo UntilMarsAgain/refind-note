@@ -1,0 +1,412 @@
+<script setup lang="ts">
+import { computed, ref, watch } from "vue";
+import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { Download, History, Pencil, Trash2, Upload } from "@lucide/vue";
+import type { FileEntry, FileInfo, Uploaded } from "../../bindings/files.ts";
+import { formatBytes, formatTime } from "../../bindings/maintenance.ts";
+import { fileReferenceOf } from "../../view/file-links.ts";
+import { saveVaultFile } from "../../view/file-save.ts";
+import { flash } from "../../core/notice.ts";
+import PageHeader, { type PageAction } from "../note/PageHeader.vue";
+
+/**
+ * 文件页面（`File:桥.png`）。
+ *
+ * 它的正文是**字节**，不是给人读的文本 —— 所以这一页不渲染正文，而是把文件本身
+ * 摆出来（能预览的预览，不能的给一句"下载看看"）。能做的事与笔记同源：
+ * 看历史、删除（进回收站）、另存为；"改内容"这件事在这里叫**传新版**。
+ */
+const props = defineProps<{
+  /** 显示标题（`File:桥.png`） */
+  title: string;
+  /** 正文滚下去了：页头收起 */
+  collapsed: boolean;
+  /** 这一页星标过没有 */
+  starred?: boolean;
+}>();
+
+const emit = defineEmits<{
+  (e: "navigate", input: string): void;
+  (e: "toggle-star"): void;
+}>();
+
+const info = ref<FileInfo | null>(null);
+/** 原位输入的口令：只有口令层才用得上 */
+const passphrase = ref("");
+const problem = ref("");
+const loading = ref(false);
+const busy = ref(false);
+
+/**
+ * 读这一份文件的现状。
+ *
+ * 用的是 `file_info` 而不是 `list_files` —— 它顺带回答"这一版怎么存的、现在读不读得动"，
+ * 于是加密的文件不会被当成普通图片直接去拉。
+ */
+async function load() {
+  loading.value = true;
+  problem.value = "";
+  try {
+    info.value = await invoke<FileInfo>("file_info", { key: props.title });
+  } catch (reason) {
+    info.value = null;
+    problem.value = String(reason);
+  } finally {
+    loading.value = false;
+  }
+}
+
+/** 这一份现在读得动吗 */
+const readable = computed(() => {
+  const found = info.value;
+  if (!found) {
+    return false;
+  }
+  if (!found.needs_unlock) {
+    return true;
+  }
+  // gpg 那一层：直接去读，系统代理自己会问口令
+  if (found.needs_secret_key && !found.needs_passphrase) {
+    return true;
+  }
+  return found.passphrase_ready;
+});
+
+/** 解锁：把口令交给本次会话，然后重读一遍（这次就显示得出来了） */
+async function unlock() {
+  const found = info.value;
+  if (!found) {
+    return;
+  }
+  busy.value = true;
+  try {
+    await invoke("unlock", {
+      title: found.title,
+      reference: null,
+      passphrase: passphrase.value,
+    });
+    passphrase.value = "";
+    await load();
+  } catch (reason) {
+    problem.value = String(reason);
+  } finally {
+    busy.value = false;
+  }
+}
+
+const entry = computed(() => info.value);
+
+watch(() => props.title, () => void load(), { immediate: true });
+
+const isImage = computed(() => entry.value?.mime.startsWith("image/") ?? false);
+const isText = computed(() => entry.value?.mime.startsWith("text/") ?? false);
+
+const actions: PageAction[] = [
+  { name: "update", label: "传新版", icon: Upload },
+  { name: "save", label: "另存为", icon: Download },
+  { name: "history", label: "版本历史", icon: History },
+  { name: "rename", label: "改名", icon: Pencil },
+  { name: "delete", label: "删除", icon: Trash2, danger: true },
+];
+
+function onAction(name: string) {
+  const file = entry.value;
+  if (!file) {
+    return;
+  }
+  switch (name) {
+    case "update":
+      void update(file);
+      break;
+    case "save":
+      void saveAs(file);
+      break;
+    case "history":
+      emit("navigate", `${file.title}@history`);
+      break;
+    case "rename":
+      rename(file);
+      break;
+    case "delete":
+      emit("navigate", `${file.title}@delete`);
+      break;
+  }
+}
+
+/** 传新版：选一个文件，内容替换进来，旧版留在历史里 */
+async function update(file: FileEntry) {
+  const path = await open({ multiple: false, title: `选择「${file.name}」的新内容` });
+  if (!path || Array.isArray(path)) {
+    return;
+  }
+
+  busy.value = true;
+  try {
+    const uploaded = await invoke<Uploaded>("update_file", { title: file.title, path });
+    flash(`已更新到第 ${uploaded.entry.rev} 版（旧版仍在历史里）`);
+    await load();
+  } catch (reason) {
+    problem.value = String(reason);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function saveAs(file: FileEntry) {
+  try {
+    const target = await saveVaultFile(file.title, file.name);
+    if (target) {
+      flash(`已另存为：${target}`);
+    }
+  } catch (error) {
+    flash(`另存失败：${error}`);
+  }
+}
+
+/** 改名：文件名就是页面名，所以要问一句新名字 */
+function rename(file: FileEntry) {
+  const wanted = window.prompt("新的文件名", file.name);
+  const name = wanted?.trim();
+  if (!name || name === file.name) {
+    return;
+  }
+  void invoke<string>("rename_file", { title: file.title, name })
+    .then((display) => {
+      flash(`已改名为「${name}」；笔记里已写下的旧名称不会随之更改`);
+      emit("navigate", display);
+    })
+    .catch((reason) => {
+      problem.value = String(reason);
+    });
+}
+
+async function copyReference() {
+  const file = entry.value;
+  if (!file) {
+    return;
+  }
+  const reference = fileReferenceOf(file);
+  try {
+    await writeText(reference);
+    flash(`已复制引用：${reference}`);
+  } catch (error) {
+    flash(`复制失败：${error}`);
+  }
+}
+</script>
+
+<template>
+  <div class="file">
+    <p v-if="loading" class="file__hint">正在读…</p>
+
+    <div v-else-if="problem" class="file__error">
+      <p class="file__error-text">{{ problem }}</p>
+      <button type="button" class="file__btn" @click="load">重试</button>
+    </div>
+
+    <template v-else-if="entry">
+      <PageHeader
+          :title="entry.title"
+          parent=""
+          :collapsed="props.collapsed"
+          :actions="actions"
+          :starred="props.starred ?? false"
+          @action="onAction"
+          @toggle-star="emit('toggle-star')"
+      />
+
+      <p class="file__meta">
+        第 {{ entry.rev }} 版 · {{ formatBytes(entry.size) }} · {{ entry.mime }} ·
+        改于 {{ formatTime(entry.modified) }}
+      </p>
+
+      <!--
+        加密的先解锁：**原位输口令**，不跳页 —— 解锁之后这一页自己就刷新了。
+        读得动之后：能预览的就地预览，不能预览的给一句实话 + 一个"另存为"。
+      -->
+      <div v-if="!readable" class="file__locked">
+        <p class="file__locked-hint">
+          {{ entry.needs_passphrase ? "这一份是加密存的，输入口令后显示。" : "这一份是加密存的，解锁后显示。" }}
+        </p>
+        <div class="file__locked-row">
+          <input
+              v-if="entry.needs_passphrase"
+              v-model="passphrase"
+              class="file__locked-input"
+              type="password"
+              placeholder="口令"
+              @keydown.enter.prevent="unlock"
+          />
+          <button type="button" class="file__btn file__btn--go" :disabled="busy" @click="unlock">
+            解锁并显示
+          </button>
+        </div>
+      </div>
+
+      <template v-else>
+        <figure v-if="isImage" class="file__preview">
+          <img :src="`${entry.url}?t=${entry.rev}`" :alt="entry.name"/>
+        </figure>
+        <p v-else-if="isText" class="file__note">这是文本文件，另存为之后可以打开查看。</p>
+        <p v-else class="file__note">这个类型不能在这里预览，另存为之后可以打开查看。</p>
+      </template>
+
+      <div class="file__actions">
+        <button type="button" class="file__btn" :disabled="busy" @click="update(entry)">
+          <Upload :size="14" :stroke-width="1.9"/>
+          传新版
+        </button>
+        <button type="button" class="file__btn" @click="saveAs(entry)">
+          <Download :size="14" :stroke-width="1.9"/>
+          另存为…
+        </button>
+        <button type="button" class="file__btn" @click="copyReference">
+          复制引用
+        </button>
+      </div>
+
+      <code class="file__ref">{{ fileReferenceOf(entry) }}</code>
+    </template>
+  </div>
+</template>
+
+<style scoped>
+.file {
+  padding-top: 4px;
+}
+
+.file__meta {
+  margin: 10px 0 0;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+/* 加密文件：先解锁，再谈显示 */
+.file__locked {
+  margin: 16px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.file__locked-hint {
+  margin: 0 0 10px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.file__locked-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.file__locked-input {
+  width: 14em;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--field-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.file__locked-input:focus {
+  outline: none;
+  border-color: var(--accent-soft);
+}
+
+.file__btn--go {
+  border-color: var(--accent-soft);
+  color: var(--accent-soft);
+}
+
+.file__btn--go:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.file__preview {
+  margin: 16px 0 0;
+}
+
+.file__preview img {
+  max-width: 100%;
+  max-height: 70vh;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.file__note {
+  margin: 16px 0 0;
+  color: var(--text-dim);
+  font-size: 13.5px;
+}
+
+.file__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 18px 0 0;
+}
+
+.file__btn {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.file__btn:hover:not(:disabled) {
+  border-color: var(--accent-soft);
+  background: var(--accent-tint);
+  color: var(--text);
+}
+
+.file__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.file__ref {
+  display: inline-block;
+  margin: 12px 0 0;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--hover);
+  color: var(--text-dim);
+  font-family: var(--mono-font);
+  font-size: 12px;
+}
+
+.file__hint {
+  margin: 28px 0 0;
+  color: var(--text-dim);
+  font-size: 13.5px;
+}
+
+.file__error {
+  margin: 28px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--danger);
+  border-left-width: 3px;
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 13.5px;
+}
+
+.file__error-text {
+  margin: 0 0 10px;
+}
+</style>

@@ -10,8 +10,9 @@
 
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { type MenuItem, openMenu } from "./context-menu.ts";
-import { fileTargetOf, fileUrl, vaultKeyOf } from "./file-links.ts";
-import { saveVaultFile, savableKey } from "./file-save.ts";
+import { fileTargetOf, fileUrl } from "./file-links.ts";
+import { saveNameOf, saveVaultFile, savableTitle } from "./file-save.ts";
+import { fileInfo, freshUrl, readable, unlockFile } from "./file-unlock.ts";
 import { viewImage } from "./image-viewer.ts";
 
 /**
@@ -62,13 +63,16 @@ function attachContextMenu(root: HTMLElement) {
         const items: MenuItem[] = [];
 
         if (target instanceof HTMLImageElement) {
-            const key = savableKey(target.src);
+            const savable = savableTitle(target.src);
             items.push({ label: "看大图", run: () => viewImage(target.src, target.alt) });
             items.push({ label: "复制图片地址", run: () => writeText(target.src) });
-            if (key) {
+            if (savable) {
                 items.push({
                     label: "另存为…",
-                    run: () => void saveVaultFile(key).catch((error) => console.warn(error)),
+                    run: () =>
+                        void saveVaultFile(savable, saveNameOf(target.src)).catch((error) =>
+                            console.warn(error),
+                        ),
                 });
             }
         } else if (target instanceof HTMLAnchorElement) {
@@ -79,11 +83,14 @@ function attachContextMenu(root: HTMLElement) {
                 // 与 Ctrl+点击同一件事：右键里也该有它，否则这条路只有键盘用户找得到
                 items.push({ label: "在新标签页打开", run: () => openInNewTab?.(title) });
             }
-            const key = vaultKeyOf(address);
-            if (key) {
+            const savable = savableTitle(address);
+            if (savable) {
                 items.push({
                     label: "另存为…",
-                    run: () => void saveVaultFile(key).catch((error) => console.warn(error)),
+                    run: () =>
+                        void saveVaultFile(savable, saveNameOf(address)).catch((error) =>
+                            console.warn(error),
+                        ),
                 });
             }
             items.push({ label: "复制链接地址", run: () => writeText(address) });
@@ -153,7 +160,98 @@ export function decorateNoteHtml(root: HTMLElement): void {
         }
         image.dataset.imageReady = "yes";
         attachImage(image);
+
+        // 本仓库里的图片：可能是加密存的 —— 那就不该直接去拉
+        const name = fileTargetOf(image.getAttribute("src") ?? "");
+        if (name) {
+            void attachLockedImage(image, name);
+        }
     }
+}
+
+/**
+ * 加密的图片：**先摆一个"解锁"的地方，别让 `<img>` 去撞 404**。
+ *
+ * 文件进了 blob 仓就可能带口令层或 gpg 加密层 —— 那两种情况下"直接显示"是不成立的：
+ * 后端取不到字节，图片只会加载失败。所以这里先问一句"这一版怎么存的、现在读不读得动"
+ * （后端只看明文头，不需要口令），读不动就把图片换成一个解锁框：
+ * 口令层的当场输口令（原位，不跳页），gpg 层的点一下就去读（由系统代理去问口令）。
+ *
+ * 解锁之后再把它换回真正的 `<img>`，并带一个"这次是新读的"后缀绕开缓存。
+ */
+async function attachLockedImage(image: HTMLImageElement, name: string) {
+    const info = await fileInfo(name);
+    if (!info || !info.needs_unlock || readable(info)) {
+        return;
+    }
+
+    const box = document.createElement("span");
+    box.className = "file-locked";
+    box.dataset.file = name;
+
+    const label = document.createElement("span");
+    label.className = "file-locked__label";
+    label.textContent = info.name;
+    box.append(label);
+
+    const hint = document.createElement("span");
+    hint.className = "file-locked__hint";
+    hint.textContent = info.needs_passphrase
+        ? "这一份是加密存的，输入口令后显示"
+        : "这一份是加密存的，解锁后显示";
+    box.append(hint);
+
+    const input = document.createElement("input");
+    input.type = "password";
+    input.className = "file-locked__input";
+    input.placeholder = "口令";
+    if (info.needs_passphrase) {
+        box.append(input);
+    }
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "file-locked__go";
+    button.textContent = "显示";
+
+    const problem = document.createElement("span");
+    problem.className = "file-locked__problem";
+
+    /** 解锁（需要口令时先交口令），然后把图片换回来 */
+    const reveal = async () => {
+        button.disabled = true;
+        problem.textContent = "";
+        try {
+            if (info.needs_passphrase && info.passphrase_ready === false) {
+                if (!input.value) {
+                    problem.textContent = "请先输入口令";
+                    return;
+                }
+                await unlockFile(info.title, input.value);
+            }
+            // 读得动了：换成真正的图片。带个后缀，免得 webview 吃上一次的失败缓存
+            const live = image.cloneNode() as HTMLImageElement;
+            live.src = freshUrl(image.getAttribute("src") ?? info.url);
+            live.dataset.imageReady = "yes";
+            attachImage(live);
+            box.replaceWith(live);
+        } catch (error) {
+            problem.textContent = String(error);
+        } finally {
+            button.disabled = false;
+        }
+    };
+
+    button.addEventListener("click", () => void reveal());
+    input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            void reveal();
+        }
+    });
+
+    box.append(button, problem);
+    image.replaceWith(box);
 }
 
 /** 图片：点一下看大图，加载不出来给一句说明 */
