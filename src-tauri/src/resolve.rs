@@ -9,9 +9,10 @@ use serde::Serialize;
 use crate::address::{self, Address, Mode, ParsedAddress};
 use crate::codec::{self, EncryptionReport, Policy, Secrets, SignatureReport};
 use crate::database::Database;
+use crate::namespace::SPECIAL_ID;
 use crate::notes::Reading;
 use crate::session;
-use crate::title::SPECIAL_NAMESPACE;
+use crate::title::ParsedTitle;
 
 /// 地址落到仓库上的结论："这是什么地方"
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -40,12 +41,13 @@ impl Database {
     /// - 还不存在的页：状态裁掉（`名称@edit` 与 `名称` 回显成同一个地址）——
     ///   状态只在"这一页存在"的那一支上有意义。
     pub fn resolve_address(&self, input: &str) -> Result<Option<ResolvedAddress>, String> {
-        let Some(parsed) = address::parse(input)? else {
+        let table = self.namespaces();
+        let Some(parsed) = address::parse(input, &table)? else {
             return Ok(None);
         };
         let ParsedAddress { address, canonical } = parsed;
 
-        if address.namespace.id == SPECIAL_NAMESPACE {
+        if address.namespace.id == SPECIAL_ID {
             if address.page.eq_ignore_ascii_case("random") {
                 return self.resolve_random();
             }
@@ -57,7 +59,14 @@ impl Database {
             }));
         }
 
-        let title = address.page.clone();
+        // 给出去的是**显示标题**（命名空间写成规范名）：前端拿它拼地址、让后端读，
+        // 与人在地址栏里敲 `帮助:入门` 是同一件事 —— 别名在这里收敛成规范名
+        let title = ParsedTitle {
+            ns: address.namespace.id.clone(),
+            page: address.page.clone(),
+        }
+        .display(&table);
+
         if self.exists(&title) {
             return Ok(Some(ResolvedAddress {
                 address,

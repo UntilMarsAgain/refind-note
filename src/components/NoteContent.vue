@@ -136,6 +136,14 @@ function onClick(event: MouseEvent) {
     const wikiLink = target.closest("a.wikilink");
     if (wikiLink) {
         event.preventDefault();
+
+        // 跨站链接（`[[zhwiki:页面]]`）：目标是别人家的页面，交给系统浏览器
+        const url = wikiLink.getAttribute("data-url");
+        if (url) {
+            void openUrl(url);
+            return;
+        }
+
         // 目标是否存在是后端渲染时判定的（data-missing）：红链点了也没东西可开
         const title =
             wikiLink.getAttribute("data-title") ?? wikiLink.getAttribute("data-doc");

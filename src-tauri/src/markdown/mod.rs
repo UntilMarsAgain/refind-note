@@ -261,14 +261,18 @@ mod tests {
             .map(|index| {
                 std::thread::spawn(move || {
                     let mut keys = HashSet::new();
-                    keys.insert(format!("条目{index}"));
-                    let resolver = LinkResolver::new(Arc::new(keys), None);
+                    keys.insert(format!("0:条目{index}"));
+                    let resolver = LinkResolver::new(
+                        Arc::new(keys),
+                        Arc::new(crate::namespace::NamespaceTable::builtin()),
+                        None,
+                    );
                     let html = render_with(
                         &format!("[[条目{index}]] 与 [[别的条目]]\n"),
                         Some(&resolver),
                     );
                     assert!(
-                        html.contains(&format!(r#"data-key="条目{index}""#)),
+                        html.contains(&format!(r#"data-key="0:条目{index}""#)),
                         "{html}"
                     );
                     assert!(html.contains(r#"data-missing="true""#), "{html}");

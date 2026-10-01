@@ -38,6 +38,11 @@ impl NodeValue for WikiLink {
                 "data-missing",
                 if resolved.exists { "false" } else { "true" }.into(),
             ));
+            // 跨站链接：目标是别人家的页面。带上地址，前端按外链打开（绿色）
+            if let Some(url) = &resolved.url {
+                attrs.push(("data-interwiki", "true".into()));
+                attrs.push(("data-url", url.clone()));
+            }
         }
 
         fmt.open("a", &attrs);
@@ -141,11 +146,15 @@ mod tests {
     #[test]
     fn resolver_marks_red_and_blue_links() {
         let mut keys = HashSet::new();
-        keys.insert("存在的条目".to_string());
-        let resolver = LinkResolver::new(Arc::new(keys), None);
+        keys.insert("0:存在的条目".to_string());
+        let resolver = LinkResolver::new(
+            Arc::new(keys),
+            Arc::new(crate::namespace::NamespaceTable::builtin()),
+            None,
+        );
 
         let html = render_with("[[存在的条目]] 与 [[没有的条目]]\n", Some(&resolver));
-        assert!(html.contains(r#"data-key="存在的条目""#), "{html}");
+        assert!(html.contains(r#"data-key="0:存在的条目""#), "{html}");
         assert!(html.contains(r#"data-missing="false""#), "{html}");
         assert!(html.contains(r#"data-missing="true""#), "{html}");
     }

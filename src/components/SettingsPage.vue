@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 import type { Policy } from "../bindings/note.ts";
+import NamespaceManager from "./NamespaceManager.vue";
 import type { ThemeMode } from "../bindings/settings.ts";
 import {
   databaseRoot,
@@ -288,6 +289,16 @@ watch(
       </label>
     </div>
 
+    <h2 class="settings__section">命名空间</h2>
+
+    <div
+      id="namespaces"
+      class="row row--stack"
+      :class="{ 'row--target': isFocused('namespaces') }"
+    >
+      <NamespaceManager/>
+    </div>
+
     <h2 class="settings__section">存储</h2>
 
     <p class="settings__note">
@@ -467,6 +478,11 @@ watch(
 .row__label {
   min-width: 132px;
   font-size: 13px;
+}
+
+/* 整块内容占一行的（命名空间表这类）：不要那两道缩进 */
+.row--stack {
+  display: block;
 }
 
 /* 勾选式的一行：复选框与说明文字并排 */

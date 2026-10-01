@@ -2,6 +2,7 @@ mod address;
 pub mod codec;
 pub mod database;
 pub mod markdown;
+pub mod namespace;
 pub mod notes;
 pub mod resolve;
 pub mod session;
@@ -15,6 +16,7 @@ use serde::Serialize;
 use address::ParsedAddress;
 use codec::Policy;
 use database::{Config, Database, Meta};
+use namespace::Namespace;
 use notes::{Draft, Note, NoteSummary, Reading, RevisionSummary};
 use resolve::ResolvedAddress;
 use settings::Preferences;
@@ -61,6 +63,56 @@ fn save_preferences(preferences: Preferences) -> Result<Preferences, String> {
     settings::save(&workspace, preferences)
 }
 
+/// 命名空间表（标题前缀那张表）
+#[tauri::command]
+fn namespaces() -> Result<Vec<Namespace>, String> {
+    let (_, database) = open_database()?;
+    Ok(database.namespace_list())
+}
+
+/// 新建命名空间：`site` 给了就是跨站（页面不在本仓库）。返回更新后的整张表。
+#[tauri::command]
+fn add_namespace(
+    name: String,
+    aliases: Vec<String>,
+    site: Option<String>,
+) -> Result<Vec<Namespace>, String> {
+    let (_, database) = open_database()?;
+    database.add_namespace(&name, aliases, site)
+}
+
+/// 改别名与站点地址（名称与标识不动）
+#[tauri::command]
+fn update_namespace(
+    key: String,
+    aliases: Vec<String>,
+    site: Option<String>,
+) -> Result<Vec<Namespace>, String> {
+    let (_, database) = open_database()?;
+    database.update_namespace(&key, aliases, site)
+}
+
+/// 改名：不动文件，只改表里那一行与标题里的前缀
+#[tauri::command]
+fn rename_namespace(key: String, name: String) -> Result<Vec<Namespace>, String> {
+    let (_, database) = open_database()?;
+    database.rename_namespace(&key, &name)
+}
+
+/// 清空：里面的页面全部移进回收站
+#[tauri::command]
+fn empty_namespace(key: String) -> Result<usize, String> {
+    let (_, database) = open_database()?;
+    database.empty_namespace(&key)
+}
+
+/// 删除：先清空，再从表里去掉
+#[tauri::command]
+fn delete_namespace(key: String) -> Result<usize, String> {
+    let (_, database) = open_database()?;
+    database.delete_namespace(&key)
+}
+
 #[tauri::command]
 fn set_protection(protection: Policy) -> Result<(), String> {
     let (_, database) = open_database()?;
@@ -71,7 +123,8 @@ fn set_protection(protection: Policy) -> Result<(), String> {
 /// 语法有问题时，错误里是一句给人看的话。
 #[tauri::command]
 fn parse_address(input: String) -> Result<Option<ParsedAddress>, String> {
-    address::parse(&input)
+    let (_, database) = open_database()?;
+    address::parse(&input, &database.namespaces())
 }
 
 /// 解析并落到仓库上：这一页在不在、是不是特殊页（`special:random` 会挑一篇落下去）
@@ -223,6 +276,12 @@ pub fn run() {
             protection_report,
             delete_note,
             list_notes,
+            namespaces,
+            add_namespace,
+            update_namespace,
+            rename_namespace,
+            empty_namespace,
+            delete_namespace,
             special_pages,
             render_markdown,
             unlock,

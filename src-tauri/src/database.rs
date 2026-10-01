@@ -3,11 +3,12 @@
 //! ```text
 //! db/
 //!   meta.json      认领标记、版本、建库时间
-//!   titles.json    id → 标题
+//!   titles.json    id → 显示标题
+//!   namespaces.json  命名空间表（标题前缀那张表）
 //!   blobs/ab/<address>
-//!   objects/0/<id>.log
+//!   objects/<命名空间>/<id>.log
 //!   drafts/<id>
-//!   trash/
+//!   trash/<命名空间>/<id>.log
 //!
 //! settings/
 //!   config.json    数据语义设置（目前是封装策略）—— 跟着仓库走
@@ -23,6 +24,7 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 use crate::codec::Policy;
+use crate::namespace::{NamespaceTable, MAIN_ID};
 use crate::notes::Titles;
 use crate::store::BlobStore;
 use crate::workspace::{write_json, Workspace};
@@ -33,10 +35,8 @@ pub const KIND: &str = "refind-note";
 /// 数据模型版本。**改数据格式就要动它**：不兼容的改动升主版本号。
 pub const MODEL_VERSION: &str = "1.0.0";
 
-/// 主命名空间的标识（也是它目录的名字）。
-pub const MAIN_NS: &str = "0";
-
 const META_FILE: &str = "meta.json";
+const NAMESPACES_FILE: &str = "namespaces.json";
 const CONFIG_FILE: &str = "config.json";
 const TITLES_FILE: &str = "titles.json";
 const BLOBS_DIR: &str = "blobs";
@@ -98,6 +98,9 @@ impl Database {
 
         let meta = open_meta(&root)?;
         ensure_json(&root.join(TITLES_FILE), &Titles::default())?;
+        // 命名空间表放在 db/ 而不是 settings/：它决定"一个标题说的是哪一篇"，
+        // 是这批数据的一部分（换台机器读同一份仓库，也得认出同一批标题）
+        ensure_json(&root.join(NAMESPACES_FILE), &NamespaceTable::default())?;
         ensure_json(&settings.join(CONFIG_FILE), &Config::default())?;
 
         let database = Self {
@@ -109,6 +112,15 @@ impl Database {
         Ok(database)
     }
 
+    /// 命名空间表（标题前缀那张表）
+    pub fn namespaces(&self) -> NamespaceTable {
+        crate::workspace::read_json(&self.root.join(NAMESPACES_FILE))
+    }
+
+    pub fn save_namespaces(&self, table: &NamespaceTable) -> Result<(), String> {
+        write_json(&self.root.join(NAMESPACES_FILE), table)
+    }
+
     pub fn meta(&self) -> &Meta {
         &self.meta
     }
@@ -117,19 +129,36 @@ impl Database {
         &self.root
     }
 
-    /// 给主命名空间把两个目录备好：日志一处、已删除日志一处。
+    /// 给每个**可存储**的命名空间把两个目录备好：日志一处、已删除日志一处。
     ///
-    /// 目录按命名空间分（`objects/<标识>/`、`trash/<标识>/`）——现在只有主命名空间。
+    /// 目录按命名空间分（`objects/<标识>/`、`trash/<标识>/`）。
     /// 每次打开都做一遍：目录不在的话，往那里写第一篇时会失败在"路径不存在"上。
     pub fn ensure_namespace_dirs(&self) -> Result<(), String> {
+        for ns in self.namespaces().storable_ids() {
+            self.ensure_namespace_dir(&ns)?;
+        }
+        Ok(())
+    }
+
+    /// 给某一个命名空间把两个目录备好（新建命名空间时补建）
+    pub fn ensure_namespace_dir(&self, ns: &str) -> Result<(), String> {
         for dir in [
-            self.root.join(OBJECTS_DIR).join(MAIN_NS),
-            self.root.join(TRASH_DIR).join(MAIN_NS),
+            self.root.join(OBJECTS_DIR).join(ns),
+            self.root.join(TRASH_DIR).join(ns),
         ] {
             fs::create_dir_all(&dir)
                 .map_err(|error| format!("建不出目录 {}：{error}", dir.display()))?;
         }
         Ok(())
+    }
+
+    /// 表里所有命名空间的标识（备份、遍历用）
+    pub fn namespace_ids(&self) -> Vec<String> {
+        self.namespaces()
+            .items
+            .iter()
+            .map(|item| item.id.clone())
+            .collect()
     }
 
     /// 某个命名空间下的笔记日志
@@ -143,6 +172,11 @@ impl Database {
     /// 某个命名空间下已删除笔记的日志
     pub fn trash_note_path(&self, ns: &str, id: &str) -> PathBuf {
         self.root.join(TRASH_DIR).join(ns).join(format!("{id}.log"))
+    }
+
+    /// 主命名空间的标识（其他地方要它时从这里拿）
+    pub fn main_ns(&self) -> &'static str {
+        MAIN_ID
     }
 
     pub fn blobs(&self) -> BlobStore {

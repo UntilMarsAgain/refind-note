@@ -9,7 +9,8 @@
 
 use serde::Serialize;
 
-use crate::title::{self, SPECIAL_NAMESPACE};
+use crate::namespace::{NamespaceTable, SPECIAL_ID};
+use crate::title;
 
 /// 现有的特殊页面。不在这里面的 `special:` 地址直接报「没有这个特殊页面」。
 pub const SPECIAL_PAGES: [&str; 5] = ["newtab", "settings", "all", "random", "debug"];
@@ -70,7 +71,10 @@ pub struct ParsedAddress {
 }
 
 /// 解析地址栏那一行：空输入不是地址（`None`）；语法有问题时，错误里是一句给人看的话。
-pub fn parse(input: &str) -> Result<Option<ParsedAddress>, String> {
+///
+/// 要那张命名空间表：`帮助:入门` 说的到底是哪个命名空间，是表说了算 ——
+/// 所以"语法"这一层也得看得见它。
+pub fn parse(input: &str, table: &NamespaceTable) -> Result<Option<ParsedAddress>, String> {
     let raw = input.trim();
     if raw.is_empty() {
         return Ok(None);
@@ -83,19 +87,46 @@ pub fn parse(input: &str) -> Result<Option<ParsedAddress>, String> {
     } = split_address(raw);
     let name = title::normalize(&name);
 
-    // 冒号只可能属于命名空间前缀：命中 special 是虚拟命名空间，其余前缀
-    // 不认得就报错 —— **不回退主命名空间**，MediaWiki 那套不同于此。
+    // 冒号只可能属于命名空间前缀。认不出来就报错，**不回退主命名空间** ——
+    // MediaWiki 那套（未知前缀一律当主命名空间的标题）到这里是打错的字，
+    // 静默收下只会让人以为"这篇笔记没了"。
     if let Some((prefix, rest)) = name.split_once(':') {
-        return if prefix.trim().eq_ignore_ascii_case(SPECIAL_NAMESPACE) {
-            special(rest.trim(), section).map(Some)
+        let prefix = prefix.trim();
+        if prefix.is_empty() {
+            return Err(title::reject_namespace(prefix, table));
+        }
+        let Some(found) = table.lookup(prefix) else {
+            return Err(title::reject_namespace(prefix, table));
+        };
+
+        if found.storable {
+            let address = Address {
+                namespace: NamespaceRef {
+                    id: found.id.clone(),
+                    // 回显用**写下来的那个拼写**：用别名访问就用别名还回去
+                    spelling: prefix.to_string(),
+                },
+                page: title::check_page(rest.trim())?,
+                mode: mode_of(state.as_deref().unwrap_or(""))?,
+                section: section.unwrap_or_default(),
+            };
+            let canonical = compose(&address);
+            return Ok(Some(ParsedAddress { address, canonical }));
+        }
+
+        return if found.id == SPECIAL_ID {
+            special(rest.trim(), section, table).map(Some)
         } else {
-            Err(title::reject_namespace(prefix.trim()))
+            Err(format!(
+                "「{}」是跨站命名空间，里面的页面不在本仓库",
+                found.name
+            ))
         };
     }
 
     let address = Address {
         namespace: NamespaceRef {
-            id: String::new(),
+            id: crate::namespace::MAIN_ID.to_string(),
             spelling: String::new(),
         },
         page: title::check_page(&name)?,
@@ -110,7 +141,11 @@ pub fn parse(input: &str) -> Result<Option<ParsedAddress>, String> {
 ///
 /// 特殊页面没有版本、编辑、删除这类状态：`@` 后面写了什么一律裁掉，章节保留 ——
 /// 地址栏回显出来的规范形状（少了那一段）本身就是提示。
-fn special(page: &str, section: Option<String>) -> Result<ParsedAddress, String> {
+fn special(
+    page: &str,
+    section: Option<String>,
+    table: &NamespaceTable,
+) -> Result<ParsedAddress, String> {
     let id = page.to_lowercase();
     if id.is_empty() {
         return Err("special: 后面要写页面名，例如 special:newtab".to_string());
@@ -124,8 +159,8 @@ fn special(page: &str, section: Option<String>) -> Result<ParsedAddress, String>
 
     let address = Address {
         namespace: NamespaceRef {
-            id: SPECIAL_NAMESPACE.to_string(),
-            spelling: title::capitalize_first(SPECIAL_NAMESPACE),
+            id: SPECIAL_ID.to_string(),
+            spelling: title::capitalize_first(&table.name_of(SPECIAL_ID)),
         },
         page: title::capitalize_first(&id),
         mode: Mode::View { reference: None },
@@ -261,9 +296,14 @@ fn split_address(raw: &str) -> AddressParts {
 mod tests {
     use super::*;
 
+    /// 测试用的命名空间表：内建的那三个
+    fn table() -> NamespaceTable {
+        NamespaceTable::builtin()
+    }
+
     /// 解析一个必定是地址的输入
     fn parsed(input: &str) -> ParsedAddress {
-        parse(input)
+        parse(input, &table())
             .unwrap_or_else(|reason| panic!("{input:?} 本该解析成功，却报了：{reason}"))
             .unwrap_or_else(|| panic!("{input:?} 本该是一个地址，却是空输入"))
     }
@@ -275,7 +315,7 @@ mod tests {
 
     /// 取报错理由（成功则 panic）
     fn reason(input: &str) -> String {
-        match parse(input) {
+        match parse(input, &table()) {
             Ok(value) => panic!("{input:?} 本该报错，却解析成了 {value:?}"),
             Err(reason) => reason,
         }
@@ -283,8 +323,8 @@ mod tests {
 
     #[test]
     fn empty_input_is_not_an_address() {
-        assert_eq!(parse(""), Ok(None));
-        assert_eq!(parse("   "), Ok(None));
+        assert_eq!(parse("", &table()), Ok(None));
+        assert_eq!(parse("   ", &table()), Ok(None));
     }
 
     #[test]
@@ -292,7 +332,7 @@ mod tests {
         let it = parsed("示例笔记");
         assert_eq!(it.canonical, "示例笔记");
         assert_eq!(it.address.page, "示例笔记");
-        assert_eq!(it.address.namespace.id, "");
+        assert_eq!(it.address.namespace.id, crate::namespace::MAIN_ID);
         assert_eq!(it.address.namespace.spelling, "");
         assert_eq!(it.address.mode, Mode::View { reference: None });
         assert_eq!(it.address.section, "");
@@ -427,7 +467,7 @@ mod tests {
     fn the_wire_format_matches_the_frontend_mirror() {
         let wire = serde_json::to_value(parsed("示例笔记@view-3#小节")).unwrap();
         assert_eq!(wire["canonical"], "示例笔记@view-3#小节");
-        assert_eq!(wire["address"]["namespace"]["id"], "");
+        assert_eq!(wire["address"]["namespace"]["id"], "0");
         assert_eq!(wire["address"]["namespace"]["spelling"], "");
         assert_eq!(wire["address"]["page"], "示例笔记");
         assert_eq!(wire["address"]["mode"]["kind"], "view");

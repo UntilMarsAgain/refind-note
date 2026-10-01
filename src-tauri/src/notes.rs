@@ -25,7 +25,8 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::codec::{Meta, Policy, Protection, Secrets};
-use crate::database::{now, Database, MAIN_NS};
+use crate::database::{now, Database};
+use crate::namespace::MAIN_ID;
 use crate::session;
 use crate::store::hash_hex;
 use crate::title::LinkResolver;
@@ -204,19 +205,43 @@ impl Database {
     /// 把地址里写的东西规整成**显示标题**。
     ///
     /// 创建、查表、地址解析都过这一道 —— 同一把尺子，所以 `example` 与 `Example`
-    /// 是同一篇。
+    /// 是同一篇；前缀写别名也认，但显示出来的是规范名。
     pub fn display_of(&self, title: &str) -> Result<String, String> {
-        crate::title::parse_main(title)
+        let table = self.namespaces();
+        let parsed = crate::title::parse(title, &table)?;
+        Ok(parsed.display(&table))
+    }
+
+    /// 标题 → 命名空间 + 页面名（创建、查表、渲染都从这里过）
+    pub fn parse_title(&self, title: &str) -> Result<crate::title::ParsedTitle, String> {
+        crate::title::parse(title, &self.namespaces())
+    }
+
+    /// 这篇笔记在哪个命名空间里。
+    ///
+    /// 标识本身不含命名空间，只能从显示标题看出来。查不到就按主命名空间算 ——
+    /// 表被改过、或笔记是从别处搬来的，都不该让整篇读不出来。
+    fn ns_of_id(&self, id: &str) -> String {
+        let Ok(titles) = self.titles() else {
+            return MAIN_ID.to_string();
+        };
+        let Some(display) = titles.notes.get(id).or_else(|| titles.trashed.get(id)) else {
+            return MAIN_ID.to_string();
+        };
+        match crate::title::parse(display, &self.namespaces()) {
+            Ok(parsed) => parsed.ns,
+            Err(_) => MAIN_ID.to_string(),
+        }
     }
 
     /// 一篇笔记的日志路径
     pub fn log_path(&self, id: &str) -> PathBuf {
-        self.note_path(MAIN_NS, id)
+        self.note_path(&self.ns_of_id(id), id)
     }
 
     /// 已删除笔记的日志路径
     pub fn trash_path(&self, id: &str) -> PathBuf {
-        self.trash_note_path(MAIN_NS, id)
+        self.trash_note_path(&self.ns_of_id(id), id)
     }
 
     /// 标题 → id
@@ -224,13 +249,19 @@ impl Database {
     /// 查表前先把名字规整成显示标题：命令也可能被直接调用（前端、脚本），
     /// 与地址解析用同一把尺子才不会出现"建了 example、敲 Example 找不到"。
     pub fn id_of(&self, title: &str) -> Option<String> {
-        let display = self.display_of(title).ok()?;
+        let table = self.namespaces();
+        // 前缀写的是别名也认：比的是**解析出来的**（命名空间, 页面名），不是字面
+        let wanted = crate::title::parse(title, &table).ok()?;
 
         self.titles()
             .ok()?
             .notes
             .iter()
-            .find(|(_, name)| name.as_str() == display)
+            .find(|(_, display)| {
+                crate::title::parse(display, &table)
+                    .map(|parsed| parsed.ns == wanted.ns && parsed.page == wanted.page)
+                    .unwrap_or(false)
+            })
             .map(|(id, _)| id.clone())
     }
 
@@ -267,9 +298,9 @@ impl Database {
         Ok(events)
     }
 
-    fn append(&self, ns: &str, id: &str, event: &Event) -> Result<(), String> {
+    fn append(&self, id: &str, event: &Event) -> Result<(), String> {
         let line = serde_json::to_string(event).map_err(|error| format!("写不进日志：{error}"))?;
-        append_line(&self.note_path(ns, id), &line)
+        append_line(&self.log_path(id), &line)
     }
 
     pub(crate) fn state_of(&self, id: &str) -> Result<NoteState, String> {
@@ -281,22 +312,26 @@ impl Database {
     /// 名字与地址解析走同一套规整与词法检查：存进去的必须是**能被解析回来**的形状，
     /// 否则就成了"建得出来、却打不开"的笔记。
     pub fn create(&self, title: &str) -> Result<String, String> {
-        let display = self.display_of(title)?;
+        let table = self.namespaces();
+        let parsed = crate::title::parse(title, &table)?;
+        let display = parsed.display(&table);
+
         let mut titles = self.titles()?;
-        if titles.notes.values().any(|name| name == &display) {
+        if self.exists(&display) {
             return Err(format!("已经有一篇叫「{display}」的笔记"));
         }
 
+        // 命名空间是刚建的、或目录被人删了：写之前先把目录备好
+        self.ensure_namespace_dir(&parsed.ns)?;
+
         let id = next_id(&titles);
-        self.append(
-            MAIN_NS,
-            &id,
-            &Event::Meta {
-                at: now(),
-                ns: MAIN_NS.to_string(),
-                title: display.clone(),
-            },
-        )?;
+        let line = serde_json::to_string(&Event::Meta {
+            at: now(),
+            ns: parsed.ns.clone(),
+            title: display.clone(),
+        })
+        .map_err(|error| format!("写不进日志：{error}"))?;
+        append_line(&self.note_path(&parsed.ns, &id), &line)?;
 
         titles.notes.insert(id, display.clone());
         self.save_titles(&titles)?;
@@ -379,7 +414,6 @@ impl Database {
         }
 
         self.append(
-            MAIN_NS,
             &id,
             &Event::Rev {
                 at: now(),
@@ -434,7 +468,6 @@ impl Database {
         let new_rev = state.rev + 1;
 
         self.append(
-            MAIN_NS,
             &id,
             &Event::Rev {
                 at: now(),
@@ -634,13 +667,24 @@ impl Database {
     /// 阅读页与编辑器预览都走这里：**渲染只有一处**，所以"预览里是什么样"
     /// 与"存下来再读是什么样"不会分家。
     pub fn render_html(&self, markdown: &str, title: &str) -> Result<String, String> {
-        let resolver = LinkResolver::new(self.link_keys()?, Some(title.to_string()));
+        let table = Arc::new(self.namespaces());
+        // 当前笔记：`[[/子页]]` 要拼在它的页面名后面，命名空间不变
+        let from = crate::title::parse(title, &table).ok();
+        let resolver = LinkResolver::new(self.link_keys()?, table, from);
         Ok(crate::markdown::render_with(markdown, Some(&resolver)))
     }
 
-    /// 现有笔记的页面名集合（链接解析用它判红 / 蓝链）
+    /// 现有笔记的**规范键**集合（链接解析用它判红 / 蓝链）
     fn link_keys(&self) -> Result<Arc<HashSet<String>>, String> {
-        Ok(Arc::new(self.titles()?.notes.values().cloned().collect()))
+        let table = self.namespaces();
+        Ok(Arc::new(
+            self.titles()?
+                .notes
+                .values()
+                .filter_map(|display| crate::title::parse(display, &table).ok())
+                .map(|parsed| parsed.key())
+                .collect(),
+        ))
     }
 
     /// 这一篇的全部提交，**新的在前**。
@@ -981,16 +1025,8 @@ mod tests {
         session::forget_all();
 
         // 该在的东西第一次打开就该在：主命名空间的日志目录与回收站目录
-        assert!(database
-            .root()
-            .join("objects")
-            .join(crate::database::MAIN_NS)
-            .is_dir());
-        assert!(database
-            .root()
-            .join("trash")
-            .join(crate::database::MAIN_NS)
-            .is_dir());
+        assert!(database.root().join("objects").join("0").is_dir());
+        assert!(database.root().join("trash").join("0").is_dir());
 
         cleanup(&database);
     }
@@ -1013,7 +1049,7 @@ mod tests {
             "my new note",
             "  My   new  note  ",
         ] {
-            let parsed = crate::address::parse(input)
+            let parsed = crate::address::parse(input, &database.namespaces())
                 .unwrap_or_else(|reason| panic!("{input:?} 本该解析成功：{reason}"))
                 .unwrap_or_else(|| panic!("{input:?} 不是空输入，应当是一个地址"));
 

@@ -6,7 +6,10 @@
  * （那边有一条线格式测试钉住形状，改错会先炸）。
  */
 
-/** 命名空间：`id` 是它的身份，`spelling` 是回显时用的拼写（主命名空间两者都是空串） */
+/**
+ * 命名空间：`id` 是它的身份（主命名空间是 `0`），`spelling` 是回显时用的拼写 ——
+ * 用别名访问时保留别名，空串 = 主命名空间（没有前缀）
+ */
 export interface NamespaceRef {
     id: string;
     spelling: string;
