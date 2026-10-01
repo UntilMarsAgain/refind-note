@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="重逢 refind">
+  <!-- 只有形本身，没有底块：底块会把「形」变成背景色（见 Git 历史里的说明） -->
+  <path
+    d="M76 93H52A17 17 0 0 1 35 76V52A17 17 0 0 1 52 35h24A17 17 0 0 1 93 52v24"
+    fill="none"
+    stroke="#201c1c"
+    stroke-width="9"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M56.5 47h15a4.5 4.5 0 0 1 4.5 4.5v29L64 72.8 52 80.5v-29A4.5 4.5 0 0 1 56.5 47Z"
+    fill="#201c1c"
+    stroke="#201c1c"
+    stroke-width="2.5"
+    stroke-linejoin="round"
+  />
+</svg>

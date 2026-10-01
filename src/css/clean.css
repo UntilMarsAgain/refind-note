@@ -1,0 +1,84 @@
+/* ============ 全局重置 ============ */
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    font: inherit;
+    color: inherit;
+    background: transparent;
+}
+
+html,
+body {
+    height: 100%;
+    width: 100%;
+    overflow: hidden; /* 自绘标题栏的桌面应用通常不需要页面滚动条 */
+}
+
+body {
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+}
+
+/* 列表去掉默认符号 */
+ul,
+ol {
+    list-style: none;
+}
+
+/* 链接去掉下划线，颜色继承 */
+a {
+    text-decoration: none;
+    color: inherit;
+}
+
+/* 图片、视频等块级化，避免底部空隙 */
+img,
+picture,
+video,
+canvas,
+svg {
+    display: block;
+    max-width: 100%;
+}
+
+/* 表单控件继承字体 */
+input,
+button,
+textarea,
+select {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: none;
+    outline: none;
+}
+
+/* 按钮去掉默认手型以外的样式 */
+button {
+    cursor: pointer;
+    -webkit-app-region: no-drag;
+}
+
+/* 表格边框合并 */
+table {
+    border-collapse: collapse;
+    border-spacing: 0;
+}
+
+/* 隐藏 details 的默认三角标记 */
+summary {
+    cursor: pointer;
+    list-style: none;
+}
+summary::-webkit-details-marker {
+    display: none;
+}

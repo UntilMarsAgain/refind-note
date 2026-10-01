@@ -1,0 +1,64 @@
+/* 全局设置（默认深色） */
+:root {
+
+    /*==== 颜色定义 ====*/
+
+    --accent: #5b8dd6;
+    --accent-soft: #a8c6ef;
+    /* 主题色的低透明度版本：给"底色淡染"用（主题色本身不透明，直接当底色会与文字撞） */
+    --accent-tint: rgba(91, 141, 214, 0.16);
+    /* 主题色的**不透明**版本：浮层要完全遮住底下的文字，半透明的 tint 会让正文透上来 */
+    --accent-solid: #263346;
+
+    /* 文本与背景 */
+    --bg: #000201;
+    --danger: #e2645c;
+    --text: #e8e8e8;
+    --text-dim: #a8a2a2;
+
+    /* 按钮 */
+    --hover: rgba(255, 255, 255, 0.12);
+    --press: rgba(255, 255, 255, 0.2);
+
+    /* 卡片 / 浮层的底色：抬起来一层 */
+    --surface: #171a1e;
+    --border: rgba(255, 255, 255, 0.14);
+    --divider: rgba(255, 255, 255, 0.3);
+    --field-bg: rgba(0, 0, 0, 0.45);
+
+
+    /* 标题栏高度 */
+    --titlebar-height: 40px;
+
+    /* 覆盖浏览器模式 */
+    color-scheme: dark;
+
+    /* 等宽字体栈：行内代码与锚点标签用；与主题无关，浅色下沿用同一份 */
+    --mono-font: "JetBrains Mono", "Cascadia Code", "Noto Sans Mono CJK SC",
+    ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+    font-family: "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei",
+    Inter, system-ui, -apple-system, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--text);
+    background-color: var(--bg);
+
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+:root[data-theme="light"] {
+    --bg: #f7f5f4;
+    --danger: #b02a2a;
+    --text: #201c1c;
+    --text-dim: #6d6464;
+    --hover: rgba(0, 0, 0, 0.06);
+    --press: rgba(0, 0, 0, 0.12);
+    --surface: #ffffff;
+    --border: rgba(0, 0, 0, 0.14);
+    --divider: rgba(0, 0, 0, 0.22);
+    --field-bg: rgba(0, 0, 0, 0.05);
+    color-scheme: light;
+}
