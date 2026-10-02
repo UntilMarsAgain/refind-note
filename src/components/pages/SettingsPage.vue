@@ -826,14 +826,6 @@ watch(
       <button class="row__go" type="button" @click="generateSyncKey">
         {{ sync.has_key ? "换一把新密钥" : "生成密钥" }}
       </button>
-      <label v-if="sync.has_key" class="row__check">
-        <span>算法</span>
-        <select class="row__text" :value="sync.cipher" @change="setSyncCipher">
-          <option v-for="(note, name) in CIPHER_NOTES" :key="name" :value="name">
-            {{ name }}（{{ note }}）
-          </option>
-        </select>
-      </label>
       <button v-if="sync.has_key" class="row__go" type="button" @click="exportKey">导出到文件…</button>
       <button
         v-if="sync.has_key"
@@ -844,6 +836,26 @@ watch(
       >
         复制到剪贴板
       </button>
+    </div>
+
+    <div id="sync-cipher" class="row" :class="{ 'row--target': isFocused('sync-cipher') }">
+      <span class="row__label">云端算法</span>
+      <code class="row__id">#sync-cipher</code>
+      <select
+        class="row__text"
+        :value="sync.cipher"
+        :disabled="!sync.has_key"
+        @change="setSyncCipher"
+      >
+        <option v-for="(note, name) in CIPHER_NOTES" :key="name" :value="name">
+          {{ name }}（{{ note }}）
+        </option>
+      </select>
+      <span class="row__hint">
+        {{ sync.has_key
+          ? "云端那一层用哪一档。只影响往后新传的：已经传上去的仍按各自头里记的那一档解。"
+          : "先在上面生成或粘一把密钥，再来选这一档。" }}
+      </span>
     </div>
 
     <div class="row">
