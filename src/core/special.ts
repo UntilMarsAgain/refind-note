@@ -30,6 +30,13 @@ export interface SpecialPageMeta {
     tip: string;
     /** 菜单里的图标；没登记的可以不给 */
     icon?: Component;
+    /**
+     * 菜单右侧那排小方键（`["Alt", "G"]`）。
+     *
+     * 只负责**显示**已有的快捷键；程序里还没配快捷键的条目就别填 ——
+     * 菜单上写着按不出来，比不写更糟。
+     */
+    shortcut?: string[];
     /** 菜单里的分组 */
     group: string;
 }

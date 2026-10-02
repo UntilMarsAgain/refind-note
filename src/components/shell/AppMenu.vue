@@ -92,7 +92,10 @@ function measureLeft() {
 /** 位置与宽度都跟着左边距走，窄窗口下也不会顶出屏幕 */
 const panelStyle = computed(() => ({
   left: `${panelLeft.value}px`,
-  width: `min(520px, calc(100vw - ${panelLeft.value + 16}px))`,
+  // 宽一点：分组是**并排的几列**，挤在一起就退化成一张两行的表（不好看也不好扫）。
+  // 820 是"四列各自放得下、且不至于把整页盖住"的宽度；窗口窄了就按比例缩，
+  // 缩到放不下时列数自然减少（grid 那条 auto-fit 管这个）。
+  width: `min(820px, calc(100vw - ${panelLeft.value + 16}px))`,
 }));
 
 // 每次展开都重新量一次：展开与收起两档宽度不同，上次的数字不能留用
@@ -148,8 +151,8 @@ const groups = computed(() =>
               :title="page.display"
               @click="openHelp($event, page)"
             >
-              <BookOpen :size="16" :stroke-width="1.75" />
-              <span>{{ page.slug }}</span>
+              <BookOpen class="menu__icon" :size="18" :stroke-width="1.6" />
+              <span class="menu__label">{{ page.slug }}</span>
             </button>
           </nav>
 
@@ -167,10 +170,17 @@ const groups = computed(() =>
               <component
                 :is="metaOf(page).icon"
                 v-if="metaOf(page).icon"
-                :size="16"
-                :stroke-width="1.75"
+                class="menu__icon"
+                :size="18"
+                :stroke-width="1.6"
               />
-              <span>{{ metaOf(page).label }}</span>
+              <span class="menu__label">{{ metaOf(page).label }}</span>
+              <!-- 快捷键提示：登记了才显示（现在还没有，见 `special.ts`） -->
+              <span v-if="metaOf(page).shortcut?.length" class="menu__keys">
+                <kbd v-for="key in metaOf(page).shortcut" :key="key" class="menu__key">
+                  {{ key }}
+                </kbd>
+              </span>
             </button>
           </nav>
         </div>
@@ -229,46 +239,52 @@ const groups = computed(() =>
   top: var(--titlebar-height);
   max-height: calc(100vh - var(--titlebar-height) - 12px);
   overflow-y: auto;
-  padding: 14px 20px 20px;
+  padding: 20px 22px 24px;
   border: 1px solid var(--border);
   border-top: 0;
-  border-radius: 0 0 10px 0;
+  border-radius: 0 0 12px 0;
   background: var(--bg);
-  box-shadow: 0 18px 40px rgb(0 0 0 / 45%);
+  box-shadow: 0 22px 48px rgb(0 0 0 / 48%);
 }
 
+/* 顶上一行站点名，下面一条通到底的细线，再往下才是那几列 */
 .menu__head {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  margin-bottom: 16px;
+  gap: 12px;
+  padding-bottom: 16px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
 }
 
 .menu__logo {
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   -webkit-user-drag: none;
 }
 
 .menu__title {
-  font-size: 20px;
-  font-weight: 500;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 .menu__columns {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 14px 24px;
+  /* 分组是**并排的列**（不是一张表）：一行摆得下就一行 */
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: 20px 20px;
+  align-items: start;
 }
 
 .menu__group-title {
-  margin: 0 0 8px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--border);
+  margin: 0 0 4px;
+  /* 与条目的图标对齐：条目自己带 10px 左内边距 */
+  padding: 0 10px;
   color: var(--text-dim);
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 12.5px;
+  font-weight: 400;
 }
 
 .menu__item {
@@ -276,17 +292,46 @@ const groups = computed(() =>
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 7px 8px;
+  padding: 9px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 8px;
   background-color: transparent;
   color: var(--text);
-  font-size: 14px;
+  font-size: 14.5px;
   text-align: left;
   cursor: pointer;
 }
 
 .menu__item:hover {
   background-color: var(--hover);
+}
+
+.menu__icon {
+  flex: 0 0 auto;
+}
+
+.menu__label {
+  flex: 1;
+  /* 菜单项一律一行：地方不够就挤一挤，宁可缩写也不要竖着排 */
+  white-space: nowrap;
+}
+
+/* 右侧那排小方键（照参考图）：只有登记了快捷键的条目才有 */
+.menu__keys {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.menu__key {
+  min-width: 22px;
+  padding: 2px 5px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--field-bg);
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 11px;
+  text-align: center;
 }
 </style>
