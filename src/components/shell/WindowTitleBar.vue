@@ -1,11 +1,5 @@
 <script setup lang="ts">
-import {
-  computed,
-  onMounted,
-  onUnmounted,
-  ref,
-  type Component,
-} from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import {
   ArrowLeft,
   ArrowRight,
@@ -14,10 +8,7 @@ import {
   House,
   Menu,
   Minus,
-  Monitor,
-  Moon,
   Square,
-  Sun,
   X,
 } from "@lucide/vue";
 import { logoSrc } from "../../core/theme.ts";
@@ -25,8 +16,6 @@ import { syncAvailable, syncBusy, syncNow, syncProgress } from "../../core/sync.
 import { describeReport } from "../../ipc/sync.ts";
 import { flash } from "../../core/notice.ts";
 import { currentWindow } from "../../core/window-api.ts";
-import type { ThemeMode } from "../../ipc/settings.ts";
-import { preferences } from "../../core/preferences.ts";
 
 /**
  * 自绘标题栏。
@@ -38,7 +27,7 @@ import { preferences } from "../../core/preferences.ts";
 const props = defineProps<{
   /** 规范地址（当前标签页解析结果里那一份）。失焦 / Esc 以它回显 */
   committed: string;
-  /** 启动跑完了没有：没跑完之前不显示地址栏、菜单与主题按钮（那时界面还不是真东西） */
+  /** 启动跑完了没有：没跑完之前不显示地址栏与菜单（那时界面还不是真东西） */
   ready?: boolean;
   canBack?: boolean;
   canForward?: boolean;
@@ -52,8 +41,6 @@ const emit = defineEmits<{
   /** 回新标签页：从哪儿都回得去的那一个地方 */
   (e: "home"): void;
   (e: "menu"): void;
-  /** 换到下一个深浅色；具体怎么换由上层决定 */
-  (e: "theme"): void;
   /** 用户按下回车：交给持有标签页的一方去解析、导航 */
   (e: "submit", value: string): void;
 }>();
@@ -73,15 +60,6 @@ onMounted(async () => {
   });
 });
 onUnmounted(() => unlistenResized?.());
-
-/** 循环切换按钮显示当前模式，点一下换到下一个 */
-const themeIcons: Record<ThemeMode, Component> = {
-  system: Monitor,
-  light: Sun,
-  dark: Moon,
-};
-
-const themeIcon = computed(() => themeIcons[preferences.value.theme] ?? Monitor);
 
 /** 同步按钮上那句话：正在跑就报走到哪儿了，没跑就说"立即同步" */
 const syncTitle = computed(() => {
@@ -210,16 +188,6 @@ function onBlur() {
     </div>
     <div v-else class="titlebar__center"/>
 
-    <button
-        v-if="ready !== false"
-        class="tbtn tbtn--theme"
-        type="button"
-        aria-label="切换主题"
-        @click="emit('theme')"
-    >
-      <component :is="themeIcon" :size="16" :stroke-width="1.75"/>
-    </button>
-
     <div class="titlebar__controls">
       <button
           class="wbtn"
@@ -333,6 +301,13 @@ function onBlur() {
   align-self: stretch;
 }
 
+/* 直接挂在标题栏上的那颗按钮（同步）：与窗口按钮之间留一条缝 ——
+   紧挨着最小化，容易被当成"又一个窗口按钮"。
+   （原先这条缝挂在主题按钮上，那颗挪去悬浮工具了） */
+.titlebar > .tbtn {
+  margin-right: 6px;
+}
+
 .tbtn {
   appearance: none;
   display: inline-flex;
@@ -375,12 +350,6 @@ function onBlur() {
   .tbtn--spinning {
     animation: none;
   }
-}
-
-/* 循环切换按钮紧挨着窗口按钮，但要留一条缝，
-   免得被误认成最小化/最大化那一组 */
-.tbtn--theme {
-  margin-right: 6px;
 }
 
 .wbtn {

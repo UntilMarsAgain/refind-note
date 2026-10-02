@@ -494,7 +494,6 @@ async function interceptClose() {
         @forward="goForward"
         @home="openHome"
         @menu="onMenu"
-        @theme="cycleTheme"
         @submit="onSubmit"
     />
 
