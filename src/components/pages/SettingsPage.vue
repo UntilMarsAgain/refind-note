@@ -212,6 +212,7 @@ function setEncrypt(value: string | null) {
 const sync = ref<SyncSettings>({
   enabled: false,
   encrypt: false,
+  cipher: "aes-256-gcm",
   has_key: false,
   has_secret: false,
   endpoint: "",
@@ -244,6 +245,7 @@ async function saveSync() {
   const patch: SyncSettingsPatch = {
     enabled: sync.value.enabled,
     encrypt: sync.value.encrypt,
+    cipher: sync.value.cipher,
     endpoint: sync.value.endpoint,
     region: sync.value.region,
     bucket: sync.value.bucket,
@@ -282,6 +284,17 @@ async function syncNow(force = false) {
   } catch (error) {
     syncProblem.value = String(error);
   }
+}
+
+/**
+ * 换云端那一层的算法。
+ *
+ * 存下去就走（不等着点"立即同步"）：这一栏只影响**往后新传的**东西，
+ * 已经传上去的照旧解得开，所以不必重传。
+ */
+async function setSyncCipher(event: Event) {
+  sync.value.cipher = (event.target as HTMLSelectElement).value as Cipher;
+  await saveSync();
 }
 
 /** 改过连接信息还没同步过（提示一句"先同步一次看看"） */
@@ -813,6 +826,14 @@ watch(
       <button class="row__go" type="button" @click="generateSyncKey">
         {{ sync.has_key ? "换一把新密钥" : "生成密钥" }}
       </button>
+      <label v-if="sync.has_key" class="row__check">
+        <span>算法</span>
+        <select class="row__text" :value="sync.cipher" @change="setSyncCipher">
+          <option v-for="(note, name) in CIPHER_NOTES" :key="name" :value="name">
+            {{ name }}（{{ note }}）
+          </option>
+        </select>
+      </label>
       <button v-if="sync.has_key" class="row__go" type="button" @click="exportKey">导出到文件…</button>
       <button
         v-if="sync.has_key"
@@ -845,7 +866,8 @@ watch(
       显示出来就不只是"碰到电脑才能偷"了：直播、共享屏幕、随手截个图都可能把它带出去。
       要带到别的机器上，用「导出到文件」（那份文件就是钥匙本身，别放进会被同步的目录），
       或者「复制到剪贴板」直接粘过去 —— 剪贴板是公开的，粘完记得清掉。
-      换一把密钥意味着云端那些旧密文解不开了，所以<strong>下一次同步会把本机这份整份重传</strong>。
+      换一把密钥意味着云端那些旧密文解不开了，所以<strong>下一次同步会把本机这份整份重传</strong>；
+      换算法不用：每一份封装的头里记着自己那一档，<strong>只有往后新传的</strong>才用新选的。
       这一层防的是存储服务与捡到那个桶的人；笔记自身那几层（GPG / 口令）防的是拿到你这台
       机器的人，两件事各管各的。
     </p>

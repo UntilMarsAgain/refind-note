@@ -104,6 +104,13 @@ pub struct SyncSettings {
     pub enabled: bool,
     /// 传上去之前要不要再套一层（钥匙就是下面这一把）
     pub encrypt: bool,
+    /// 这一层用哪一档对称加密（与笔记那边同一个枚举）。
+    ///
+    /// 与钥匙分开：**钥匙不必跟着换**。SM4 的密钥是 128 位，从这把 32 字节的钥匙里
+    /// 取前 16 字节（见 `CloudCipher`），所以换算法只用改这一栏。
+    /// 已经传上去的东西也不受影响 —— 每一份封装的头里记着自己那一档（见 `CloudEnvelope`），
+    /// 解得开旧的就还是解得开，只有**往后新传的**才用新选的。
+    pub cipher: crate::storage::codec::Cipher,
     /// 下一次同步**把本机这份整份重传**（换了钥匙就得这样：云端那些旧密文已经解不开了）。
     /// 跑完这一趟就自动清掉。
     #[serde(default)]
@@ -122,9 +129,9 @@ impl SyncSettings {
         self.enabled && self.s3.is_usable()
     }
 
-    /// 这一份设置里那把钥匙（认得出才给）
+    /// 这一份设置里那把钥匙 + 选的那一档算法（认得出才给）
     pub fn cipher(&self) -> Result<CloudCipher, String> {
-        CloudCipher::from_key(&self.key)
+        CloudCipher::from_key(&self.key).map(|cipher| cipher.with_cipher(self.cipher))
     }
 }
 
@@ -136,6 +143,8 @@ impl SyncSettings {
 pub struct SyncSettingsView {
     pub enabled: bool,
     pub encrypt: bool,
+    /// 云端那一层用哪一档（不是秘密，界面要能显示与修改）
+    pub cipher: crate::storage::codec::Cipher,
     /// 云端密钥配好了没有（**钥匙本身不出去**）
     pub has_key: bool,
     /// S3 私钥配好了没有
@@ -153,6 +162,7 @@ impl SyncSettings {
         SyncSettingsView {
             enabled: self.enabled,
             encrypt: self.encrypt,
+            cipher: self.cipher,
             has_key: !self.key.is_empty(),
             has_secret: !self.s3.secret_key.is_empty(),
             endpoint: self.s3.endpoint.clone(),
@@ -167,6 +177,7 @@ impl SyncSettings {
     pub fn apply(&mut self, patch: SyncSettingsPatch) {
         self.enabled = patch.enabled;
         self.encrypt = patch.encrypt;
+        self.cipher = patch.cipher;
         self.s3.endpoint = patch.endpoint;
         self.s3.region = patch.region;
         self.s3.bucket = patch.bucket;
@@ -184,6 +195,7 @@ impl SyncSettings {
 pub struct SyncSettingsPatch {
     pub enabled: bool,
     pub encrypt: bool,
+    pub cipher: crate::storage::codec::Cipher,
     pub endpoint: String,
     pub region: String,
     pub bucket: String,
@@ -265,7 +277,8 @@ impl CloudCipher {
         bytes.copy_from_slice(&raw);
         Ok(Self {
             key: bytes,
-            // 用仓库默认那一档（与笔记那边一致：选了国密就都是国密）
+            // 一开始按默认那一档；真正用哪一档由调用方说了算
+            // （同步那边是 `SyncSettings::cipher` 里的设置，见 `with_cipher`）
             cipher: crate::storage::codec::Cipher::default(),
         })
     }
@@ -1097,6 +1110,7 @@ mod tests {
         let settings = SyncSettings {
             enabled: true,
             encrypt: true,
+            cipher: crate::storage::codec::Cipher::Aes256Gcm,
             reupload: false,
             key: "SUPER-SECRET-CLOUD-KEY".to_string(),
             s3: S3Config {
@@ -1118,6 +1132,7 @@ mod tests {
         target.apply(SyncSettingsPatch {
             enabled: false,
             encrypt: true,
+            cipher: crate::storage::codec::Cipher::Aes256Gcm,
             endpoint: "https://other".to_string(),
             ..Default::default()
         });
@@ -1559,6 +1574,7 @@ mod end_to_end {
         SyncSettings {
             enabled: true,
             encrypt: true,
+            cipher: crate::storage::codec::Cipher::Aes256Gcm,
             reupload: false,
             key: key.to_string(),
             s3: S3Config {
@@ -1709,6 +1725,44 @@ mod end_to_end {
         };
         let (decision, _) = decide(false, Some(&here), Some(&there), Some(&stamp));
         assert_eq!(decision, Decision::Nothing, "只差大小写不算云端变了");
+    }
+
+    /// 云端那一层认设置里的算法：选了国密，传上去的就是国密的封装
+    ///
+    /// 顺带钉住一件要紧的事：**换算法不必换钥匙、也不必重传** ——
+    /// 每一份封装的头里记着自己那一档，换回 AES 之后老对象照旧解得开。
+    #[test]
+    fn the_cloud_layer_uses_the_chosen_cipher() {
+        let (address, bucket) = start_fake_s3();
+        let key = generate_key().unwrap();
+
+        let first = workspace("cipher-sm4");
+        std::fs::write(first.root().join("db/objects/0/1.log"), "{\"rev\":1}\n".as_bytes())
+            .unwrap();
+
+        let mut settings = settings_for(&address, &key);
+        settings.cipher = crate::storage::codec::Cipher::Sm4Gcm;
+        assert_eq!(settings.view().cipher, crate::storage::codec::Cipher::Sm4Gcm);
+        run(&first, &settings, &|_| {}, false).unwrap();
+
+        // 云端那份的封装头上记着用的是哪一档（magic(4) + 版本(1) + 算法(1)，见 CloudEnvelope）
+        let stored = bucket.lock().unwrap()["notes/db/objects/0/1.log"].0.clone();
+        assert_eq!(&stored[..4], b"RNDS", "应当是封装过的");
+        assert_eq!(stored[5], 2, "算法那一字节：2 = 国密 SM4");
+
+        // 换台机器、换回 AES：老那份（国密的）照旧解得开
+        let second = workspace("cipher-aes");
+        let mut settings = settings_for(&address, &key);
+        settings.cipher = crate::storage::codec::Cipher::Aes256Gcm;
+        let report = run(&second, &settings, &|_| {}, false).unwrap();
+        assert_eq!(report.downloaded, 1, "该把那一份拿回来：{report:?}");
+        assert_eq!(
+            std::fs::read_to_string(second.root().join("db/objects/0/1.log")).unwrap(),
+            "{\"rev\":1}\n"
+        );
+
+        let _ = std::fs::remove_dir_all(first.root());
+        let _ = std::fs::remove_dir_all(second.root());
     }
 
     /// 云端那把锁还热着：普通同步让你等着，**强制同步**现在就抢过来。

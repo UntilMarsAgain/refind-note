@@ -6,6 +6,8 @@
  * 工作目录那一层回答（`storage/workspace.rs` 的 `is_synced`）。
  */
 
+import type { Cipher } from "./note.ts";
+
 /** S3 那一头的连接信息（与 Rust 侧的 `S3Config` 对应） */
 export interface S3Config {
     /** 服务地址，形如 `https://s3.example.com`（不带桶名） */
@@ -30,6 +32,13 @@ export interface SyncSettings {
     enabled: boolean;
     /** 传上去之前要不要再套一层 */
     encrypt: boolean;
+    /**
+     * 云端这一层用哪一档对称加密。
+     *
+     * 换算法**不必换钥匙**（SM4 从同一把钥匙里取前 16 字节），也不必重传 ——
+     * 每一份封装的头里记着自己那一档，只有往后新传的才用新选的。
+     */
+    cipher: Cipher;
     /** 云端密钥配好了没有（**钥匙本身不在这份数据里**） */
     has_key: boolean;
     /** S3 私钥配好了没有 */
@@ -45,6 +54,7 @@ export interface SyncSettings {
 export interface SyncSettingsPatch {
     enabled: boolean;
     encrypt: boolean;
+    cipher: Cipher;
     endpoint: string;
     region: string;
     bucket: string;
