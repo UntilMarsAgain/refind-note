@@ -36,7 +36,12 @@ static STAMP_FORMAT: LazyLock<Vec<BorrowedFormatItem<'static>>> = LazyLock::new(
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct S3Config {
-    /// 服务地址，形如 `https://s3.example.com`（**不带**桶名）
+    /// 服务地址。**两种写法都认**：
+    ///
+    /// - 不带桶名（`https://s3.example.com`）—— 桶名由程序补进路径；
+    /// - 带桶名（`https://桶名.s3.example.com`）—— 有些服务（如缤纷云）给的端点
+    ///   本来就长这样，这时程序不再补，否则桶名会被当成键的一部分：
+    ///   上传看着成功，列举却永远列不到东西。
     pub endpoint: String,
     /// 区域。多数兼容服务不校验，缺省 `us-east-1`
     pub region: String,
@@ -260,6 +265,31 @@ impl S3 {
     ///
     /// `query` 传的是**已经编码并排好序**的形式（`a=1&b=2`），`key` 是桶里的键
     /// （空串表示操作桶本身，列清单就是这样）。
+    /// URL 里那一段路径：`/桶名/键` 还是 `/键`。
+    ///
+    /// **两种写法服务端都可能有，认错了后果很重**：
+    ///
+    /// - 桶名在域名里（`https://桶名.s3.某云.net`，virtual-host）—— 服务端从域名取桶，
+    ///   整条路径都当**键**。这时再补一段桶名，东西就存成 `桶名/db/…`：上传看着成功
+    ///   （PUT 与 HEAD 走同一条路，自洽），可**列举**——列举也走这条路——多半列不到，
+    ///   于是"云端一片空白"被读成"云端删过"，接着把本地的删掉。丢文件就是从这儿开始的。
+    /// - 桶名在路径里（`https://s3.example.com/桶名/键`，path-style）—— 域名里没有桶，
+    ///   路径必须补上那一段。
+    ///
+    /// 判据就一条：**域名的第一段是不是桶名**。是，就按域名里的桶来（不再补）；
+    /// 不是（`127.0.0.1:9000`、`s3.example.com` 这种），才补。
+    fn path_of(&self, key: &str) -> String {
+        let bucket = self.config.bucket.trim();
+        let first_label = host_of(&self.config.endpoint);
+        let first_label = first_label.split('.').next().unwrap_or_default().to_string();
+
+        if !bucket.is_empty() && first_label == bucket {
+            format!("/{}", encode_path(key))
+        } else {
+            format!("/{}/{}", bucket, encode_path(key))
+        }
+    }
+
     fn prepare(
         &self,
         method: &str,
@@ -269,7 +299,7 @@ impl S3 {
         body: Option<&[u8]>,
     ) -> Prepared {
         let host = host_of(&self.config.endpoint);
-        let path = format!("/{}/{}", self.config.bucket, encode_path(key));
+        let path = self.path_of(key);
         let url = format!(
             "{}{}?{}",
             self.config.endpoint.trim_end_matches('/'),
@@ -583,6 +613,35 @@ fn unescape_xml(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 端点里**带了桶名**时，URL 里不该再补一段。
+    ///
+    /// 这一条是从真事上来的：补了那一段，东西就存成 `桶名/db/…`
+    /// （上传 PUT 与 HEAD 走同一条路，自洽，看着像成功了），而列举——列举也走这条路——
+    /// 永远列不到那些键。接着"云端一片空白"被读成"云端删过"，把本机的东西删了。
+    #[test]
+    fn a_bucket_in_the_hostname_is_not_repeated_in_the_path() {
+        let with_bucket = S3Config {
+            endpoint: "https://uma-refind.s3.bitiful.net".to_string(),
+            bucket: "uma-refind".to_string(),
+            access_key: "AK".to_string(),
+            secret_key: "SK".to_string(),
+            ..Default::default()
+        };
+        let client = S3::new(with_bucket).unwrap();
+        assert_eq!(client.path_of("db/meta.json"), "/db/meta.json");
+        assert_eq!(client.path_of(""), "/", "列举就去桶根上列");
+
+        // 域名里没有桶（自建的 MinIO、AWS 的通用端点）→ 照旧把桶名补进路径
+        let plain = S3Config {
+            endpoint: "http://127.0.0.1:9000".to_string(),
+            bucket: "notes".to_string(),
+            access_key: "AK".to_string(),
+            secret_key: "SK".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(S3::new(plain).unwrap().path_of("db/meta.json"), "/notes/db/meta.json");
+    }
 
     /// 同一个 ETag 的几种写法要读成同一个值 —— 清单走 XML、GET/HEAD 走响应头。
     ///

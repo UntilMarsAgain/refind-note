@@ -754,9 +754,13 @@ watch(
           v-model="sync.endpoint"
           class="row__text"
           type="text"
-          placeholder="https://s3.example.com（不带桶名）"
+          placeholder="https://s3.example.com 或 https://桶名.s3.example.com"
           @change="saveSync()"
       />
+      <span class="row__hint">
+        两种写法都认：服务商给的端点带桶名就照填（如缤纷云），程序不会再补一次；
+        不带桶名的（自建 MinIO 之类）程序自己补。
+      </span>
     </div>
 
     <div id="sync-bucket" class="row" :class="{ 'row--target': isFocused('sync-bucket') }">

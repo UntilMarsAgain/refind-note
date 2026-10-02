@@ -71,6 +71,18 @@ const INDEX_SAVE_EVERY: usize = 25;
 /// 锁放在云端哪个键上（在配置的前缀之下）
 const LOCK_KEY: &str = ".sync-lock.json";
 
+/// 云端那份**账本**：上一次同步跑完时的索引副本（在配置的前缀之下）。
+///
+/// 本地那份记的是"这台机器上次对齐时什么样"，它答不了两件事：
+///
+/// 1. **这台机器是新装的**（本地没有账）—— 那就照云端这份认路，别把云端已有的每一份
+///    都当成"本机新写的"再传一遍（"新仓库盖掉云端"那个老毛病，根子也在这儿）；
+/// 2. **清单里没有某一份**时，它到底是"被别的机器删了"，还是"桶被清空/清单没列全"。
+///    本地账答不了，云端账能：两处都说没有，才是真删了。
+///
+/// 判"删没删"这件事上，**宁可多传一份，也别删人东西** —— 这一份就是那条底线的凭据。
+const LATEST_KEY: &str = ".sync-latest.json";
+
 /// 上传前后给字节过一道的钩子。
 ///
 /// 现在只有"原样"这一种实现，但它把**位置**先留出来：将来要让云端那一份也加密，
@@ -514,6 +526,35 @@ struct Remote {
     modified: i64,
 }
 
+/// 云端那份账对某一条怎么说（判断"云端删没删"的证据）
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum CloudSays {
+    /// 云端压根没有这份账（第一次用、换了桶、账本丢了）—— **没有证据**
+    NoAccount,
+    /// 账上还记着它 —— 清单里没有只是清单的问题
+    Listed,
+    /// 账上也没有它 —— 两处一致，确实是被删了
+    Gone,
+}
+
+/// 判"删没删"要的两处证据
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Evidence {
+    cloud: CloudSays,
+    /// 本机这边**留着删除凭据**吗（笔记的日志进了回收站）
+    trashed: bool,
+}
+
+impl Evidence {
+    /// 什么凭据都没有时的那一份
+    fn none() -> Self {
+        Self {
+            cloud: CloudSays::NoAccount,
+            trashed: false,
+        }
+    }
+}
+
 /// 一个路径该怎么办
 #[derive(Debug, Clone, PartialEq)]
 enum Decision {
@@ -538,6 +579,7 @@ fn decide(
     local: Option<&Local>,
     remote: Option<&Remote>,
     aligned: Option<&Stamp>,
+    evidence: Evidence,
 ) -> (Decision, String) {
     // 换过钥匙的那一趟：本机有的一律重传（云端那些旧密文已经解不开了）
     if force_upload {
@@ -579,12 +621,20 @@ fn decide(
 
         // ---- 只有本机有 ----
         (Some(local), None, aligned) => match aligned {
-            // 上次对齐时云端有它、现在没了 —— 那是别的机器删了。
-            // 但**只有本机这一份没动过**才跟着删：改过的那些是新的，
-            // 传回去（宁可多一份，也别把刚写的东西删掉）
-            Some(stamp) if stamp.hash == local.hash => {
+            // 上次对齐时云端有它、现在清单里没了 —— **先别急着删**。
+            //
+            // "清单里没有"有三种可能：别的机器删了、清单没列全、桶被清空/换了。
+            // 只有**云端那份账也记着它没了**，才是第一种。分不清就别删 ——
+            // "本地新写的东西被当成旧版本删掉"就是这么来的。
+            Some(stamp)
+                if stamp.hash == local.hash && evidence.cloud == CloudSays::Gone =>
+            {
                 (Decision::DeleteLocal, "云端已经删掉".to_string())
             }
+            Some(stamp) if stamp.hash == local.hash => (
+                Decision::Upload,
+                "云端清单里没有它，账上还在 —— 当作没传上去".to_string(),
+            ),
             Some(_) => (Decision::Upload, "云端删过，但本机这份改过".to_string()),
             // 从来没有过：新写的，传上去
             None => (Decision::Upload, String::new()),
@@ -592,8 +642,16 @@ fn decide(
 
         // ---- 只有云端有 ----
         (None, Some(_), aligned) => match aligned {
-            // 上次对齐时本机是有它的 —— 那是本机删了，云端跟着删
-            Some(_) => (Decision::DeleteRemote, "本机已经删掉".to_string()),
+            // 本机删过 —— 但**"本机没有"和"我删的"是两回事**：删除会留下凭据
+            // （笔记的日志进回收站，见 `trashed_at`）。有凭据才替人删云端那份；
+            // 没有就取回来 —— 宁可多一份，也别把云端唯一的那一份抹掉。
+            Some(_) if evidence.trashed => {
+                (Decision::DeleteRemote, "本机已经删掉".to_string())
+            }
+            Some(_) => (
+                Decision::Download,
+                "云端还有这一份、本机没了 —— 取回来（要删它请在本机删）".to_string(),
+            ),
             None => (Decision::Download, String::new()),
         },
 
@@ -641,6 +699,26 @@ pub fn run(
     });
     let lock = acquire(&s3, force)?;
 
+    // ---- 云端那份账本 ----
+    //
+    // 本地这份记的是"**这台机器**上次对齐时什么样"。它要是空的（新装的机器、
+    // 换过桶、被清理过），而云端有一份，那就照云端的认路：不然云端已有的每一份
+    // 都会被当成"本机新写的"再传一遍 —— 那条路上出过"新仓库盖掉云端"的事。
+    let cloud = fetch_latest(&s3);
+    if index.files.is_empty() {
+        if let Some(cloud) = &cloud {
+            if !cloud.files.is_empty() {
+                progress(Progress {
+                    phase: "lock".to_string(),
+                    done: 0,
+                    total: 1,
+                    text: "本机没有账本，照云端的认路…".to_string(),
+                });
+                index = cloud.clone();
+            }
+        }
+    }
+
     // 干活期间续锁 —— 顺便搭在进度回调上，不必另开线程（见 [`LOCK_REFRESH`]）
     let last_touch = Cell::new(Instant::now());
     let beating = |step: Progress| {
@@ -656,6 +734,7 @@ pub fn run(
         &root,
         workspace,
         &mut index,
+        cloud.as_ref(),
         transform.as_ref(),
         settings.reupload,
         &beating,
@@ -666,6 +745,13 @@ pub fn run(
 
     let report = outcome?;
     index.save(workspace)?;
+
+    // 云端那份账本跟着更新：它记的是"跑完这一趟之后，哪些已经对齐"。
+    // 写不上去不算这一趟失败（东西都传完了），只记一笔 —— 账本旧了是**少删**，
+    // 不是乱删，方向是安全的。
+    if let Err(error) = publish_latest(&s3, &index) {
+        eprintln!("[sync] 云端账本没写上去：{error}");
+    }
 
     // "整份重传"是**一次性**的：这一趟跑完就清掉，免得此后每次都重传
     if settings.reupload {
@@ -682,6 +768,8 @@ fn reconcile(
     root: &Path,
     workspace: &Workspace,
     index: &mut Index,
+    // 云端那份账（没有就是 `None`）—— 判"云端删没删"要它当证据
+    cloud: Option<&Index>,
     transform: &dyn SyncTransform,
     force_upload: bool,
     progress: &dyn Fn(Progress),
@@ -713,15 +801,36 @@ fn reconcile(
     paths.sort_unstable();
     paths.dedup();
 
-    // 决定怎么办（纯规则）
+    // 这一趟要从云端取回日志吗（云端有、本机没有的日志）—— 它决定内容块能不能删：
+    // 那些日志可能正指着这些内容块，删了就"页面在、内容没了"。
+    let restoring_logs = remote
+        .keys()
+        .any(|path| path.starts_with("db/objects/") && !local.contains_key(path));
+
+    // 决定怎么办（纯规则）—— 判"删没删"要两处证据：云端那份账怎么说（`cloud`），
+    // 以及本机这边有没有留下删除凭据（笔记的日志会进回收站）
     let planned: Vec<(String, Decision, String)> = paths
         .iter()
         .map(|path| {
+            let evidence = Evidence {
+                cloud: match cloud {
+                    Some(cloud) if cloud.files.contains_key(path) => CloudSays::Listed,
+                    Some(_) => CloudSays::Gone,
+                    None => CloudSays::NoAccount,
+                },
+                // 内容块没有回收站：本机删它只有一条正当路径 —— 整理（GC）发现没人引用它。
+                // 认不出"是整理删的"还是"工作目录被清过"，那就退一步问：
+                // **本机缺着云端有的日志吗？** 缺，就说明这一趟要把日志取回来，
+                // 而那些日志可能正指着这些内容块 —— 一个都不能删（取回来才对）。
+                trashed: trashed_at(root, path)
+                    || (path.starts_with("db/blobs/") && !restoring_logs),
+            };
             let (decision, why) = decide(
                 force_upload,
                 local.get(path),
                 remote.get(path),
                 index.files.get(path),
+                evidence,
             );
             (path.clone(), decision, why)
         })
@@ -959,11 +1068,45 @@ fn prefix_of(s3: &S3) -> String {
 fn relative_of(s3: &S3, key: &str) -> Option<String> {
     let prefix = prefix_of(s3);
     let relative = key.strip_prefix(&prefix)?;
-    // 锁是云端的东西，不是仓库里的文件 —— 别把它下载到工作目录里
-    if relative.is_empty() || relative == LOCK_KEY || !is_synced(relative) {
+    // 锁与账本是云端自己的东西，不是仓库里的文件 —— 别把它们下载到工作目录里
+    if relative.is_empty()
+        || relative == LOCK_KEY
+        || relative == LATEST_KEY
+        || !is_synced(relative)
+    {
         return None;
     }
     Some(relative.to_string())
+}
+
+/// 读云端那份账本（没有就是 `None`：第一次用、换了桶、或者还没写过）
+fn fetch_latest(s3: &S3) -> Option<Index> {
+    let key = s3.config().key_of(LATEST_KEY);
+    let fetched = s3.get(&key).ok().flatten()?;
+    serde_json::from_slice::<Index>(&fetched.bytes).ok()
+}
+
+/// 把跑完时的账本写到云端。
+///
+/// **明文**：里面只有路径、内容指纹与 ETag，没有一分内容；而路径本来就以键的形式
+/// 摆在云端（键名就是相对路径），再封一层只是自欺欺人。
+fn publish_latest(s3: &S3, index: &Index) -> Result<(), String> {
+    let key = s3.config().key_of(LATEST_KEY);
+    let body = serde_json::to_vec(index).map_err(|error| format!("账本序列化失败：{error}"))?;
+    s3.put(&key, &body, false)?;
+    Ok(())
+}
+
+/// 本机这边"这一份是被删掉的"凭据：笔记的日志进了回收站。
+///
+/// 只有 `db/objects/<命名空间>/<id>.log` 这种形状查得出来（回收站按命名空间存，
+/// 见 `Database::trash_note_path`）。别的形状一律"不知道" —— 不知道就别替人删
+/// （内容块那一类由 `reconcile` 另作判断，见那里的说明）。
+fn trashed_at(root: &Path, path: &str) -> bool {
+    let Some(rest) = path.strip_prefix("db/objects/") else {
+        return false;
+    };
+    root.join("trash").join(rest).is_file()
 }
 
 fn mtime_of(meta: &fs::Metadata) -> i64 {
@@ -1238,6 +1381,7 @@ mod tests {
             Some(&local("h1", 100)),
             Some(&remote("aaa", 100)),
             Some(&stamp("h1", 100, "aaa")),
+            Evidence::none(),
         );
         assert_eq!(decision, Decision::Nothing);
     }
@@ -1249,6 +1393,7 @@ mod tests {
             Some(&local("h2", 200)),
             Some(&remote("aaa", 100)),
             Some(&stamp("h1", 100, "aaa")),
+            Evidence::none(),
         );
         assert_eq!(decision, Decision::Upload);
     }
@@ -1260,6 +1405,7 @@ mod tests {
             Some(&local("h1", 100)),
             Some(&remote("bbb", 200)),
             Some(&stamp("h1", 100, "aaa")),
+            Evidence::none(),
         );
         assert_eq!(decision, Decision::Download);
     }
@@ -1272,6 +1418,7 @@ mod tests {
             Some(&local("h2", 200)),
             Some(&remote("bbb", 300)),
             Some(&stamp("h1", 100, "aaa")),
+            Evidence::none(),
         );
         assert_eq!(decision, Decision::TakeNewer("remote"));
         assert!(!why.is_empty(), "取哪边、为什么，要说得出来");
@@ -1281,6 +1428,7 @@ mod tests {
             Some(&local("h2", 400)),
             Some(&remote("bbb", 300)),
             Some(&stamp("h1", 100, "aaa")),
+            Evidence::none(),
         );
         assert_eq!(decision, Decision::TakeNewer("local"));
 
@@ -1290,39 +1438,118 @@ mod tests {
             Some(&local("h2", 300)),
             Some(&remote("bbb", 300)),
             Some(&stamp("h1", 100, "aaa")),
+            Evidence::none(),
         );
         assert_eq!(decision, Decision::TakeNewer("local"));
+    }
+
+    /// **清单空白绝不能当成"云端删过"** —— 这是真出过的事故：
+    ///
+    /// 桶名被填成了带桶的端点（`https://桶.s3.某云.net`），客户端又按"桶名走路径"拼 URL，
+    /// 于是上传把桶名写进了键、列举永远列不到东西。结果每同步一次，就把本机那些
+    /// "账上记着已对齐"的文件当成"云端删过的"删掉一批 —— 用户刚写的页面就是这么没的。
+    #[test]
+    fn a_missing_listing_never_means_the_cloud_deleted_it() {
+        let here = local("h1", 100);
+        let stamp = stamp("h1", 100, "aaa");
+
+        // 云端账上还记着它（只是清单里没列出来）→ 传上去，绝不删
+        let (decision, why) = decide(
+            false,
+            Some(&here),
+            None,
+            Some(&stamp),
+            Evidence {
+                cloud: CloudSays::Listed,
+                trashed: false,
+            },
+        );
+        assert_eq!(decision, Decision::Upload, "{why}");
+
+        // 云端连账都没有（第一次用、换了桶）→ 同样没有证据，同样不删
+        let (decision, _) = decide(
+            false,
+            Some(&here),
+            None,
+            Some(&stamp),
+            Evidence::none(),
+        );
+        assert_eq!(decision, Decision::Upload);
+    }
+
+    /// 云端有、本机没有，但**本机这边找不到"是删掉的"凭据** → 取回来，别替人抹掉
+    #[test]
+    fn a_cloud_file_is_restored_unless_the_deletion_left_a_trace() {
+        let there = remote("aaa", 100);
+
+        // 回收站里没有它：取回本机
+        let (decision, why) = decide(
+            false,
+            None,
+            Some(&there),
+            Some(&stamp("h1", 100, "aaa")),
+            Evidence {
+                cloud: CloudSays::Gone,
+                trashed: false,
+            },
+        );
+        assert_eq!(decision, Decision::Download, "{why}");
+
+        // 回收站里有它：本机确实删过，云端跟着删
+        let (decision, _) = decide(
+            false,
+            None,
+            Some(&there),
+            Some(&stamp("h1", 100, "aaa")),
+            Evidence {
+                cloud: CloudSays::Gone,
+                trashed: true,
+            },
+        );
+        assert_eq!(decision, Decision::DeleteRemote);
     }
 
     /// 新写的传上去，云端多出来的拿回来
     #[test]
     fn a_first_sync_takes_the_union() {
-        let (decision, _) = decide(false, Some(&local("h1", 100)), None, None);
+        let (decision, _) = decide(false, Some(&local("h1", 100)), None, None,
+            Evidence::none(),
+        );
         assert_eq!(decision, Decision::Upload);
 
-        let (decision, _) = decide(false, None, Some(&remote("aaa", 100)), None);
+        let (decision, _) = decide(false, None, Some(&remote("aaa", 100)), None,
+            Evidence::none(),
+        );
         assert_eq!(decision, Decision::Download);
     }
 
-    /// 删除要**两边都认**才动：一边删了、另一边没改，才跟着删
+    /// 删除要**两边都认**、**而且有凭据**才动
     #[test]
     fn deletions_travel_only_when_the_other_side_is_untouched() {
-        // 本机删了（索引里有、本机没有），云端还在 → 云端也删
+        // 本机删了（回收站里留着凭据）、云端还在 → 云端也删
         let (decision, why) = decide(
             false,
             None,
             Some(&remote("aaa", 100)),
             Some(&stamp("h1", 100, "aaa")),
+            Evidence {
+                cloud: CloudSays::Gone,
+                trashed: true,
+            },
         );
         assert_eq!(decision, Decision::DeleteRemote);
         assert!(!why.is_empty());
 
-        // 云端删了，本机没动过 → 本机也删
+        // 云端账上也说没了，本机没动过 → 本机也删
         let (decision, _) = decide(
             false,
             Some(&local("h1", 100)),
             None,
             Some(&stamp("h1", 100, "aaa")),
+            Evidence {
+                cloud: CloudSays::Gone,
+                trashed: false,
+            },
         );
         assert_eq!(decision, Decision::DeleteLocal);
 
@@ -1332,6 +1559,10 @@ mod tests {
             Some(&local("h2", 300)),
             None,
             Some(&stamp("h1", 100, "aaa")),
+            Evidence {
+                cloud: CloudSays::Gone,
+                trashed: false,
+            },
         );
         assert_eq!(
             decision,
@@ -1354,19 +1585,34 @@ mod end_to_end {
     /// 桶里的东西：键 → (内容, ETag)
     type Bucket = Arc<Mutex<HashMap<String, (Vec<u8>, String)>>>;
 
-    /// 起一个只够测试用的 S3，返回 (地址, 桶)
-    fn start_fake_s3() -> (String, Bucket) {
-        let bucket: Bucket = Arc::new(Mutex::new(HashMap::new()));
+    /// 一个假服务：桶 + 开关
+    #[derive(Clone)]
+    struct Fake {
+        bucket: Bucket,
+        /// 让**列举**装死（东西还在，就是列不出来）。
+        ///
+        /// 这一条是从真事上来的：桶名被填进端点（`https://桶.s3.某云.net`）、
+        /// 客户端又按"桶名走路径"拼 URL，上传把桶名写进了键，列举则永远列不到东西 ——
+        /// 于是"云端一片空白"被读成"云端删过"，把本机的东西删了。
+        blind_listing: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    /// 起一个只够测试用的 S3，返回 (地址, 假服务)
+    fn start_fake_s3() -> (String, Fake) {
+        let fake = Fake {
+            bucket: Arc::new(Mutex::new(HashMap::new())),
+            blind_listing: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        };
         let listener = TcpListener::bind("127.0.0.1:0").expect("绑定本地端口");
         let address = format!("http://{}", listener.local_addr().unwrap());
 
-        let served = bucket.clone();
+        let served = fake.clone();
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
                 let _ = serve(stream, &served);
             }
         });
-        (address, bucket)
+        (address, fake)
     }
 
     /// 一次请求的应答：状态码、该带的头、正文
@@ -1379,7 +1625,7 @@ mod end_to_end {
         body: Vec<u8>,
     }
 
-    fn serve(mut stream: TcpStream, bucket: &Bucket) -> std::io::Result<()> {
+    fn serve(mut stream: TcpStream, fake: &Fake) -> std::io::Result<()> {
         let mut reader = BufReader::new(stream.try_clone()?);
 
         // 请求行
@@ -1423,7 +1669,7 @@ mod end_to_end {
             .map(|(_, rest)| rest.to_string())
             .unwrap_or(key);
 
-        let reply = route(&method, &key, &query, &headers, body, bucket);
+        let reply = route(&method, &key, &query, &headers, body, fake);
 
         let mut out = format!(
             "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n",
@@ -1448,9 +1694,9 @@ mod end_to_end {
         query: &str,
         headers: &HashMap<String, String>,
         body: Vec<u8>,
-        bucket: &Bucket,
+        fake: &Fake,
     ) -> Reply {
-        let mut map = bucket.lock().unwrap();
+        let mut map = fake.bucket.lock().unwrap();
         // 假服务里 ETag 只要"内容一样就一样、变了就变"即可，够对账用了
         let etag_of = |bytes: &[u8]| {
             use sha2::{Digest, Sha256};
@@ -1484,6 +1730,15 @@ mod end_to_end {
                 }
             }
             "GET" if query.contains("list-type=2") => {
+                // 装死：东西都在，就是列不出来（见 `Fake::blind_listing`）
+                if fake.blind_listing.load(std::sync::atomic::Ordering::SeqCst) {
+                    return Reply {
+                        status: 200,
+                        content_type: "application/xml".into(),
+                        etag: None,
+                        body: b"<?xml version=\"1.0\"?><ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>".to_vec(),
+                    };
+                }
                 let prefix = query
                     .split('&')
                     .find_map(|pair| pair.strip_prefix("prefix="))
@@ -1752,7 +2007,9 @@ mod end_to_end {
             etag: "9f2c4a".to_string(),
             modified: 100,
         };
-        let (decision, _) = decide(false, Some(&here), Some(&there), Some(&stamp));
+        let (decision, _) = decide(false, Some(&here), Some(&there), Some(&stamp),
+            Evidence::none(),
+        );
         assert_eq!(decision, Decision::Nothing, "只差大小写不算云端变了");
     }
 
@@ -1775,7 +2032,7 @@ mod end_to_end {
         run(&first, &settings, &|_| {}, false).unwrap();
 
         // 云端那份的封装头上记着用的是哪一档（magic(4) + 版本(1) + 算法(1)，见 CloudEnvelope）
-        let stored = bucket.lock().unwrap()["notes/db/objects/0/1.log"].0.clone();
+        let stored = bucket.bucket.lock().unwrap()["notes/db/objects/0/1.log"].0.clone();
         assert_eq!(&stored[..4], b"RNDS", "应当是封装过的");
         assert_eq!(stored[5], 2, "算法那一字节：2 = 国密 SM4");
 
@@ -1788,6 +2045,100 @@ mod end_to_end {
         assert_eq!(
             std::fs::read_to_string(second.root().join("db/objects/0/1.log")).unwrap(),
             "{\"rev\":1}\n"
+        );
+
+        let _ = std::fs::remove_dir_all(first.root());
+        let _ = std::fs::remove_dir_all(second.root());
+    }
+
+    /// **清单一片空白时，什么都不能删** —— 这是真出过的事故（端到端复现）。
+    ///
+    /// 用户那台机器上：桶名被填进了端点、客户端又按"桶名走路径"拼 URL，
+    /// 于是东西都传上去了（PUT/HEAD 自洽，看着成功），可**列举**永远列不到 ——
+    /// 每同步一次，就把本机"账上记着已对齐"的文件当成"云端删过的"删掉一批。
+    #[test]
+    fn a_blind_listing_deletes_nothing_at_all() {
+        let (address, fake) = start_fake_s3();
+        let key = generate_key().unwrap();
+        let machine = workspace("blind");
+        std::fs::write(
+            machine.root().join("db/objects/0/1.log"),
+            "{\"rev\":1}\n".as_bytes(),
+        )
+        .unwrap();
+        std::fs::write(machine.root().join("db/blobs/ab/abc"), b"PNGDATA").unwrap();
+        let settings = settings_for(&address, &key);
+
+        // 第一趟：正常传上去（账本也写上去）
+        let report = run(&machine, &settings, &|_| {}, false).unwrap();
+        assert_eq!(report.uploaded + report.downloaded, 2, "{report:?}");
+
+        // 第二趟：列举装死（东西其实都在桶里）
+        fake.blind_listing
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let report = run(&machine, &settings, &|_| {}, false).unwrap();
+
+        assert!(
+            machine.root().join("db/objects/0/1.log").is_file(),
+            "本机这一份必须还在：{report:?}"
+        );
+        assert!(
+            machine.root().join("db/blobs/ab/abc").is_file(),
+            "内容块也要还在：{report:?}"
+        );
+        assert_eq!(report.removed_local, 0, "不许删本机：{report:?}");
+        assert_eq!(report.removed_remote, 0, "也不许删云端：{report:?}");
+
+        let _ = std::fs::remove_dir_all(machine.root());
+    }
+
+    /// 新机器（本地没有账本）照着云端那份认路：不重传，也不乱删
+    #[test]
+    fn a_fresh_machine_learns_from_the_cloud_ledger() {
+        let (address, fake) = start_fake_s3();
+        let key = generate_key().unwrap();
+
+        let first = workspace("ledger-a");
+        std::fs::write(
+            first.root().join("db/objects/0/1.log"),
+            "{\"rev\":1}\n".as_bytes(),
+        )
+        .unwrap();
+        let settings = settings_for(&address, &key);
+        run(&first, &settings, &|_| {}, false).unwrap();
+
+        // 账本确实写到云端了
+        assert!(
+            fake.bucket
+                .lock()
+                .unwrap()
+                .keys()
+                .any(|name| name.ends_with(LATEST_KEY)),
+            "跑完一趟应当留下账本"
+        );
+
+        // 甲机器再同步一次：账本在，什么都不用动
+        let report = run(&first, &settings, &|_| {}, false).unwrap();
+        assert_eq!(
+            report.uploaded + report.downloaded,
+            0,
+            "账本在手，第二次该无事可做：{report:?}"
+        );
+
+        // 乙机器：把甲那份仓库整个抄过来，**唯独不带本地账本**（等于新装的机器）
+        let second = workspace("ledger-b");
+        std::fs::copy(
+            first.root().join("db/objects/0/1.log"),
+            second.root().join("db/objects/0/1.log"),
+        )
+        .unwrap();
+        assert!(!second.settings_file("sync-index.json").exists());
+
+        let report = run(&second, &settings, &|_| {}, false).unwrap();
+        assert_eq!(
+            report.uploaded + report.downloaded + report.removed_local,
+            0,
+            "照云端的账认路之后：不重传、不下载、更不删：{report:?}"
         );
 
         let _ = std::fs::remove_dir_all(first.root());
@@ -1811,6 +2162,7 @@ mod end_to_end {
         })
         .unwrap();
         bucket
+            .bucket
             .lock()
             .unwrap()
             .insert(key.clone(), (held, "held".to_string()));
@@ -1821,15 +2173,15 @@ mod end_to_end {
             Err(message) => message,
         };
         assert!(polite.contains("锁"), "该说清是锁挡着：{polite}");
-        assert!(bucket.lock().unwrap().contains_key(&key), "锁还该在原处");
+        assert!(bucket.bucket.lock().unwrap().contains_key(&key), "锁还该在原处");
 
         // 强制：抢过来，锁里换成我们的名字
         let lock = acquire(&s3, true).expect("强制同步应当拿到锁");
-        let holder: LockBody = serde_json::from_slice(&bucket.lock().unwrap()[&key].0).unwrap();
+        let holder: LockBody = serde_json::from_slice(&bucket.bucket.lock().unwrap()[&key].0).unwrap();
         assert_ne!(holder.host, "另一台机器", "锁该换成我们拿着了");
 
         // 放掉之后云端不留锁，下一次谁都能同步
         lock.release(&s3).unwrap();
-        assert!(!bucket.lock().unwrap().contains_key(&key));
+        assert!(!bucket.bucket.lock().unwrap().contains_key(&key));
     }
 }
