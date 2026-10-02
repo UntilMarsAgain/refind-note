@@ -1,22 +1,30 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { Copy, X } from "@lucide/vue";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { canonicalOf, sectionOf } from "../../core/address.ts";
 import type { Mode, ResolvedAddress } from "../../ipc/address.ts";
-import { policyLabel } from "../../ipc/note.ts";
+import { THEME_LABELS } from "../../ipc/settings.ts";
 import { flash } from "../../core/notice.ts";
-import { gpgAvailable, preferences, protection, railCollapsed } from "../../core/preferences.ts";
+import { preferences, railCollapsed } from "../../core/preferences.ts";
+import { resolvedTheme } from "../../core/theme.ts";
 import { labelOf } from "../../core/special.ts";
 import type { TabState } from "../../core/tabs.ts";
 
 /**
- * 调试信息框：**前端**的状态与**当前这一页**的状态。
+ * 调试信息框：**前端此刻**与**当前这一页**。
  *
  * 右下角那组按钮里的「虫子」调它出来。它只读，不改任何东西 ——
  * 排查"看着不对"的时候，先看这里比到处打日志快。
  *
- * 仓库那一层的事实（工作目录、数据库）不在这里，在 `special:debug` 那张诊断页上。
+ * **分工**（这条线要守住，不然两块很快就长得一样）：
+ *
+ * - 这里（浮动）：眼前这一页（地址、解析结果、本页历史、页面上数出来的东西）
+ *   与前端此刻的样子（缩放、深浅色、窗口尺寸、标签栏开合）；
+ * - `special:debug`（整页）：**软件整体与仓库** —— 工作目录、数据库、偏好默认值、
+ *   仓库规模、同步配置、渲染能力、系统集成。
+ *
+ * 一句话：**换一页就该变的东西留在这里，换一页不变的去那张诊断页**。
  */
 const props = defineProps<{
   tab: TabState | null;
@@ -27,6 +35,77 @@ defineEmits<{
 }>();
 
 const route = computed<ResolvedAddress | null>(() => props.tab?.route ?? null);
+
+/** 窗口尺寸：版式出问题时它就是第一条线索 */
+const windowSize = ref(`${window.innerWidth} × ${window.innerHeight}`);
+
+function onResize() {
+  windowSize.value = `${window.innerWidth} × ${window.innerHeight}`;
+}
+
+/**
+ * 页面上数出来的东西。
+ *
+ * 这几样正好都是最近加的：公式、图、图片、加密附件。**"没显示出来"的时候先看这里** ——
+ * 是压根**没认出来**（总数 0），还是**认出来了没画出来**（总数有、画成的 0）：
+ * 前者去看后端（语法认没认），后者去看前端（引擎能不能加载）。
+ *
+ * 数的是**渲染完的 DOM**（`decorateNoteHtml` 收尾之后的样子），不是笔记原文。
+ */
+const pageStats = ref("（还没数）");
+
+function countPage(): void {
+  const body = document.querySelector(".note-body");
+  if (!body) {
+    pageStats.value = "（这一页没有正文）";
+    return;
+  }
+
+  const count = (selector: string) => body.querySelectorAll(selector).length;
+  const formulas = count(".math");
+  const drawnFormulas = count(".math[data-math-ready]");
+  const diagrams = count("pre.mermaid");
+  const drawnDiagrams = count('pre.mermaid[data-processed="true"]');
+  const brokenDiagrams = count("pre.mermaid[data-problem]");
+  const images = count("img");
+  const missingImages = count(".image-missing");
+  const locked = count(".file-locked");
+
+  pageStats.value = [
+    `公式 ${drawnFormulas}/${formulas}`,
+    `图 ${drawnDiagrams}/${diagrams}${brokenDiagrams > 0 ? `（画不出来 ${brokenDiagrams}）` : ""}`,
+    `图片 ${images}${missingImages > 0 ? `（取不到 ${missingImages}）` : ""}`,
+    `加密附件 ${locked}`,
+  ].join("，");
+}
+
+let observer: MutationObserver | undefined;
+let recount: number | undefined;
+
+onMounted(() => {
+  window.addEventListener("resize", onResize);
+  countPage();
+
+  // 正文是**注入**进来的，注入之后还会变（公式排版、图换成 SVG）：盯着一改就重数。
+  // 攒 200ms 再数 —— 编辑器预览每敲一个字就会重注入一次。
+  observer = new MutationObserver(() => {
+    window.clearTimeout(recount);
+    recount = window.setTimeout(countPage, 200);
+  });
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    // 只盯"画好了没有"这几个记号，别把整棵树的属性变化都收进来
+    attributeFilter: ["data-math-ready", "data-processed", "data-problem"],
+  });
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("resize", onResize);
+  observer?.disconnect();
+  window.clearTimeout(recount);
+});
 
 /** 地址里的浏览状态，按它自己的写法显示（与规范串里的后缀一致） */
 function modeLabel(mode: Mode | null): string {
@@ -89,30 +168,24 @@ const sections = computed(() => {
             ? `${tab.cursor + 1} / ${tab.history.length}`
             : "（还没去过任何地方）",
         },
+        { label: "页面上有", value: pageStats.value },
       ],
     },
     {
-      title: "界面",
+      title: "前端此刻",
       rows: [
         { label: "地址栏内容", value: tab?.address || "（空）" },
-        { label: "界面缩放", value: `${Math.round(preferences.value.zoom * 100)}%` },
+        { label: "缩放", value: `${Math.round(preferences.value.zoom * 100)}%` },
         {
-          label: "深浅色 / 主题色",
-          value: `${preferences.value.theme} · ${preferences.value.accent}`,
+          label: "深浅色",
+          value: `${THEME_LABELS[preferences.value.theme]}（此刻${
+            resolvedTheme.value === "light" ? "浅色" : "深色"
+          }）`,
         },
+        { label: "主题色", value: preferences.value.accent },
         { label: "宽度限制器", value: preferences.value.limit_width ? "开" : "关" },
         { label: "标签栏（此刻）", value: railCollapsed.value ? "收起" : "展开" },
-        { label: "标签栏（默认）", value: preferences.value.rail_collapsed ? "收起" : "展开" },
-      ],
-    },
-    {
-      title: "仓库",
-      rows: [
-        { label: "默认保护", value: policyLabel(protection.value) },
-        {
-          label: "gpg",
-          value: gpgAvailable.value ? "可用" : "没有 gpg（签名 / 加密不可用）",
-        },
+        { label: "窗口", value: `${windowSize.value} · 像素比 ${window.devicePixelRatio}` },
       ],
     },
   ];

@@ -7,6 +7,13 @@ import type { Policy } from "./note.ts";
 
 export type ThemeMode = "system" | "light" | "dark";
 
+/** 三档的显示名（两个诊断面板都用这一份，别各写各的） */
+export const THEME_LABELS: Record<ThemeMode, string> = {
+    system: "跟随系统",
+    light: "浅色",
+    dark: "深色",
+};
+
 /** 界面偏好：这台机器上这个人用着舒服的东西，落盘在 `settings/preferences.json` */
 export interface Preferences {
     /** 界面缩放（1.0 = 100%） */

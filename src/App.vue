@@ -14,6 +14,7 @@ import WindowResizeHandles from "./components/shell/WindowResizeHandles.vue";
 import WindowTitleBar from "./components/shell/WindowTitleBar.vue";
 import { listen } from "@tauri-apps/api/event";
 import { withSection } from "./core/address.ts";
+import { addressFromDeepLink } from "./core/deep-link.ts";
 import type { HelpPage } from "./ipc/help.ts";
 import { loadBrowsing } from "./core/browsing.ts";
 import { dismissNotice, flash, notice } from "./core/notice.ts";
@@ -402,8 +403,11 @@ async function runMaintenanceOnce() {
 /**
  * 启动时先看一件事：**是不是被 `refind://…` 唤起**。
  *
- * 是（冷启动）：那地址就是这一趟的目的地，直接导航过去 —— 此时窗口刚建好，
- * 后端把地址寄存在那里等着人来取（见 `take_pending_address`）；
+ * 是（冷启动）：那地址就是这一趟的目的地，直接落在**开头那个空标签页**上 ——
+ * 此时窗口刚建好，后端把地址寄存在那里等着人来取（见 `take_pending_address`）。
+ * 这里**不另开一页**：那会多出一个没人要的"新标签页"要人亲手关掉。
+ * （程序**已经在跑**时收到深链是另一回事，那条路开新标签页 —— 见下面那个监听。）
+ *
  * 不是：才落到新标签页。两件事都做就成了"先开一页再跳走"，后退键里多一条冤枉路。
  */
 async function openStartupAddress() {
@@ -435,8 +439,8 @@ watch(
   { immediate: true },
 );
 
-/** 停在"已经在跑的实例收到 refind:// 地址"这个监听上，卸载时要摘掉 */
-let unlistenAddress: (() => void) | undefined;
+/** 顶栏那两条深链监听的摘除函数（卸载时要摘掉） */
+const unlistenAddress: (() => void)[] = [];
 
 onMounted(() => {
   window.addEventListener("keydown", onKeydown);
@@ -445,17 +449,35 @@ onMounted(() => {
   // 正文右键里的"在新标签页打开"与 Ctrl+点击走同一个实现
   setOpenInNewTab(openTabWith);
   void interceptClose();
-  // 已经在跑时被 `refind://…` 唤起：后端把地址发过来，这里当场导航
+  // 深链来的时候**开一个新标签页**，不动人正在看的这一页：
+  // 对方是从别处点了一个链接过来的，不是要你离开手上这一页 ——
+  // 直接改当前标签页会把正在读的东西顶掉，而"点了个链接，结果那一页没了"
+  // 是最容易让人以为"程序把我的东西弄丢了"的一种。
+  //
+  // 两条路都汇到这里：
+  // - `open-address`：Linux / Windows，系统是"再拉起一次实例、把 URL 当参数给"，
+  //   后端把参数解析好发过来（见 `platform::deep_link`）；
+  // - `deep-link://new-url`：macOS 与 Android，系统**走事件**把 URL 递给已经在跑的
+  //   这一个实例（那是插件发的事件，解析在这儿做 —— 规矩与后端那条一样）。
   void listen<string>("open-address", (event) => {
-    void navigate(event.payload, "push");
-  }).then((unlisten) => {
-    unlistenAddress = unlisten;
-  });
+    openTabWith(event.payload);
+  }).then((unlisten) => unlistenAddress.push(unlisten));
+
+  void listen<string[]>("deep-link://new-url", (event) => {
+    for (const url of event.payload ?? []) {
+      const address = addressFromDeepLink(url);
+      if (address) {
+        openTabWith(address);
+      }
+    }
+  }).then((unlisten) => unlistenAddress.push(unlisten));
 });
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
   window.removeEventListener("beforeunload", flushOnUnload);
-  unlistenAddress?.();
+  for (const unlisten of unlistenAddress) {
+    unlisten();
+  }
 });
 
 /**

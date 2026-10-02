@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { Copy } from "@lucide/vue";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import type { ThemeMode } from "../../ipc/settings.ts";
+import { THEME_LABELS } from "../../ipc/settings.ts";
 import type { Diagnostics } from "../../ipc/diagnostics.ts";
 import { flash } from "../../core/notice.ts";
 import { isMobile } from "../../core/platform.ts";
@@ -41,13 +41,6 @@ const preferencesFile = computed(() =>
 const configFile = computed(() =>
   workspaceRoot.value ? `${workspaceRoot.value}/settings/repository.json` : NOT_OPEN,
 );
-
-/** 深浅色的显示名 */
-const THEME_LABELS: Record<ThemeMode, string> = {
-  system: "跟随系统",
-  light: "浅色",
-  dark: "深色",
-};
 
 function yesNo(value: boolean): string {
   return value ? "是" : "否";
