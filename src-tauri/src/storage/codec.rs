@@ -94,13 +94,20 @@ impl Compression {
 /// 口令层的对称加密算法（口令派生都是 Argon2id，参数记在头里）。
 ///
 /// 两档都是 AEAD：自带完整性校验，改一个字节都解不开。
+///
+/// **名字是写死的**（不是 `rename_all`）：它要跟着界面上的写法走，而
+/// `rename_all = "kebab-case"` 会把 `Aes256Gcm` 拼成 `aes256-gcm` —— 少一个横线，
+/// 界面那边写的是 `aes-256-gcm`，两边对不上就是一句
+/// "unknown variant `aes-256-gcm`"。别名收着旧写法：早先存下来的
+/// `preferences.json` / `sync.json` 里是 `aes256-gcm`，读得回来。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
 pub enum Cipher {
     /// AES-256-GCM：国际通用的那一档，有硬件指令的机器上很快
     #[default]
+    #[serde(rename = "aes-256-gcm", alias = "aes256-gcm")]
     Aes256Gcm,
     /// SM4-GCM：国密（GB/T 32907 的 SM4 配上 GCM 那套认证）
+    #[serde(rename = "sm4-gcm", alias = "sm4gcm")]
     Sm4Gcm,
 }
 
@@ -1061,6 +1068,34 @@ fn gpg_decrypt(content: &[u8]) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 算法在 JSON 里怎么写：界面（`ipc/note.ts`）按这串字选，写错了就是一句
+    /// "unknown variant `aes-256-gcm`"。老文件里是 `aes256-gcm`（少一个横线），
+    /// 也要能读回来 —— 那正是这条测试存在的原因。
+    #[test]
+    fn a_cipher_spells_the_same_in_json_and_in_the_interface() {
+        assert_eq!(
+            serde_json::to_string(&Cipher::Aes256Gcm).unwrap(),
+            "\"aes-256-gcm\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Cipher::Sm4Gcm).unwrap(),
+            "\"sm4-gcm\""
+        );
+
+        for (text, wanted) in [
+            ("\"aes-256-gcm\"", Cipher::Aes256Gcm),
+            ("\"aes256-gcm\"", Cipher::Aes256Gcm),
+            ("\"sm4-gcm\"", Cipher::Sm4Gcm),
+            ("\"sm4gcm\"", Cipher::Sm4Gcm),
+        ] {
+            assert_eq!(
+                serde_json::from_str::<Cipher>(text).unwrap(),
+                wanted,
+                "从 {text} 读出来"
+            );
+        }
+    }
 
     /// gpg 的可用性是进程级开关，碰它的用例要串行。
     fn gpg_guard() -> std::sync::MutexGuard<'static, ()> {
