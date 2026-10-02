@@ -1,5 +1,6 @@
 import { computed, ref } from "vue";
 import { resolveAddress, titleOf } from "./address.ts";
+import { forget as forgetEditing } from "./editor-state.ts";
 import { recordVisit } from "./browsing.ts";
 import type { ResolvedAddress } from "../ipc/address.ts";
 
@@ -144,6 +145,9 @@ export function useTabs() {
     const closing = tabs.value[index];
     if (closing) {
       remember(closing);
+      // 关掉之后它就不再是"哪一个标签页"了：编辑状态跟着忘掉
+      // （没提交的字还在草稿槽位里，那是兜底的那一份）
+      forgetEditing(closing.id);
     }
 
     if (tabs.value.length <= 1) {
@@ -168,6 +172,11 @@ export function useTabs() {
     const keep = tabs.value[index];
     if (!keep) {
       return;
+    }
+    for (const tab of tabs.value) {
+      if (tab.id !== keep.id) {
+        forgetEditing(tab.id);
+      }
     }
     // 其余的都算"刚关掉"。按从左到右压栈，于是最右边的在最上面 ——
     // 与"一个个关过去"的顺序一致，重新打开时回来的顺序也就一致。

@@ -57,12 +57,22 @@ onBeforeUnmount(() => window.clearTimeout(shakeTimer));
 const dragging = ref<number | null>(null);
 const overIndex = ref<number | null>(null);
 
-function onDragStart(index: number) {
+function onDragStart(event: DragEvent, index: number) {
   dragging.value = index;
+  // 不带数据的拖动在 WebKit 里根本不算"拖起来"（拖到一半就没有了），
+  // 所以哪怕用不上也塞一份进去
+  event.dataTransfer?.setData("text/plain", String(index));
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "move";
+  }
 }
 
-function onDragOver(index: number) {
+function onDragOver(event: DragEvent, index: number) {
   overIndex.value = index;
+  // 光标显示成"移动"，而不是"复制"
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = "move";
+  }
 }
 
 function onDragEnd() {
@@ -134,8 +144,8 @@ function onTabMenu(event: MouseEvent, index: number) {
         v-for="(tab, index) in tabs"
         :key="tab.id"
         draggable="true"
-        @dragstart="onDragStart(index)"
-        @dragover.prevent="onDragOver(index)"
+        @dragstart="onDragStart($event, index)"
+        @dragover.prevent="onDragOver($event, index)"
         @drop.prevent="onDrop(index)"
         @dragend="onDragEnd"
       >

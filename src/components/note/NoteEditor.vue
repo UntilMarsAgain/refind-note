@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { forget as forgetEditing, recall, remember } from "../../core/editor-state.ts";
 import { invoke } from "@tauri-apps/api/core";
 import { Check, ImagePlus, RotateCcw, Save, Trash2, X } from "@lucide/vue";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -37,6 +38,13 @@ import { sourceExtensions } from "../../dom/editor-setup.ts";
 const props = defineProps<{
     /** 正在编辑的笔记标题 */
     title: string;
+    /**
+     * 这个编辑器属于哪个标签页。
+     *
+     * 有了它，切走再切回来时**正在写的字、光标与滚动都在原地**（见 `core/editor-state.ts`）；
+     * 不给也不影响用，只是没有这一层"原位还原"。
+     */
+    tabId?: string;
 }>();
 
 const emit = defineEmits<{
@@ -271,9 +279,48 @@ async function load() {
         }
     } catch (error) {
         console.debug("读取草稿失败:", error);
-    } finally {
-        loading.value = false;
     }
+
+    // 这个标签页自己还留着编辑状态（切走又切回来）：直接用它。
+    //
+    // 它比草稿槽位**新** —— 草稿是攒一会儿才落一次盘的备份，而这份是切走那一刻
+    // 编辑器里的原样。所以有它就不摆"要不要恢复草稿"那一条：那份是兜底，
+    // 不是要问人的那一份。
+    const remembered = recall(props.tabId);
+    if (remembered) {
+        markdown.value = remembered.markdown;
+        pendingDraft.value = null;
+        hasDraft.value = true;
+        await nextTick();
+        restoreEditing(remembered);
+    }
+
+    loading.value = false;
+}
+
+/** 把光标与滚动放回原位（文档内容由上面那个 `watch(markdown)` 推进编辑器） */
+function restoreEditing(state: { cursor: number; scroll: number }) {
+    const editor = view;
+    if (!editor) {
+        return;
+    }
+    const at = Math.max(0, Math.min(state.cursor, editor.state.doc.length));
+    editor.dispatch({ selection: { anchor: at } });
+    editor.scrollDOM.scrollTop = state.scroll;
+    editor.focus();
+}
+
+/** 记下这一刻的样子（字、光标、滚动）—— 切走时靠它还原 */
+function recordEditing() {
+    const editor = view;
+    if (!props.tabId || !editor) {
+        return;
+    }
+    remember(props.tabId, {
+        markdown: markdown.value,
+        cursor: editor.state.selection.main.head,
+        scroll: editor.scrollDOM.scrollTop,
+    });
 }
 
 /** 写草稿槽位。没改动就不写 —— 后端也挡得住，这里省一次往返 */
@@ -316,6 +363,10 @@ async function commit() {
         });
         passphraseDraft.value = "";
         status.value = "";
+        // 这一趟编辑结束了：记忆清掉（再进来该看已提交的那一版）
+        if (props.tabId) {
+            forgetEditing(props.tabId);
+        }
         // 提交之后顺手叫一次同步（攒一会儿再跑，连提几次只同步一次）
         requestSyncAfterCommit();
         emit("navigate", committed.title);
@@ -354,6 +405,9 @@ async function discard() {
     try {
         await invoke<boolean>("discard_draft", { title: props.title });
         hasDraft.value = false;
+        if (props.tabId) {
+            forgetEditing(props.tabId);
+        }
         markdown.value = committedMarkdown.value;
         status.value = "草稿已丢弃，已恢复为上次提交的内容";
     } catch (error) {
@@ -465,10 +519,15 @@ onMounted(async () => {
                         },
                     }),
                     EditorView.updateListener.of((update) => {
+                        // 光标挪了也记一笔：切回来时视线要落回原处
+                        if (update.selectionSet) {
+                            recordEditing();
+                        }
                         if (!update.docChanged || syncing) {
                             return;
                         }
                         markdown.value = update.state.doc.toString();
+                        recordEditing();
                         // 输入后延迟自动保存，连续敲字不会每次都写
                         window.clearTimeout(autosaveTimer);
                         autosaveTimer = window.setTimeout(() => void saveDraft(), AUTOSAVE_DELAY_MS);
@@ -497,6 +556,15 @@ onBeforeUnmount(() => {
     window.clearTimeout(previewTimer);
     panesObserver?.disconnect();
     window.removeEventListener("resize", measurePanes);
+
+    // 走之前把两件事做完：
+    //
+    // 1. 记下这一刻的样子 —— 切回来时光标与滚动还在原地；
+    // 2. **把草稿落一次盘**。原来是直接取消自动保存的计时器，于是"敲完字马上切走"
+    //    那一截就丢了（草稿要等计时器到点才写）。切标签页就是这么丢字的。
+    recordEditing();
+    void saveDraft();
+
     view?.destroy();
     view = null;
 });

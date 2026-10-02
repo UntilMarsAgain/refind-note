@@ -4,10 +4,16 @@
 //! 程序不必带着那些文件，用户也改不了它们；而渲染走的还是**与笔记同一个渲染器**，
 //! 所以帮助里的模板块、代码块、表格与笔记里一模一样。
 //!
-//! **有哪几页、按什么顺序，是这里写死的**（见 [`PAGES`]）：帮助是程序的一部分，
-//! 页数不该跟着目录里有什么走 —— 往 `help/` 里丢一个新文件不该悄悄多出一个菜单项
-//! （那多半是名字写错了）。内容仍然来自那个目录：**文件名就是页面名**
-//! （`首页.md` → `Help:首页`），不剥前缀、也不从正文另猜一个名字。
+//! 两件事分开：
+//!
+//! - **菜单里列哪几页**：写死的三页（见 [`PAGES`]）—— 菜单是给人指路的，页数要克制，
+//!   往 `help/` 里丢个新文件不该悄悄多出一项；
+//! - **能打开哪些页**：`help/` 目录里**所有**的 `.md` —— 多出来的那些照样能被地址、
+//!   `[[Help:…]]` 与 `refind://` 深链打开，只是暂时不在菜单里。
+//!   （"菜单里没有"和"打不开"是两回事；后者是坏的。）
+//!
+//! 内容一律来自那个目录：**文件名就是页面名**（`首页.md` → `Help:首页`），
+//! 不剥前缀、也不从正文另猜一个名字。
 
 use include_dir::{include_dir, Dir};
 use serde::Serialize;
@@ -25,9 +31,9 @@ pub const HELP_ID: &str = "help";
 /// 首页在前是因为它是入口；三页之间是"读什么"的顺序，不是文件名的排序
 /// （按名字排的话，`首页` 会掉到最后 —— 它开头的字排得最靠后）。
 ///
-/// 内容照旧来自 `help/` 目录（同名 `.md`），这张表只回答"有哪些页、什么次序"。
-/// 目录里多出来的文件**不进菜单**（那多半是写错名字），少了的按空页算
-/// —— 名字写错、文件丢了都不该让菜单变形。测试盯着这两件事。
+/// 内容照旧来自 `help/` 目录（同名 `.md`），这张表只回答"菜单里列哪几页、什么次序"。
+/// 目录里多出来的文件**不进菜单**，但**照样打得开**（见 [`find`]）；少了的按空页算
+/// —— 名字写错、文件丢了都不该让菜单变形。测试盯着这几件事。
 pub const PAGES: [&str; 3] = ["首页", "目录", "语法速览"];
 
 /// 一页帮助
@@ -43,23 +49,40 @@ pub struct HelpPage {
     pub html: String,
 }
 
-/// 这三页各自的正文（`help/<页面名>.md`；文件不在就是空页）
-fn sources() -> Vec<(&'static str, &'static str)> {
-    PAGES
-        .iter()
-        .map(|slug| {
-            let source = HELP
-                .get_file(format!("{slug}.md"))
-                .and_then(|file| file.contents_utf8())
-                .unwrap_or("");
-            (*slug, source)
+/// 一页的正文（`help/<页面名>.md`；文件不在就是空串）
+fn source_of(slug: &str) -> &'static str {
+    HELP.get_file(format!("{slug}.md"))
+        .and_then(|file| file.contents_utf8())
+        .unwrap_or("")
+}
+
+/// **菜单里那三页**，按写死的顺序
+fn menu_sources() -> Vec<(&'static str, &'static str)> {
+    PAGES.iter().map(|slug| (*slug, source_of(slug))).collect()
+}
+
+/// `help/` 目录里**所有**的页，按文件名排
+///
+/// "能打开哪些页"归目录管：菜单只列那三页，但新丢进来的文件照样打得开 ——
+/// 区别只是"菜单里没列它"，不是"打不开它"。
+fn all_sources() -> Vec<(&'static str, &'static str)> {
+    let mut pages: Vec<(&'static str, &'static str)> = HELP
+        .files()
+        .filter(|file| file.path().extension().is_some_and(|ext| ext == "md"))
+        .filter_map(|file| {
+            let stem = file.path().file_stem()?.to_str()?;
+            let source = file.contents_utf8()?;
+            Some((stem, source))
         })
-        .collect()
+        .collect();
+
+    pages.sort_by(|a, b| a.0.cmp(b.0));
+    pages
 }
 
 /// 全部帮助页（渲染在调用时发生，所以这一步要一个仓库 —— 渲染器在它身上）
 pub fn pages(database: &Database) -> Vec<HelpPage> {
-    sources()
+    menu_sources()
         .into_iter()
         .map(|(slug, source)| page_of(database, slug, source))
         .collect()
@@ -68,7 +91,7 @@ pub fn pages(database: &Database) -> Vec<HelpPage> {
 /// 找一页：认页面名（大小写与首尾空白宽松）
 pub fn find(database: &Database, wanted: &str) -> Option<HelpPage> {
     let wanted = wanted.trim().to_lowercase();
-    sources()
+    all_sources()
         .into_iter()
         .map(|(slug, source)| page_of(database, slug, source))
         .find(|page| page.slug.to_lowercase() == wanted)
@@ -76,13 +99,16 @@ pub fn find(database: &Database, wanted: &str) -> Option<HelpPage> {
 
 /// 全部页面名（渲染 `[[Help:…]]` 时用：与笔记的键放进同一张表）
 pub fn slugs() -> Vec<String> {
-    sources().into_iter().map(|(slug, _)| slug.to_string()).collect()
+    all_sources()
+        .into_iter()
+        .map(|(slug, _)| slug.to_string())
+        .collect()
 }
 
 /// 一页在不在（解析地址时用；不渲染，省一次开销）
 pub fn exists(wanted: &str) -> bool {
     let wanted = wanted.trim().to_lowercase();
-    sources()
+    all_sources()
         .iter()
         .any(|(slug, _)| slug.to_lowercase() == wanted)
 }
@@ -127,10 +153,7 @@ mod tests {
         }
     }
 
-    /// 帮助菜单**就是这三页、这个顺序**（首页在最前，它是入口）。
-    ///
-    /// 顺带盯住"目录里多出来的文件"：多了（多半是名字写错）要在这里当场红，
-    /// 而不是悄悄不出现在菜单里 —— 那才是最难查的一种。
+    /// 菜单**就是这三页、这个顺序**（首页在最前，它是入口）
     #[test]
     fn the_help_menu_is_exactly_three_pages_in_order() {
         let database = scratch("fixed");
@@ -141,18 +164,33 @@ mod tests {
             vec!["首页", "目录", "语法速览"],
             "菜单就是这三页、这个顺序"
         );
-        assert_eq!(slugs(), vec!["首页", "目录", "语法速览"]);
 
-        let stray: Vec<String> = HELP
-            .files()
-            .filter_map(|file| {
-                file.path()
-                    .file_stem()
-                    .map(|stem| stem.to_string_lossy().to_string())
-            })
-            .filter(|stem| !PAGES.contains(&stem.as_str()))
-            .collect();
-        assert!(stray.is_empty(), "help/ 里这些文件不在帮助菜单里：{stray:?}");
+        cleanup(&database);
+    }
+
+    /// **菜单里没列的页，照样打得开** —— 往 `help/` 里丢一个新文件，它就该能被地址、
+    /// `[[Help:…]]` 与深链打开（只是暂时不在菜单里）。
+    ///
+    /// 这里踩过一次：把"菜单那张表"同时用在了"能不能打开"上，于是除了那三页，
+    /// 别的帮助页一律"没有这页帮助"（用户加的《开源协议》就这么打不开）。
+    #[test]
+    fn every_file_in_the_folder_is_openable_even_if_it_is_not_in_the_menu() {
+        let database = scratch("reachable");
+
+        for file in HELP.files() {
+            let Some(stem) = file.path().file_stem().and_then(|stem| stem.to_str()) else {
+                continue;
+            };
+            assert!(exists(stem), "{stem} 在 help/ 里，就该打得开");
+            assert!(
+                find(&database, stem).is_some(),
+                "{stem} 在 help/ 里，就该找得到"
+            );
+            assert!(
+                slugs().iter().any(|slug| slug == stem),
+                "{stem} 应当在页面名单里（[[Help:…]] 要认得它）"
+            );
+        }
 
         cleanup(&database);
     }

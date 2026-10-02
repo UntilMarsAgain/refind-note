@@ -57,6 +57,19 @@ pub fn list() -> Result<Vec<GpgKey>, String> {
     }
 
     let mut context = gpg_context().map_err(|error| error.to_string())?;
+
+    // 这台机器上**有私钥**的那些指纹。
+    //
+    // 不能看公开列举里那个 `secret` 标志：实测它一直是 `false`（gpgme 的公开列举不填它，
+    // 尽管 `sec:` 明明在钥匙环里）—— 于是"明明有私钥，程序却说只有公钥"，
+    // 连带签名时也选不着自己的钥匙。私钥得**单独问一遍**。
+    let with_secret: std::collections::BTreeSet<String> = context
+        .secret_keys()
+        .map_err(|error| error.to_string())?
+        .flatten()
+        .map(|key| key.fingerprint().unwrap_or_default().to_string())
+        .collect();
+
     let keys = context.keys().map_err(|error| error.to_string())?;
 
     let mut out = Vec::new();
@@ -76,12 +89,15 @@ pub fn list() -> Result<Vec<GpgKey>, String> {
         let created = primary.as_ref().and_then(|sub| sub.creation_time());
         let expires = primary.as_ref().and_then(|sub| sub.expiration_time());
 
+        // 先问一遍再交出去：`fingerprint` 这一行要挪进结构体里
+        let has_secret = with_secret.contains(&fingerprint);
+
         out.push(GpgKey {
             fingerprint,
             uids,
             // 信任看的是**主人**对这把钥匙的判定（自己签的、还是陌生人给的）
             trust: crate::storage::codec::trust_label(key.owner_trust()),
-            secret: key.has_secret(),
+            secret: has_secret,
             can_sign: key.can_sign(),
             can_encrypt: key.can_encrypt(),
             created: stamp(created),
@@ -170,6 +186,37 @@ fn stamp(at: Option<std::time::SystemTime>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **有私钥就要说"有"** —— 这里踩过一次：公开列举里那个 `secret` 标志一直是 false
+    /// （gpgme 不填它），于是"明明有私钥，页面说只有公钥、签名也选不着自己的钥匙"。
+    ///
+    /// 所以这条测的是：凡是 `secret_keys()` 认得出来的指纹，`list()` 也必须说 `secret`。
+    #[test]
+    fn a_key_with_a_secret_is_reported_as_such() {
+        if !crate::storage::codec::gpg_available() {
+            return; // 没有 gpg 的机器上这条不算数
+        }
+
+        let mut context = gpg_context().unwrap();
+        let mine: Vec<String> = context
+            .secret_keys()
+            .unwrap()
+            .flatten()
+            .map(|key| key.fingerprint().unwrap_or_default().to_string())
+            .collect();
+        if mine.is_empty() {
+            return; // 钥匙环里本来就没有私钥，没什么可钉的
+        }
+
+        let listed = list().unwrap();
+        for fingerprint in mine {
+            let found = listed
+                .iter()
+                .find(|key| key.fingerprint == fingerprint)
+                .unwrap_or_else(|| panic!("{fingerprint} 应当出现在列表里"));
+            assert!(found.secret, "{fingerprint} 有私钥，就该报 true");
+        }
+    }
 
     /// 钥匙串是**进程外**的东西，测试不去动它 —— 这里只钉住"没有 gpg 时不炸"。
     #[test]

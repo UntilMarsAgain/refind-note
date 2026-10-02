@@ -287,8 +287,9 @@ defineExpose({
 
         <NoteEditor
             v-else-if="mode.kind === 'edit'"
-            :key="noteTitle"
+            :key="tab?.id ?? noteTitle"
             :title="noteTitle"
+            :tab-id="tab?.id"
             @navigate="emit('edit-navigate', $event)"
         />
 
