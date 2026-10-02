@@ -1,3 +1,19 @@
+//   Refind Note is a note-taking software.
+//   Copyright (C) 2026 Until Mars Again
+//
+//   This program is free software: you can redistribute it and/or modify
+//   it under the terms of the GNU Affero General Public License as published by
+//   the Free Software Foundation, either version 3 of the License, or
+//   (at your option) any later version.
+//
+//   This program is distributed in the hope that it will be useful,
+//   but WITHOUT ANY WARRANTY; without even the implied warranty of
+//   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//   GNU Affero General Public License for more details.
+//
+//   You should have received a copy of the GNU Affero General Public License
+//   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 //! 用户帮助：仓库里 `help/` 目录下的那些 markdown。
 //!
 //! 整个目录**编译时**嵌进二进制（`include_dir`），运行时再照常渲染 —— 发布出去的

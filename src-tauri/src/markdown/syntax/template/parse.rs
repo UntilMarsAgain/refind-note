@@ -1,3 +1,19 @@
+//   Refind Note is a note-taking software.
+//   Copyright (C) 2026 Until Mars Again
+//
+//   This program is free software: you can redistribute it and/or modify
+//   it under the terms of the GNU Affero General Public License as published by
+//   the Free Software Foundation, either version 3 of the License, or
+//   (at your option) any later version.
+//
+//   This program is distributed in the hope that it will be useful,
+//   but WITHOUT ANY WARRANTY; without even the implied warranty of
+//   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//   GNU Affero General Public License for more details.
+//
+//   You should have received a copy of the GNU Affero General Public License
+//   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 //! 模板块的**头解析**：词法（引号、转义）与 `::名字 key=value …` 的拆解。
 //!
 //! 单独一个文件，是因为这里能写的东西太多：引号、转义、开关式参数。块的边界识别在

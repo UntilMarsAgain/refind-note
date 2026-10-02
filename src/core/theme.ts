@@ -1,3 +1,19 @@
+//   Refind Note is a note-taking software.
+//   Copyright (C) 2026 Until Mars Again
+//
+//   This program is free software: you can redistribute it and/or modify
+//   it under the terms of the GNU Affero General Public License as published by
+//   the Free Software Foundation, either version 3 of the License, or
+//   (at your option) any later version.
+//
+//   This program is distributed in the hope that it will be useful,
+//   but WITHOUT ANY WARRANTY; without even the implied warranty of
+//   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//   GNU Affero General Public License for more details.
+//
+//   You should have received a copy of the GNU Affero General Public License
+//   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 import {computed, ref, watch} from "vue";
 import {ThemeMode} from "../ipc/settings.ts";
 /* 两个 logo 是 `public/` 里的静态文件：按路径引用，不走打包器 —— 它们是**图标**，

@@ -1,13 +1,20 @@
 /*
- * 笔记正文排版。
- *
- * 内容由 Rust 端编译成 HTML 后用 v-html 注入，所以用 .note-body 前缀做作用域，
- * 而不是 Vue 的 scoped 样式 —— scoped 对 v-html 注入的节点不生效。
- *
- * 排版惯例参考 MediaWiki / Citizen 皮肤：标题下划线、引用左侧竖线、
- * 表格带表头底色、代码块自成一块。配色一律走 theme.css 的变量，因此
- * 浅色/深色切换自动跟随。
- */
+  Refind Note is a note-taking software.
+  Copyright (C) 2026 Until Mars Again
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU Affero General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU Affero General Public License for more details.
+
+  You should have received a copy of the GNU Affero General Public License
+  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
 
 .note-body {
   /* body 上是 user-select:none，正文必须显式放开，否则笔记没法复制 */
