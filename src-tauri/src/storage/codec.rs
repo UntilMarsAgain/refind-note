@@ -870,6 +870,32 @@ pub fn gpg_available() -> bool {
     }
 }
 
+/// 系统里的 gpg 是哪一个、什么版本（诊断页要报）；没有就是 `None`。
+///
+/// 只取版本那一行的原文 —— 排障时"是哪一家的 gpg、几版的"常常就是答案。
+pub fn gpg_version() -> Option<String> {
+    if !gpg_available() {
+        return None;
+    }
+
+    #[cfg(desktop)]
+    for program in ["gpg", "gpg2"] {
+        if let Ok(output) = Command::new(program).arg("--version").output() {
+            if output.status.success() {
+                let text = String::from_utf8_lossy(&output.stdout);
+                if let Some(first) = text.lines().next() {
+                    let first = first.trim();
+                    if !first.is_empty() {
+                        return Some(first.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
 /// 测试用：假装这台机器上没有 gpg（不假装就真去探）。
 #[cfg(test)]
 static FORCE_NO_GPG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);

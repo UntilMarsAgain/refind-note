@@ -14,8 +14,8 @@ pub fn install_scratch(dir: std::path::PathBuf) {
     let _ = SCRATCH.set(dir);
 }
 
-/// 这一台设备上放临时东西的地方
-fn scratch_dir() -> std::path::PathBuf {
+/// 这一台设备上放临时东西的地方（诊断页要报它：手机上不是 `/tmp`）
+pub fn scratch_dir() -> std::path::PathBuf {
     SCRATCH.get().cloned().unwrap_or_else(std::env::temp_dir)
 }
 

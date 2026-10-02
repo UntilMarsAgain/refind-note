@@ -45,6 +45,11 @@ pub use stdlib::TEMPLATES;
 use markdown_it::parser::block::{BlockRule, BlockState};
 use markdown_it::{MarkdownIt, Node, NodeValue, Renderer};
 
+/// 内置模板的名字（诊断页要报：模板出问题时，先看这一串对不对）
+pub fn names() -> Vec<&'static str> {
+    stdlib::TEMPLATES.iter().map(|(name, _)| *name).collect()
+}
+
 impl NodeValue for Template {
     fn render(&self, node: &Node, fmt: &mut dyn Renderer) {
         dispatch::render(self, node, fmt);

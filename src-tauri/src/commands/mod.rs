@@ -11,9 +11,11 @@
 //! - [`namespaces`]：命名空间表；
 //! - [`activity`]：最近更改、浏览历史、特殊页面；
 //! - [`sync`]：与 S3 兼容服务的同步；
-//! - [`platform`]：这台设备是桌面还是手机（另存为走哪条路靠它）。
+//! - [`platform`]：这台设备是桌面还是手机（另存为走哪条路靠它）；
+//! - [`diagnostics`]：诊断页要的那些事实（只有后端知道的那一半）。
 
 pub mod activity;
+pub mod diagnostics;
 pub mod files;
 pub mod help;
 pub mod keys;

@@ -68,6 +68,7 @@ pub fn run() {
         // 待打开地址先寄存在这里：窗口还没建好时（冷启动）也得有个地方放
         .manage(platform::deep_link::PendingAddress::default())
         .invoke_handler(tauri::generate_handler![
+            commands::diagnostics::diagnostics,
             commands::platform::platform_kind,
             commands::workspace::open_workspace,
             commands::workspace::save_preferences,

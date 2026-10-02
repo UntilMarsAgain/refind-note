@@ -72,6 +72,51 @@ pub fn deliver_from_arguments<I: IntoIterator<Item = String>>(app: &AppHandle, a
     }
 }
 
+/// Linux 上那份"只认协议、不进应用菜单"的桌面项叫什么
+#[cfg(target_os = "linux")]
+const DESKTOP_NAME: &str = "refind-note-handler.desktop";
+
+/// `refind://` 现在注册成什么样了（诊断页要报）。
+///
+/// Linux 上要的是**两处都在**：桌面项文件，以及 `mimeapps.list` 里那条默认关联。
+/// 只写了一半是能复现的坑（早期版本就漏过后一条），所以这里分开说。
+/// 别的平台由打包时的声明管（macOS 是 Info.plist、Windows 是注册表），运行时无从查起。
+pub fn status(app: &AppHandle) -> String {
+    #[cfg(target_os = "linux")]
+    {
+        let Ok(data) = app.path().data_dir() else {
+            return "问不到用户数据目录".to_string();
+        };
+        let desktop = data.join("applications").join(DESKTOP_NAME);
+        let has_desktop = desktop.is_file();
+
+        let line = format!("x-scheme-handler/{SCHEME}={DESKTOP_NAME};");
+        let linked = app
+            .path()
+            .config_dir()
+            .ok()
+            .and_then(|config| std::fs::read_to_string(config.join("mimeapps.list")).ok())
+            .map(|text| text.lines().any(|it| it.trim() == line))
+            .unwrap_or(false);
+
+        return match (has_desktop, linked) {
+            (true, true) => "已注册（桌面项与默认关联都在）".to_string(),
+            (true, false) => "桌面项在，但默认关联没写进 mimeapps.list".to_string(),
+            (false, _) => "还没注册（找不到那份 .desktop）".to_string(),
+        };
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = app;
+        if cfg!(mobile) {
+            "手机上由打包时的清单决定（Android 认 intent-filter，iOS 认 Info.plist）".to_string()
+        } else {
+            "由打包时的声明决定（macOS 是 Info.plist、Windows 是注册表）".to_string()
+        }
+    }
+}
+
 /// 把 `refind://` 注册给系统。
 #[cfg(target_os = "linux")]
 pub fn register(app: &AppHandle) -> Result<(), String> {
@@ -115,7 +160,7 @@ fn register_on_linux(app: &AppHandle) -> Result<(), String> {
         .map_err(|error| format!("建不出 {}：{error}", applications.display()))?;
 
     // 一份"只认协议、不进应用菜单"的桌面项（`NoDisplay=true` 就是后者）
-    let desktop_name = "refind-note-handler.desktop".to_string();
+    let desktop_name = DESKTOP_NAME.to_string();
     let desktop_path = applications.join(&desktop_name);
     let name = app
         .config()

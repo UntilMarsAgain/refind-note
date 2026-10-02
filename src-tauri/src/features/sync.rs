@@ -427,6 +427,35 @@ fn settings_path(workspace: &Workspace) -> PathBuf {
     workspace.settings_file("sync.json")
 }
 
+/// 记账本现在的样子：对上了几份、什么时候记的（诊断页要报）
+pub struct IndexFacts {
+    /// 索引里记着几份文件（"上次对齐时它们是什么样"）
+    pub files: usize,
+    /// 这个文件最后一次改动是什么时候（RFC3339）；还没有就是空串
+    pub updated: String,
+}
+
+/// 读一眼记账本（读不动就是空的，不报错 —— 诊断页不该因为读不出来就打不开）
+pub fn index_facts(workspace: &Workspace) -> IndexFacts {
+    let path = index_path(workspace);
+    let index = read_json::<Index>(&path);
+
+    let updated = std::fs::metadata(&path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .map(|at| {
+            OffsetDateTime::from(at)
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap_or_default()
+        })
+        .unwrap_or_default();
+
+    IndexFacts {
+        files: index.files.len(),
+        updated,
+    }
+}
+
 /// 对齐索引（`settings/sync-index.json`）
 fn index_path(workspace: &Workspace) -> PathBuf {
     workspace.settings_file("sync-index.json")

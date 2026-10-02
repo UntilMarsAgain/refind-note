@@ -6,9 +6,5 @@
 /// 统一由后端放进下载目录（见 [`crate::platform::saving`]）。
 #[tauri::command]
 pub fn platform_kind() -> &'static str {
-    if cfg!(mobile) {
-        "mobile"
-    } else {
-        "desktop"
-    }
+    crate::platform::kind()
 }

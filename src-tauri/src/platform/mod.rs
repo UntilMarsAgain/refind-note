@@ -14,6 +14,18 @@ pub mod protocol;
 pub mod saving;
 pub mod staging;
 
+/// 这台设备是什么：`"desktop"` 或 `"mobile"`（编译期就定了，不是运行时探测）。
+///
+/// 有几处要按它分叉：另存为走不走系统对话框（见 [`saving`]）、GPG 那一层在不在
+/// （见 `storage::codec`）、仓库落在哪（见 `storage::workspace::install_root`）。
+pub fn kind() -> &'static str {
+    if cfg!(mobile) {
+        "mobile"
+    } else {
+        "desktop"
+    }
+}
+
 /// 把 URL 里的百分号编码换回原文（不是合法转义就原样留着）。
 ///
 /// 三处都要用：二进制上传的文件名走请求头、`refind://` 的地址来自命令行、

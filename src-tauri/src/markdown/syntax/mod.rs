@@ -9,9 +9,16 @@ pub mod wikilink;
 
 use markdown_it::MarkdownIt;
 
-/// 把所有自定义语法注册到解析器上。
+/// 所有自定义语法注册到解析器上。
 pub fn register(md: &mut MarkdownIt) {
     math::add(md);
     template::add(md);
     wikilink::add(md);
+}
+
+/// 这一层带了哪几种语法（诊断页要报）。
+///
+/// 与上面 `register` 里那三行一一对应 —— 加一种就两边一起加。
+pub fn names() -> [&'static str; 3] {
+    ["math（$…$ / $$…$$）", "template（::名字）", "wikilink（[[目标]]）"]
 }

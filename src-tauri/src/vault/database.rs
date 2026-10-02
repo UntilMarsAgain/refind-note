@@ -232,6 +232,23 @@ impl Database {
     }
 
     /// 已删除笔记的日志目录
+    /// 仓库里有多少东西 —— 只数文件名与大小，**不读内容**（诊断页要报）。
+    ///
+    /// 刻意不去数"有多少篇笔记"：那要把每篇的事件日志读一遍，加密的那些还会碰锁。
+    /// 这里报的是磁盘上的实情：日志几份、内容块几个、占多少、草稿与回收站各几条。
+    pub fn facts(&self) -> RepositoryFacts {
+        // `root` 就是 `db/` 那一层（blobs / objects / drafts 都在它下面）
+        let (blobs, blob_bytes) = count_files(&self.root.join(BLOBS_DIR));
+        RepositoryFacts {
+            logs: count_files(&self.objects_dir()).0,
+            drafts: count_files(&self.drafts_dir()).0,
+            trash: count_files(&self.trash_dir()).0,
+            blobs,
+            blob_bytes,
+            database_bytes: directory_bytes(&self.root),
+        }
+    }
+
     pub fn trash_dir(&self) -> PathBuf {
         self.root.join(TRASH_DIR)
     }
@@ -380,6 +397,46 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    /// 仓库规模数得对（诊断页报的就是这一串）
+    ///
+    /// 顺带钉住路径的基准：`root` **就是 `db/` 那一层** —— 数内容块时写成
+    /// `db/blobs` 会数到零（第一版就写错过）。
+    #[test]
+    fn facts_count_what_is_really_there() {
+        let root = scratch("facts");
+        let database = open(&root).unwrap();
+
+        // 刚建出来的库：三处都空着（`db/` 目录本身已经在了）
+        let empty = database.facts();
+        assert_eq!(empty.logs, 0, "{empty:?}");
+        assert_eq!(empty.blobs, 0, "{empty:?}");
+        assert_eq!(empty.drafts, 0, "{empty:?}");
+        assert_eq!(empty.trash, 0, "{empty:?}");
+
+        // 各丢一份进去：内容块（内容寻址那两级目录）、事件日志、草稿、回收站
+        let blob = database.blobs().path_of("abc123");
+        fs::create_dir_all(blob.parent().unwrap()).unwrap();
+        fs::write(&blob, vec![0u8; 100]).unwrap();
+
+        let log = database.objects_dir().join(MAIN_ID).join("1.log");
+        fs::write(&log, "{}\n").unwrap();
+        let draft = database.drafts_dir().join("1");
+        fs::write(&draft, "写了一半").unwrap();
+        let trashed = database.trash_dir().join(MAIN_ID).join("2.log");
+        fs::create_dir_all(trashed.parent().unwrap()).unwrap();
+        fs::write(&trashed, "{}\n").unwrap();
+
+        let facts = database.facts();
+        assert_eq!(facts.logs, 1, "{facts:?}");
+        assert_eq!(facts.blobs, 1, "{facts:?}");
+        assert_eq!(facts.blob_bytes, 100, "{facts:?}");
+        assert_eq!(facts.drafts, 1, "{facts:?}");
+        assert_eq!(facts.trash, 1, "{facts:?}");
+        assert!(facts.database_bytes >= 100, "{facts:?}");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
     /// 老仓库里的 `config.json` 会被搬成 `repository.json`，设置不丢
     #[test]
     fn the_old_config_file_is_moved_to_its_new_name() {
@@ -463,4 +520,48 @@ mod tests {
 
         let _ = fs::remove_dir_all(&root);
     }
+}
+
+/// 仓库里有多少东西（诊断页）
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RepositoryFacts {
+    /// 事件日志几份（`db/objects/<命名空间>/<id>.log`）
+    pub logs: usize,
+    /// 草稿槽位几个（`db/drafts/`，写了一半的）
+    pub drafts: usize,
+    /// 回收站里几条（`trash/`）
+    pub trash: usize,
+    /// 内容块几个（`db/blobs/ab/<sha256>`，内容寻址）
+    pub blobs: usize,
+    /// 内容块一共占多少字节（磁盘上那份，含压缩/加密后的封装）
+    pub blob_bytes: u64,
+    /// `db/` 整个目录占多少字节
+    pub database_bytes: u64,
+}
+
+/// 数一数目录里有多少个文件、一共多少字节（子目录也算；数不出来就是 0）
+fn count_files(directory: &std::path::Path) -> (usize, u64) {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return (0, 0);
+    };
+
+    let mut count = 0usize;
+    let mut bytes = 0u64;
+    for entry in entries.flatten() {
+        let Ok(kind) = entry.file_type() else { continue };
+        if kind.is_dir() {
+            let (inner, inner_bytes) = count_files(&entry.path());
+            count += inner;
+            bytes += inner_bytes;
+            continue;
+        }
+        count += 1;
+        bytes += entry.metadata().map(|meta| meta.len()).unwrap_or(0);
+    }
+    (count, bytes)
+}
+
+/// 整个目录占多少字节（数不出来就是 0）
+fn directory_bytes(directory: &std::path::Path) -> u64 {
+    count_files(directory).1
 }
