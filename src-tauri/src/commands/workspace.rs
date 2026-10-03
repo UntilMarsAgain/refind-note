@@ -75,6 +75,20 @@ pub fn save_preferences(preferences: Preferences) -> Result<Preferences, String>
     settings::save(&workspace, preferences)
 }
 
+/// 读键位表（`settings/keymap.json`，与偏好分开存，见 `crate::keymap`）
+#[tauri::command]
+pub fn load_keymap() -> Result<crate::keymap::Keymap, String> {
+    let (workspace, _) = open_database()?;
+    crate::keymap::load(&workspace)
+}
+
+/// 写键位表，返回**实际存下去的那一份**（可能已被收进合法范围）
+#[tauri::command]
+pub fn save_keymap(keymap: crate::keymap::Keymap) -> Result<crate::keymap::Keymap, String> {
+    let (workspace, _) = open_database()?;
+    crate::keymap::save(&workspace, keymap)
+}
+
 #[tauri::command]
 pub fn set_protection(protection: Policy) -> Result<(), String> {
     let (_, database) = open_database()?;

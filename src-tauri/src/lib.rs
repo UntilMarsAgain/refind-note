@@ -28,6 +28,7 @@
 
 pub mod commands;
 pub mod features;
+pub mod keymap;
 pub mod markdown;
 pub mod platform;
 pub mod settings;
@@ -88,6 +89,8 @@ pub fn run() {
             commands::platform::platform_kind,
             commands::workspace::open_workspace,
             commands::workspace::save_preferences,
+            commands::workspace::load_keymap,
+            commands::workspace::save_keymap,
             commands::workspace::set_protection,
             commands::workspace::set_maintenance,
             commands::notes::parse_address,
