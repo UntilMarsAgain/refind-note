@@ -23,7 +23,6 @@ import AppMenu from "./components/shell/AppMenu.vue";
 import ContextMenu from "./components/shell/ContextMenu.vue";
 import DebugPanel from "./components/shell/DebugPanel.vue";
 import FloatingTools from "./components/shell/FloatingTools.vue";
-import ImageViewer from "./components/shell/ImageViewer.vue";
 import RenderPane from "./components/shell/RenderPane.vue";
 import StartupError from "./components/shell/StartupError.vue";
 import StartupLoading from "./components/shell/StartupLoading.vue";
@@ -452,8 +451,6 @@ async function interceptClose() {
       <p class="closing-sync__hint">没传完的东西留在本机，下次同步会接着传。</p>
     </div>
   </div>
-
-  <ImageViewer/>
 
   <ContextMenu/>
 

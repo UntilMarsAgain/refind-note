@@ -25,6 +25,7 @@ import { applyLineNumbers, codeLineNumbers, highlightCode } from "../../dom/code
 import { decorateNoteHtml } from "../../dom/note-html.ts";
 import { saveNameOf, saveVaultFile, savableTitle } from "../../dom/file-save.ts";
 import { flash } from "../../core/notice.ts";
+import ImageViewer from "../shell/ImageViewer.vue";
 
 /**
  * 正文：把后端渲染好的 HTML 注入进来，再做一遍 DOM 收尾。
@@ -289,4 +290,16 @@ function onClickCode(event: MouseEvent) {
     v-html="html"
     @click="onClick"
   />
+
+  <!--
+    大图查看器挂在这儿，而不是 `App.vue`。
+
+    它是 `position: fixed` 的浮层，以前挂在窗口一级：A 栏点开一张图、切到 B 栏，
+    浮层跟着飘过去，盖在 B 栏上 —— 看的是 A 栏的图，而 B 栏的人根本不知道它从哪来。
+
+    挂进正文之后它跟着这一页走：视图被 KeepAlive 缓存起来时，浮层一起被缓存
+    （父节点 `display: none`，fixed 定位不受影响）；切回来时它还在。
+    至于"切到别的一栏"—— `ImageViewer` 在被停用时会自己收起来，见那边。
+  -->
+  <ImageViewer/>
 </template>

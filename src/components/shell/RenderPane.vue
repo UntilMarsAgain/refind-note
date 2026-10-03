@@ -118,6 +118,24 @@ const isNewTab = computed(() => route.value === null || specialPage.value === "n
 /** 宽度限制器：偏好里的一项 */
 const limited = computed(() => preferences.value.limit_width);
 
+/**
+ * 同时**常驻**几个标签页的视图（设置里可调）。
+ *
+ * 常驻 = 那个视图不被销毁，于是编辑器实例、选区、预览栏滚动、图片查看器这些
+ * **组件自己的状态**都原样留着 —— 切回来不用重新搭。这是"切出去再切回来不自然"
+ * 的解药：以前靠的是"销毁之后手工把状态搬回来"，而搬漏一项就露一次馅。
+ */
+const residentLimit = computed(() => preferences.value.resident_tabs);
+
+/**
+ * 视图在缓存里的身份。
+ *
+ * 做成 computed 而不是模板里写 `tab.id`：`v-if="!tab"` 那条兜底是 `<KeepAlive>` 的
+ * **兄弟**而不是祖先，所以框架的类型收窄到不了里面，模板里直接写 `tab.id` 会报
+ * "possibly null"。空串只在没有标签页时出现 —— 那条分支本来就不渲染任何视图。
+ */
+const viewKey = computed(() => props.tab?.id ?? "");
+
 /** 滚动容器。滚动位置也属于"这个标签页的浏览状态"，所以存进标签页自己 */
 const scroller = ref<HTMLElement | null>(null);
 
@@ -198,39 +216,69 @@ defineExpose({
       <!-- 理论上窗口里至少有一个标签页，这条是兜底 -->
       <p v-if="!tab" class="pane__hint">当前没有打开的标签页。</p>
 
-      <SettingsPage v-else-if="specialPage === 'settings'" :focus="section"/>
-
-      <DebugPage v-else-if="specialPage === 'debug'"/>
-
-      <FilesPage
-          v-else-if="specialPage === 'files'"
-          @navigate="emit('navigate', $event)"
-      />
-
-      <ChangesPage v-else-if="specialPage === 'changes'" @open="emit('navigate', $event)"/>
-
-      <HistoryPage v-else-if="specialPage === 'history'" @navigate="emit('navigate', $event)"/>
-
-      <KeysPage v-else-if="specialPage === 'keys'"/>
-
-      <TrashPage
-          v-else-if="specialPage === 'trash'"
-          @navigate="emit('navigate', $event)"
-      />
-
-      <GcPage v-else-if="specialPage === 'gc'" @navigate="emit('navigate', $event)"/>
-
-      <AllPages v-else-if="specialPage === 'all'" @navigate="emit('navigate', $event)"/>
-
       <!--
-        文件页面（`File:桥.png`）：正文是字节，所以"看"这一态交给文件视图；
-        历史与删除与笔记**走同一套**（事件日志是同一种）——
-        先前这里只看 `filePage`、不看状态，于是那两个按钮点下去又回到原地。
+        **常驻**：切走的标签页不被销毁 —— 于是编辑器实例、选区、预览栏的滚动、
+        图片查看器这些**组件自己的状态**都原样留着，切回来不用重新搭。
+
+        这是"切出去再切回来不自然"的解药。以前靠的是"销毁之后手工把状态搬回来"，
+        而那种做法**搬漏一项就露一次馅**：今天补了光标，明天就会漏掉预览栏的滚动。
+
+        `max` 就是设置里那个"常驻标签页数"，超出的按最近没用过的先踢。被踢掉的那一个
+        并不是真丢了 —— 滚动位置每次滚动就写进 `tab.scroll`，编辑器另有 `editor-state`
+        兜着，重新进来时从那两份手工状态还原。
+
+        key 一律用 `tab.id`：所有视图都 watch 自己的身份 props 并重读（见各组件里
+        `watch(() => [props.title, props.reference], …)` 那一处），所以复用实例读到的
+        不会是上一篇的内容。同一个标签页换视图（看 → 历史）是**组件类型变了**，
+        KeepAlive 会把旧的那一份挤掉 —— 那是对的，旧视图本来就不再显示了。
       -->
-      <template v-else-if="filePage && mode">
+      <KeepAlive :max="residentLimit">
+        <SettingsPage v-if="specialPage === 'settings'" :key="viewKey" :focus="section"/>
+
+        <DebugPage v-else-if="specialPage === 'debug'" :key="viewKey"/>
+
+        <FilesPage
+            v-else-if="specialPage === 'files'"
+            :key="viewKey"
+            @navigate="emit('navigate', $event)"
+        />
+
+        <ChangesPage
+            v-else-if="specialPage === 'changes'"
+            :key="viewKey"
+            @open="emit('navigate', $event)"
+        />
+
+        <HistoryPage
+            v-else-if="specialPage === 'history'"
+            :key="viewKey"
+            @navigate="emit('navigate', $event)"
+        />
+
+        <KeysPage v-else-if="specialPage === 'keys'" :key="viewKey"/>
+
+        <TrashPage
+            v-else-if="specialPage === 'trash'"
+            :key="viewKey"
+            @navigate="emit('navigate', $event)"
+        />
+
+        <GcPage v-else-if="specialPage === 'gc'" :key="viewKey" @navigate="emit('navigate', $event)"/>
+
+        <AllPages v-else-if="specialPage === 'all'" :key="viewKey" @navigate="emit('navigate', $event)"/>
+
+        <!--
+          文件页面（`File:桥.png`）：正文是字节，所以"看"这一态交给文件视图；
+          历史与删除与笔记**走同一套**（事件日志是同一种）——
+          先前这里只看 `filePage`、不看状态，于是那两个按钮点下去又回到原地。
+
+          原来这两支是包在一个 `<template v-else-if>` 里的。那种包法会产生
+          **fragment**，而 fragment 是不会被 KeepAlive 缓存的 —— 所以条件摊到了
+          每一片上，顺带让 `v-else-if` 的类型收窄继续有效。
+        -->
         <FileView
-            v-if="mode.kind === 'view'"
-            :key="`${filePage.title}@${mode.ref ?? ''}`"
+            v-else-if="filePage && mode && mode.kind === 'view'"
+            :key="viewKey"
             :title="filePage.title"
             :reference="mode.ref"
             :collapsed="collapsed"
@@ -240,7 +288,8 @@ defineExpose({
         />
 
         <HistoryView
-            v-else-if="mode.kind === 'history'"
+            v-else-if="filePage && mode && mode.kind === 'history'"
+            :key="viewKey"
             :title="filePage.title"
             @open-version="emit('open-version', { title: filePage.title, rev: $event })"
             @rollback="emit('rollback-version', { title: filePage.title, rev: $event })"
@@ -248,48 +297,49 @@ defineExpose({
         />
 
         <DeleteView
-            v-else-if="mode.kind === 'delete'"
+            v-else-if="filePage && mode && mode.kind === 'delete'"
+            :key="viewKey"
             :title="filePage.title"
             @cancel="emit('navigate', filePage.title)"
             @deleted="emit('deleted')"
         />
 
         <RollbackView
-            v-else-if="mode.kind === 'rollback'"
+            v-else-if="filePage && mode && mode.kind === 'rollback'"
+            :key="viewKey"
             :title="filePage.title"
             :reference="mode.ref"
             @cancel="emit('navigate', `${filePage.title}@view-${mode.ref}`)"
             @rolled-back="emit('rolled-back', $event)"
         />
-      </template>
 
-      <CrossSiteView
-          v-else-if="crossSite"
-          :key="crossSite.url"
-          :title="crossSite.title"
-          :url="crossSite.url"
-      />
+        <CrossSiteView
+            v-else-if="crossSite"
+            :key="viewKey"
+            :title="crossSite.title"
+            :url="crossSite.url"
+        />
 
-      <HelpView
-          v-else-if="helpPage"
-          :key="`${helpPage.page}@${mode?.kind ?? ''}`"
-          :page="helpPage.page"
-          :display="helpPage.title"
-          :source="mode?.kind === 'edit'"
-          :editable="route?.editable ?? false"
-          :starred="starredHere"
-          :collapsed="collapsed"
-          @navigate="emit('navigate', $event)"
-          @section="emit('section', $event)"
-          @toggle-star="onToggleStar"
-      />
+        <HelpView
+            v-else-if="helpPage"
+            :key="viewKey"
+            :page="helpPage.page"
+            :display="helpPage.title"
+            :source="mode?.kind === 'edit'"
+            :editable="route?.editable ?? false"
+            :starred="starredHere"
+            :collapsed="collapsed"
+            @navigate="emit('navigate', $event)"
+            @section="emit('section', $event)"
+            @toggle-star="onToggleStar"
+        />
 
-      <NewTabView v-else-if="isNewTab" @open="emit('navigate', $event)"/>
+        <NewTabView v-else-if="isNewTab" :key="viewKey" @open="emit('navigate', $event)"/>
 
-      <template v-else-if="noteTitle && mode">
+        <!-- 笔记的各状态。条件同样摊平（理由见上面文件那一支） -->
         <NoteView
-            v-if="mode.kind === 'view'"
-            :key="`${noteTitle}@${mode.ref ?? ''}`"
+            v-else-if="noteTitle && mode && mode.kind === 'view'"
+            :key="viewKey"
             :title="noteTitle"
             :reference="mode.ref"
             :collapsed="collapsed"
@@ -304,15 +354,16 @@ defineExpose({
         />
 
         <NoteEditor
-            v-else-if="mode.kind === 'edit'"
-            :key="tab?.id ?? noteTitle"
+            v-else-if="noteTitle && mode && mode.kind === 'edit'"
+            :key="viewKey"
             :title="noteTitle"
             :tab-id="tab?.id"
             @navigate="emit('edit-navigate', $event)"
         />
 
         <HistoryView
-            v-else-if="mode.kind === 'history'"
+            v-else-if="noteTitle && mode && mode.kind === 'history'"
+            :key="viewKey"
             :title="noteTitle"
             @open-version="emit('open-version', { title: noteTitle, rev: $event })"
             @rollback="emit('rollback-version', { title: noteTitle, rev: $event })"
@@ -320,14 +371,16 @@ defineExpose({
         />
 
         <DeleteView
-            v-else-if="mode.kind === 'delete'"
+            v-else-if="noteTitle && mode && mode.kind === 'delete'"
+            :key="viewKey"
             :title="noteTitle"
             @cancel="emit('navigate', noteTitle)"
             @deleted="emit('deleted')"
         />
 
         <RollbackView
-            v-else-if="mode.kind === 'rollback'"
+            v-else-if="noteTitle && mode && mode.kind === 'rollback'"
+            :key="viewKey"
             :title="noteTitle"
             :reference="mode.ref"
             @cancel="emit('navigate', `${noteTitle}@view-${mode.ref}`)"
@@ -335,23 +388,25 @@ defineExpose({
         />
 
         <UnlockView
-            v-else-if="mode.kind === 'unlock'"
+            v-else-if="noteTitle && mode && mode.kind === 'unlock'"
+            :key="viewKey"
             :title="noteTitle"
             :reference="mode.ref"
             @navigate="emit('navigate', $event)"
             @cancel="emit('unlock-cancel')"
             @unlocked="emit('unlocked')"
         />
-      </template>
 
-      <MissingView
-          v-else-if="missingTitle"
-          :title="missingTitle"
-          @create="emit('create-note', missingTitle)"
-      />
+        <MissingView
+            v-else-if="missingTitle"
+            :key="viewKey"
+            :title="missingTitle"
+            @create="emit('create-note', missingTitle)"
+        />
 
-      <!-- 兜底：到不了这里，真到了也别白屏 -->
-      <p v-else class="pane__hint">此页面暂无对应视图。</p>
+        <!-- 兜底：到不了这里，真到了也别白屏 -->
+        <p v-else class="pane__hint">此页面暂无对应视图。</p>
+      </KeepAlive>
     </div>
   </main>
 </template>

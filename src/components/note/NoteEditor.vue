@@ -17,7 +17,7 @@
 -->
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, shallowRef, watch } from "vue";
+import { onBeforeUnmount, onDeactivated, onMounted, shallowRef, watch } from "vue";
 import type { EditorView } from "@codemirror/view";
 import { Check, ImagePlus, RotateCcw, Save, Trash2, X } from "@lucide/vue";
 import StoragePicker from "../common/StoragePicker.vue";
@@ -121,6 +121,20 @@ onMounted(async () => {
     // 视线落回原处"就只在"重试"那条路上生效。
     editor.applyPendingRestore();
     void preview.refresh(editor.markdown.value);
+});
+
+/**
+ * 切走时（标签页被 KeepAlive 缓存起来）：**编辑器还在**，所以这一次落盘是实打实的。
+ *
+ * 这一条是常驻带来的：以前切标签页会卸载组件，`onBeforeUnmount` 顺手把草稿兜底
+ * 落一次；现在不卸载了，那次落盘就没有了 —— 只剩"停手三秒"的自动保存顶着。
+ * 开着编辑器切走、立刻关窗，那三秒里的字就悬在半空。所以这里补上。
+ *
+ * `codeMirror.destroy()` **不在这里做**：那是拆实例，切走时实例还要留着（切回来
+ * 继续用同一个编辑器）。
+ */
+onDeactivated(() => {
+    editor.flushOnLeave();
 });
 
 onBeforeUnmount(() => {

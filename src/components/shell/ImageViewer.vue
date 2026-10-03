@@ -17,7 +17,7 @@
 -->
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onDeactivated } from "vue";
 import { X } from "@lucide/vue";
 import { closeImage, viewingImage } from "../../dom/image-viewer.ts";
 import { saveNameOf, saveVaultFile, savableTitle } from "../../dom/file-save.ts";
@@ -26,10 +26,25 @@ import { flash } from "../../core/notice.ts";
 /**
  * 看大图：整屏一层，点哪都关。
  *
- * 它挂在应用根上（`App.vue`），所以正文里任何一张图都能调它 —— 阅读页与编辑器预览
- * 用的是同一份状态。
+ * 它挂在**正文里**（`NoteContent.vue`，笔记与帮助页都走那儿），不再挂在应用根上 ——
+ * 因为它是 `position: fixed` 的浮层，挂在窗口一级的话，A 栏点开的图会跟着飘到 B 栏。
+ *
+ * 状态本身仍是 `dom/image-viewer.ts` 里那**一份模块级**的（正文里的图片点一下就调它，
+ * 而那些点击处理器是 DOM 级的、拿不到组件实例）。单例配多份实例，所以下面那条
+ * `onDeactivated` 是必需的，不是顺手加的。
  */
 const image = computed(() => viewingImage.value);
+
+/**
+ * 这一页被缓存起来（切到别的标签页）时**收起大图**。
+ *
+ * 状态是全局一份的：不收的话，切到 B 栏会看到 A 栏点开的那张图 —— 而 B 栏的人
+ * 根本不知道自己刚才"看"了什么。按浏览器的脾气，浮层属于打开它的那一页，
+ * 离开那一页就该收。
+ */
+onDeactivated(() => {
+    closeImage();
+});
 
 /** 能另存为的才给按钮：本仓库的文件可以，外链图片不揽这件事 */
 const title = computed(() => (image.value ? savableTitle(image.value.url) : null));
