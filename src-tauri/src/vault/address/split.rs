@@ -5,10 +5,12 @@
 //! 原样保留）能单独讲清楚，不必混在一大段解析里。
 
 
+// 字段也得是 `pub(super)`：子模块的**私有**方法父模块调得到，私有**字段**却调不到
+// —— 父模块 `parse` 要拿这三段拼地址去。私有性是"逐层"判的，这一条容易踩。
 pub(super) struct AddressParts {
-    name: String,
-    state: Option<String>,
-    section: Option<String>,
+    pub(super) name: String,
+    pub(super) state: Option<String>,
+    pub(super) section: Option<String>,
 }
 
 /// 把 `名称[@状态][#段落]` 拆成三部分。

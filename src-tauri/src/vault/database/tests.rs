@@ -5,8 +5,6 @@
 
 use super::*;
 
-use super::*;
-
 fn scratch(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "refind-note-database-test-{}-{name}",

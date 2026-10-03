@@ -3,9 +3,6 @@
 //! 这一层的规矩是"拼写必须唯一"：同一个意思只有一个写法，规范串与解析结果要能对上。
 
 use super::*;
-use super::split::split_address;
-use super::state::{mode_of, state_of};
-
 
 /// 测试用的命名空间表：内建的那三个
 fn table() -> NamespaceTable {
