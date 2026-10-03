@@ -81,6 +81,19 @@ const find = useFindInPage();
 /** `NoteContent` 用 `defineExpose` 交出来的正文容器（查找要往里包 `<mark>`） */
 const contentRef = ref<InstanceType<typeof NoteContent> | null>(null);
 
+const entry = ref<HelpPage | null>(null);
+const problem = ref("");
+const loading = ref(false);
+
+// 下面这几个 watch 里有两个是 `immediate: true` —— 它们**在 setup 还没走完时就跑一遍**。
+// 所以凡是它们用到的状态（`entry`）必须声明在上面。我第一版把这一整块插在
+// 状态声明**之前**，于是首次打开帮助页必然抛
+// `ReferenceError: Cannot access 'entry' before initialization`（TDZ）。
+//
+// 症状很轻（页面照常显示，只是控制台里两声报错），所以很容易被当成"无害噪音"
+// 放过 —— 但它意味着那两个 `immediate` 的首轮回调其实**没跑成**，
+// `findable` 报的仍是初值。改这块顺序时留意。
+
 // 把容器交给查找层；换了容器就收掉高亮（它属于旧正文）
 watch(
   contentRef,
@@ -122,10 +135,6 @@ watch(
     }
   },
 );
-
-const entry = ref<HelpPage | null>(null);
-const problem = ref("");
-const loading = ref(false);
 
 async function load() {
   loading.value = true;
