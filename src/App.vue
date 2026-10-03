@@ -31,7 +31,6 @@ import TabRail from "./components/shell/TabRail.vue";
 import WindowResizeHandles from "./components/shell/WindowResizeHandles.vue";
 import WindowTitleBar from "./components/shell/WindowTitleBar.vue";
 import { listen } from "@tauri-apps/api/event";
-import { withSection } from "./core/address.ts";
 import { addressFromDeepLink } from "./core/deep-link.ts";
 import type { HelpPage } from "./ipc/help.ts";
 import { loadBrowsing } from "./core/browsing.ts";
@@ -50,6 +49,8 @@ import {
 import { restartStartup, startupPhase } from "./core/startup.ts";
 import { formatBytes, type MaintenanceReport } from "./ipc/maintenance.ts";
 import { useTabs } from "./core/tabs.ts";
+import { useNavigation } from "./core/use-navigation.ts";
+import { useShortcuts } from "./core/use-shortcuts.ts";
 import { installWheelZoom } from "./dom/zoom-wheel.ts";
 
 /**
@@ -60,7 +61,12 @@ import { installWheelZoom } from "./dom/zoom-wheel.ts";
  * - `RenderPane` 显示当前标签页对应的视图。
  *
  * 三块之间没有"谁驱动谁"的关系 —— 它们只是**读同一份标签页状态**。
- * 状态本身在 `useTabs()` 里，这里只做组装、导航入口与键盘快捷键。
+ * 状态本身在 `useTabs()` 里，这里只做**装配**：顶栏菜单、开机那一轮、
+ * 监听器的装与摘，以及把三块接到标签页上。
+ *
+ * 「导航胶水层」（页面之间怎么走）与「快捷键」各自搬去了
+ * `core/use-navigation.ts` / `core/use-shortcuts.ts` —— 它们变更的原因与装配不同，
+ * 而标签页状态仍然只有 `useTabs()` 这一份，能力是**递进去**的，不是复制一份。
  */
 const {
   tabs,
@@ -117,16 +123,6 @@ function onSubmit(value: string) {
   void navigate(value, "push");
 }
 
-/** 标题栏那颗首页按钮：回新标签页（它也是一个地址，走同一条导航） */
-function openHome() {
-  void navigate("special:newtab", "push");
-}
-
-/** 标签栏底下的入口：它也是地址（`special:xxx`），算一次跳转 */
-function openSpecial(page: string) {
-  void navigate(`special:${page}`, "push");
-}
-
 /** 站点名：菜单面板顶上那一行 */
 const APP_NAME = "重逢笔记";
 
@@ -174,160 +170,29 @@ function openTabWith(input: string) {
   void newTabWith(input);
 }
 
-/** 正文里点了内部链接：算一次跳转 */
-function openNote(title: string) {
-  void navigate(title, "push");
-}
-
 /**
- * 页面上锁时改去 `@unlock`。
+ * 导航胶水层：把上面这些入口接到标签页上。
  *
- * 走**替换**而不是压新记录：从解锁页后退回来会又落到这一页、又被送去解锁，
- * 来回打转。换掉脚下这条之后，后退回到的还是进来之前那一页。
+ * 标签页状态还是 `useTabs()` 那**一份**，这里只是把它要用的几项能力递进去
+ * （不复制状态，见 `core/use-navigation.ts` 的模块头）。
  */
-function redirectNote(input: string) {
-  void navigate(input, "replace");
-}
-
-/** 正文里的内部链接被 Ctrl/Cmd 点击：在新标签页打开 */
-function openNoteInNewTab(title: string) {
-  void newTabWith(title);
-}
-
-/**
- * 正文里点了页内锚点：把章节叠进当前地址。
- *
- * 前缀（名称、状态）原样保留，只换 `#` 之后的部分 —— 章节算一次跳转，能后退回来。
- */
-function openSection(section: string) {
-  void navigate(withSection(committed.value, section), "push");
-}
-
-/** 编辑器提交完成或取消：回到它给的阅读地址 */
-function leaveEditor(input: string) {
-  void navigate(input, "push");
-}
-
-/**
- * 去看历史里的某一版。
- *
- * 这里拼的是**输入**（`标题@view-3`），和人在地址栏里敲的是同一种东西 ——
- * 规范地址仍然由后端解析出来。
- */
-function openVersion(payload: { title: string; rev: number }) {
-  void navigate(`${payload.title}@view-${payload.rev}`, "push");
-}
-
-/** 从历史清单直接去回退页 —— 这条路不用先读得懂那一版 */
-function rollbackVersion(payload: { title: string; rev: number }) {
-  void navigate(`${payload.title}@rollback-${payload.rev}`, "push");
-}
-
-/** 删除完成：这篇已经没了，改去全部页面 */
-function afterDelete() {
-  void navigate("special:all", "push");
-}
-
-/** 当前页对应的笔记标题（确认页、解锁页自己也属于某一篇） */
-function currentNoteTitle(): string {
-  const outcome = active.value?.route?.outcome;
-  return outcome?.kind === "note" ? outcome.title : "";
-}
-
-/**
- * 建一篇笔记，建完直接进编辑器。
- *
- * 空白笔记没有什么可读的，所以下一步就是 `@edit`；用的名字是后端回来的**规范标题**，
- * 不是人敲进去的那一串。
- */
-async function createNote(title: string) {
-  try {
-    const created = await invoke<string>("create_note", { title });
-    await navigate(`${created}@edit`, "push");
-  } catch (reason) {
-    // 建不出来（重名、名字不合法）要说给人听，而不是默默什么都不发生
-    flash(String(reason));
-  }
-}
-
-/**
- * 某一页解开了锁：把脚下这条 `@unlock` **换成那一页本身**。
- *
- * 为什么不"退一步"：进来时那条记录已经被替换成 `@unlock` 了（见 `redirectNote`），
- * 后退一步到的是**再往前**那一页 —— 从新标签页点进来的人会发现自己又回到了新标签页，
- * 而刚解开的那一篇就在眼前却看不成。所以这里原地替换成那一页：
- * 后退依旧回得来处，而眼前正是要读的东西。
- *
- * 一个例外：从**编辑器**点「去解锁」过来的（那条是压进去的，不是替换的），
- * 解完退回编辑器才对 —— 那里本来就是要接着写的地方。
- */
-function afterUnlock() {
-  const tab = active.value;
-  const route = tab?.route;
-  const outcome = route?.outcome;
-
-  if (!tab || !route || outcome?.kind !== "note") {
-    // 认不出来是哪一篇（理论上到不了）：退回上一条就是最合理的
-    if (canGoBack.value) {
-      void goBack();
-    }
-    return;
-  }
-
-  const title = outcome.title;
-  const before = tab.cursor > 0 ? tab.history[tab.cursor - 1] : undefined;
-  if (before === `${title}@edit`) {
-    void goBack();
-    return;
-  }
-
-  // 看的是旧版本就回到那一版（`@unlock-3` 解的是第 3 版）
-  const mode = route.address.mode;
-  const reference = mode.kind === "unlock" ? mode.ref : null;
-  void navigate(reference ? `${title}@view-${reference}` : title, "replace");
-}
-
-/**
- * 从解锁页退出来。
- *
- * 进这一页时那条记录已经被**替换**掉了（原来那一页读不出来，留着它只会再被送回来），
- * 所以"退一步"就是后退：回到进来之前待的地方。一整个标签页都是从 `@unlock` 开局的，
- * 没处可退，就摆到全部页面上让人挑。
- */
-/**
- * 读不出来的页面留的那条出路：退一步。
- *
- * 后退回得去就后退（绝大多数时候是）；整个标签页就是从这一页开局的，那就去全部页面。
- */
-function leavePage() {
-  if (canGoBack.value) {
-    void goBack();
-    return;
-  }
-  void navigate("special:all", "push");
-}
-
-function leaveUnlock() {
-  if (canGoBack.value) {
-    void goBack();
-    return;
-  }
-  void navigate("special:all", "push");
-}
-
-/**
- * 回滚完成：回到阅读地址，让人直接看到回滚后的内容。
- *
- * 特意把"旧历史一条未动"说清楚 —— 回滚看起来像"把东西改回去了"，
- * 不说的话人会以为后面那几版没了。
- */
-function afterRollback(rev: number) {
-  flash(`已回滚至所选版本（第 ${rev} 版），原有版本记录均保留`);
-  const title = currentNoteTitle();
-  if (title) {
-    void navigate(title, "push");
-  }
-}
+const {
+  openHome,
+  openSpecial,
+  openNote,
+  redirectNote,
+  openNoteInNewTab,
+  openSection,
+  leaveEditor,
+  openVersion,
+  rollbackVersion,
+  afterDelete,
+  createNote,
+  afterUnlock,
+  leavePage,
+  leaveUnlock,
+  afterRollback,
+} = useNavigation({ active, committed, canGoBack, navigate, newTabWith, goBack });
 
 /** 关窗前把还没落盘的改动写完。平时靠节流，这一步是兜底 */
 function flushOnUnload() {
@@ -357,29 +222,8 @@ function retryStartup() {
   void openWorkspace();
 }
 
-/** 浏览器习惯的快捷键 */
-function onKeydown(event: KeyboardEvent) {
-  if (!(event.ctrlKey || event.metaKey)) {
-    return;
-  }
-  const key = event.key.toLowerCase();
-
-  // Ctrl+Shift+T 要先判：否则会被下面的 Ctrl+T 吃掉
-  if (key === "t" && event.shiftKey) {
-    event.preventDefault();
-    reopenClosed();
-    return;
-  }
-  if (key === "t") {
-    event.preventDefault();
-    newTab();
-    return;
-  }
-  if (key === "w") {
-    event.preventDefault();
-    close(activeIndex.value);
-  }
-}
+/** 浏览器习惯的快捷键。同样只把标签页能力递进去，状态不在这里多一份 */
+const { onKeydown } = useShortcuts({ activeIndex, newTab, close, reopenClosed });
 
 /**
  * 开机那一轮维护：清过期的回收站条目、回收没人引用的内容块。

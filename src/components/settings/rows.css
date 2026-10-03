@@ -1,0 +1,295 @@
+/*
+ * 设置页那些"一行"的样式 —— `.row` 及其配套，与 `SettingsPage.vue` 拆出来的那几节共用。
+ *
+ * 为什么不并进某个组件：`.row` / `.settings__section` / `.settings__hint` 这一套是
+ * 设置页的通用排版，外观、仓库、存储、云端同步四节都用它。拆成子组件之后，
+ * `<style scoped>` 的作用域是**按组件**的 —— 父组件里写，子组件的元素照样匹配不到，
+ * 所以这段样式得由每个子组件自己带一份。
+ *
+ * 用 `<style scoped src="./rows.css">` 引用，而不是 `@import`：两者在编译结果上等价，
+ * 但 `src` 让"这一节组件的样式就是这几行"在源码里一眼看得出来。
+ * **仍然是 scoped**：`.row` 这种短名字不该泄到全局去。
+ *
+ * 顺序：先"一行的骨架"，再它身上的零件，最后才是分节标题与成段说明 ——
+ * 都是各自的独立选择器，次序只影响读的人。
+ */
+
+/* 勾选式的一行：复选框与说明文字并排 */
+.row__check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.row__check input {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  /* 窄窗口下让"标签 + 锚点 + 控件 + 单位"换行，而不是被裁掉 */
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 10px 0;
+  /* 从地址跳过来时滚到中间，别被顶边贴住 */
+  scroll-margin-top: 24px;
+}
+
+.row__label {
+  min-width: 132px;
+  font-size: 13px;
+}
+
+.row__id {
+  /*
+   * 定宽：锚点标签的长短不一样（`#theme` 短、`#code-line-numbers` 长），
+   * 随内容撑开就会把后面的控件推到不同的位置、整页看着错位。
+   */
+  flex: 0 0 auto;
+  width: 152px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* 标签本身就是给人复制用的，别被选中规则拦住 */
+  -webkit-user-select: text;
+  user-select: text;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--hover);
+  color: var(--text-dim);
+  font-family: var(--mono-font);
+  font-size: 11px;
+}
+
+.row__unit {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+/*
+ * 控件旁的一句提醒：与标签左缘对齐另起一行，
+ * 免得挤在输入框右边把它压短。
+ */
+.row__hint {
+  flex-basis: 100%;
+  padding-left: 144px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+/* 整块内容占一行的（命名空间表这类）：不要那两道缩进 */
+.row--stack {
+  display: block;
+}
+
+/* 这类行自己排头：标签 + 锚点提示，与别的行对齐 */
+.row__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+/* 跳过来时把目标那一行点出来：左侧一条强调色 + 淡底 */
+.row--target {
+  margin-left: -10px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent-tint);
+}
+
+/* 行里的文本框 / 下拉 */
+.row__text {
+  flex: 1;
+  min-width: 200px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.row__text:focus {
+  outline: none;
+  border-color: var(--accent-soft);
+}
+
+.row__text:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* 数字输入框（缩放、天数）：宽度与主题色那个输入框一致 */
+.num {
+  width: 92px;
+}
+
+/* 设置页里偶尔要用按钮（如"忘掉口令"）：它长得像编辑器工具栏上那些 */
+.ebtn {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  padding: 5px 11px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ebtn:hover {
+  border-color: var(--accent-soft);
+  background: var(--accent-tint);
+  color: var(--text);
+}
+
+.row__go {
+  padding: 5px 12px;
+  border: 1px solid var(--accent-soft);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent-soft);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.row__go:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--text);
+}
+
+.row__go:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 「强制同步」：带代价的那一颗 —— 平时安静，悬上去才露出它是"硬来"的那条路 */
+.row__go--force {
+  border-style: dashed;
+  border-color: var(--divider);
+  color: var(--text-dim);
+}
+
+.row__go--force:hover:not(:disabled) {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--text);
+}
+
+/* 深浅色那一组：分段按钮 */
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+
+.seg__item {
+  appearance: none;
+  padding: 4px 12px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.seg__item:hover {
+  background: var(--hover);
+}
+
+.seg__item--on {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* 主题色那一组：色板 + 旁边那个手填的十六进制 */
+.swatches {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.swatch {
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.swatch--on {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+.swatches__hex,
+.num {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--field-bg);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.swatches__hex {
+  width: 92px;
+  margin-left: 6px;
+  font-family: var(--mono-font);
+  font-size: 12px;
+}
+
+.settings__section {
+  margin: 26px 0 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* 成段说明：用来交代"这一节影响什么"，而不是塞进行标签里 */
+.settings__note {
+  margin: 0 0 6px;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+.settings__hint {
+  margin: 10px 0;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1.8;
+}
+
+.settings__problem {
+  margin: 10px 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--danger);
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.settings__hint code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--hover);
+  font-family: var(--mono-font);
+}
