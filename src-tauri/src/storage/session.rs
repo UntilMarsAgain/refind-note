@@ -33,6 +33,14 @@ type Key = (String, u64);
 static PASSWORDS: LazyLock<Mutex<HashMap<Key, String>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// 这一趟里已经读出来的**页正文**：标题 → （版本号, 正文）。
+///
+/// 为什么要有它：模板嵌入（`src=`）每次渲染都要去读那些模板页，而编辑器预览
+/// **每敲一个字**就重渲染一次 —— 不缓存的话，一次编辑就是几十次解密。
+/// 键上带着版本号：那一页提交了新版本，缓存自然失效。
+static PAGES: LazyLock<Mutex<HashMap<String, (u64, String)>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
 /// 给某一版解锁
 pub fn unlock(id: &str, rev: u64, passphrase: String) {
     shared().insert((id.to_string(), rev), passphrase);
@@ -56,6 +64,7 @@ pub fn latest_for(id: &str) -> Option<String> {
 
 /// 忘掉某一版。口令错了就把它丢掉 —— 留着只会让"再输一次"变成不可能。
 pub fn forget(id: &str, rev: u64) {
+    drop_pages();
     shared().remove(&(id.to_string(), rev));
 }
 
@@ -64,11 +73,13 @@ pub fn forget(id: &str, rev: u64) {
 /// 「我不想让它留着了」—— 与 [`forget`] 不同，那个是口令错了顺手丢掉；
 /// 这个是用户明说要忘掉，所以整篇一起清。
 pub fn forget_note(id: &str) {
+    drop_pages();
     shared().retain(|(key, _), _| key != id);
 }
 
 /// 全部忘掉（上锁）
 pub fn forget_all() {
+    drop_pages();
     shared().clear();
 }
 
@@ -117,4 +128,32 @@ mod tests {
 
         forget_all();
     }
+}
+
+/// 这一趟里读过的某一页（版本号对得上才算数）
+pub fn cached_page(title: &str) -> Option<(u64, String)> {
+    PAGES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(title)
+        .cloned()
+}
+
+/// 记下这一页读出来的样子
+pub fn cache_page(title: &str, rev: u64, markdown: String) {
+    PAGES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(title.to_string(), (rev, markdown));
+}
+
+/// 把读过的内容一并忘掉。
+///
+/// **必须跟着口令一起忘**：那一页能读出来，是因为这一趟的口令还在；
+/// 口令一丢（锁定、换页、清理），留着正文就等于"锁了门还把东西摊在桌上"。
+fn drop_pages() {
+    PAGES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clear();
 }

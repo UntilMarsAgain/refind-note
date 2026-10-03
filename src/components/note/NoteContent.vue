@@ -18,6 +18,7 @@
 
 <script setup lang="ts">
 import { nextTick, onMounted, ref, watch } from "vue";
+import { resolveAddress } from "../../core/address.ts";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { applyLineNumbers, codeLineNumbers, highlightCode } from "../../dom/code-blocks.ts";
@@ -222,6 +223,43 @@ function onClick(event: MouseEvent) {
             })
             .catch((error) => flash(`另存失败：${error}`));
         return;
+    }
+
+    void openMaybeInternal(href, event);
+}
+
+/**
+ * `<a href="…">` 里的目标：**先当内部地址试一次**（`重逢笔记`、`Help:首页`、`File:桥.png`…），
+ * 认得出（本仓库真有这一页）就在程序里打开；认不出才是外链，交给系统浏览器。
+ *
+ * 为什么要有这一步：模板里的 HTML 是**手写的**（`::html src=` 那种），在那儿写
+ * `<a href="另一页">` 是最自然的事 —— 而这条路以前一律当外链，点下去就去找
+ * `https://另一页`。现在与 `[[内部链接]]` 走同一个出口（Ctrl/Cmd 点击＝新标签页）。
+ */
+async function openMaybeInternal(href: string, event: MouseEvent) {
+    // 带协议的（`http:`、`mailto:`、`data:`…）没什么可猜的：照旧交给系统
+    if (/^[a-z][a-z0-9+.-]*:/i.test(href)) {
+        void openUrl(normalizeUrl(href));
+        return;
+    }
+
+    try {
+        const resolved = await resolveAddress(href);
+        if (resolved) {
+            const target = resolved.canonical || href;
+            if (event.ctrlKey || event.metaKey) {
+                emit("wikilink-new", target);
+            } else {
+                emit("wikilink", {
+                    title: target,
+                    missing: resolved.outcome.kind === "missing",
+                });
+            }
+            return;
+        }
+    } catch (error) {
+        // 解析不了（写错了、不是地址）就照外链走，别把一个链接变成死按钮
+        console.debug("按内部地址打不开，当外链处理：", error);
     }
 
     void openUrl(normalizeUrl(href));

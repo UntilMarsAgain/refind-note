@@ -920,6 +920,23 @@ static FORCE_NO_GPG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBo
 #[cfg(test)]
 static TEST_GPG_HOME: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
 
+thread_local! {
+    /// 这一段里不许弹口令（渲染时会把它打开）
+    static NON_INTERACTIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// 在这段里做加解密时**绝不弹口令**：gpg 拿不到就用错误回答，而不是叫 pinentry。
+///
+/// 谁需要它：**渲染**。渲染是"顺手看一眼"的动作（模板嵌入会去读别的页面），
+/// 不该因为某一页没解锁就蹦出一个口令框、把界面卡在那儿等人输密码 ——
+/// 那看起来就是"程序死了"。解锁是**用户按下去的**动作，只该由阅读那一页来触发。
+pub fn without_prompting<T>(run: impl FnOnce() -> T) -> T {
+    let previous = NON_INTERACTIVE.with(|flag| flag.replace(true));
+    let out = run();
+    NON_INTERACTIVE.with(|flag| flag.set(previous));
+    out
+}
+
 /// 指定 gpg 的家目录（只有测试会调）
 #[cfg(test)]
 pub fn set_gpg_home(dir: std::path::PathBuf) {
@@ -947,6 +964,14 @@ pub(crate) fn gpg_context() -> Result<gpgme::Context> {
 
     let mut context = gpgme::Context::from_protocol(gpgme::Protocol::OpenPgp)
         .map_err(|error| CodecError::Gpg(error.to_string()))?;
+
+    // 这一段里不许弹口令（见 `without_prompting`）：拿不到就直接失败，
+    // 别去叫 pinentry —— 否则一个"顺手看一眼"的动作能把界面挂住等人输密码
+    if NON_INTERACTIVE.with(|flag| flag.get()) {
+        context
+            .set_pinentry_mode(gpgme::PinentryMode::Error)
+            .map_err(|error| CodecError::Gpg(error.to_string()))?;
+    }
 
     #[cfg(test)]
     if let Some(home) = TEST_GPG_HOME.get() {

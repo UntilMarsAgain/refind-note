@@ -51,14 +51,31 @@ pub fn substitute(text: &str, template: &Template, body: &str) -> String {
 }
 
 /// 模板的正文：块自身的内容；带 `src=` 的取不到（它指向命名空间里的模板页）。
-pub fn source_of(template: &Template) -> Option<String> {
+/// 这个模板要处理的**内容**：没写 `src=` 就是块内容本身，写了就是那一页的正文。
+///
+/// `src=` 指的是**模板命名空间**里的一页（`Template:卡片`）：内容由仓库那一层
+/// 在渲染前备好，这里只查表 —— 渲染器自己够不着仓库（见 [`crate::markdown::TemplatePages`]）。
+///
+/// 取不到时返回 `Err(原因)`：**"没有这一页"和"有，但没解锁"要分得开** ——
+/// 两种情况对作者来说是两件事，混成一句"取不到"最难查。
+pub fn source_of(template: &Template) -> Result<String, String> {
+    use crate::markdown::TemplatePage;
+
     let Some(name) = template.param("src") else {
-        return Some(template.body.clone());
+        return Ok(template.body.clone());
     };
 
-    // `src=` 指的是**模板命名空间**里的一页（`Template:卡片`）：正文由仓库那一层
-    // 在渲染前备好，这里只查表 —— 渲染器自己够不着仓库（见 `markdown::TemplatePages`）。
-    crate::markdown::template_page(name)
+    match crate::markdown::template_page(name) {
+        Some(TemplatePage::Ready(text)) => Ok(text),
+        Some(TemplatePage::Unreadable(why)) => Err(why),
+        None => {
+            // 报的是**归一之后**的页面名：写 `template:卡片` 时就别再叠一层前缀
+            let page = crate::markdown::template_page_key(name);
+            Err(format!(
+                "`Template:{page}` 这一页不存在（名字按页面名写，不用带 `.md`）"
+            ))
+        }
+    }
 }
 
 /// 开关式参数开没开：写了 `flag`、`flag=true`、`flag=yes`、`flag=on` 都算开了。

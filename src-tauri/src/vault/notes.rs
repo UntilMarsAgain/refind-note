@@ -831,13 +831,18 @@ impl Database {
         ))
     }
 
-    /// `Template:` 里每一页的正文 —— 模板的 `src=` 要把另一页嵌进来（见 `markdown::TemplatePages`）。
+    /// `Template:` 里每一页 —— 模板的 `src=` 要把另一页嵌进来（见 `markdown::TemplatePages`）。
     ///
-    /// **只有正文里写了 `src=` 才去取**：每次渲染都把那些模板页读一遍太亏，
-    /// 而 `src=` 必须原样写在正文里，漏不掉（认错的代价只是白读几页）。
+    /// 两条规矩：
     ///
-    /// 读不出来的（加密的、坏掉的）就当没有这一页 —— 渲染处会说"取不到它"。
-    fn template_pages(&self, markdown: &str) -> std::collections::HashMap<String, String> {
+    /// 1. **只在正文里写了 `src=` 时才去取** —— 每次渲染都把模板页读一遍太亏，
+    ///    而 `src=` 必须原样写在正文里，漏不掉（认错的代价只是白读几页）；
+    /// 2. **绝不弹口令**（见 [`codec::without_prompting`]）—— 渲染是"顺手看一眼"，
+    ///    不该因为某一页没解锁就把界面挂在一个口令框上。取不到就白纸黑字写清楚，
+    ///    让作者自己决定去不去解锁（打开那一页一次，口令就进了这一趟的缓存）。
+    fn template_pages(&self, markdown: &str) -> std::collections::HashMap<String, crate::markdown::TemplatePage> {
+        use crate::markdown::TemplatePage;
+
         let mut pages = std::collections::HashMap::new();
         if !markdown.contains("src=") {
             return pages;
@@ -855,15 +860,54 @@ impl Database {
             if parsed.ns != crate::vault::namespace::TEMPLATE_ID {
                 continue;
             }
-            if let Ok(Reading::Ready { note }) = self.read_note(title, None) {
-                pages.insert(
-                    crate::markdown::template_page_key(&parsed.page),
-                    note.markdown,
-                );
-            }
+
+            let page = match self.read_for_embedding(title) {
+                Ok(text) => TemplatePage::Ready(text),
+                Err(why) => TemplatePage::Unreadable(why),
+            };
+            pages.insert(crate::markdown::template_page_key(&parsed.page), page);
         }
 
         pages
+    }
+
+    /// 读一页用来嵌入的正文：**不弹口令**，而且这一趟读过就不再读。
+    ///
+    /// 缓存键是"标题 + 版本号"：那一页提交了新版本，缓存自然失效；
+    /// 而编辑器预览每敲一个字就重渲染一次，没有这一层缓存就是每次几十次解密。
+    fn read_for_embedding(&self, title: &str) -> Result<String, String> {
+        let id = self.locate(title)?;
+        let state = self.state_of(&id)?;
+        let rev = state.rev;
+
+        if let Some((cached_rev, text)) = session::cached_page(title) {
+            if cached_rev == rev {
+                return Ok(text);
+            }
+        }
+
+        // 头是明文：**先看它加没加密**，好把"没解锁"和"真出错"分开说
+        let encrypted = self
+            .blobs()
+            .protection(&state.blob)
+            .map(|protection| protection.symmetric || protection.encrypt.is_some())
+            .unwrap_or(false);
+
+        let locked = || {
+            format!("《{title}》是加密的：打开它一次（解锁）之后，模板就能嵌进来了")
+        };
+
+        match crate::storage::codec::without_prompting(|| self.read_note(title, None)) {
+            Ok(Reading::Ready { note }) => {
+                session::cache_page(title, rev, note.markdown.clone());
+                Ok(note.markdown)
+            }
+            // 上了锁：说清是"没解锁"，而不是含糊的"取不到"
+            Ok(Reading::Locked { .. }) => Err(locked()),
+            // 加密的页面读失败，多半就是没解锁（gpg 那边拿不到口令）
+            Err(_) if encrypted => Err(locked()),
+            Err(error) => Err(format!("《{title}》读不出来：{error}")),
+        }
     }
 
     /// 给"当前页是某一页"的一次渲染装配解析器（红蓝链、`[[/子页]]` 都靠它）
@@ -1122,6 +1166,81 @@ mod tests {
         }
     }
 
+    /// **加密的模板页：说清是"没解锁"，不是"没这一页"** —— 而且**不许弹口令**。
+    ///
+    /// 这一条是从真事上来的：默认策略带 GPG 加密的人，每一页都是加密的；
+    /// 嵌入时若直接去解密，gpg 会叫出 pinentry 把界面挂在那儿等人输密码
+    /// （看起来就是"程序死了"）。所以渲染时一律走非交互（见 `codec::without_prompting`），
+    /// 拿不到就把原因写在页面上。
+    #[test]
+    fn a_locked_template_says_it_is_locked_instead_of_hanging() {
+        let _guard = session_guard();
+
+        let database = scratch("template-locked");
+        let locked = Policy {
+            compress: true,
+            symmetric: true,
+            ..Policy::default()
+        };
+        database.create("Template:锁住的").unwrap();
+        database
+            .commit_with(
+                "Template:锁住的",
+                "**锁住的卡片**",
+                None,
+                Some(locked.clone()),
+                Some("口令".to_string()),
+            )
+            .unwrap();
+
+        // 这一趟已经解锁过了（提交时顺延）：嵌得进来
+        let ok = database
+            .render_html("::html src=\"锁住的\"\n", "某页")
+            .unwrap();
+        assert!(ok.contains("锁住的卡片"), "{ok}");
+
+        // 把口令从这一趟里忘掉（等于"换台机器/重启之后"）：不再解得开
+        let id = database.locate("Template:锁住的").unwrap();
+        session::forget(&id, 1);
+
+        let locked_out = database
+            .render_html("::html src=\"锁住的\"\n", "某页")
+            .unwrap();
+        assert!(locked_out.contains("template--problem"), "{locked_out}");
+        assert!(
+            locked_out.contains("加密"),
+            "要说清是没解锁，而不是含糊的取不到：{locked_out}"
+        );
+        assert!(
+            !locked_out.contains("不存在"),
+            "它明明在，别说成不存在：{locked_out}"
+        );
+
+        cleanup(&database);
+    }
+
+    /// 模板页提交了新版本：缓存要跟着失效（不然嵌进来的是上一版）
+    #[test]
+    fn an_embedded_template_follows_the_newest_version() {
+        let database = scratch("template-fresh");
+
+        database.create("Template:卡片").unwrap();
+        database.commit("Template:卡片", "第一版", None).unwrap();
+        let first = database
+            .render_html("::html src=\"卡片\"\n", "某页")
+            .unwrap();
+        assert!(first.contains("第一版"), "{first}");
+
+        database.commit("Template:卡片", "第二版", None).unwrap();
+        let second = database
+            .render_html("::html src=\"卡片\"\n", "某页")
+            .unwrap();
+        assert!(second.contains("第二版"), "缓存要跟着版本走：{second}");
+        assert!(!second.contains("第一版"), "{second}");
+
+        cleanup(&database);
+    }
+
     /// **模板嵌入**：`src=` 指的是 `Template:` 命名空间里的一页，真的取得到。
     ///
     /// 这一条是从一个"看着像坏了"的地方补上的：`src=` 那条路以前**永远**返回
@@ -1131,13 +1250,18 @@ mod tests {
         let database = scratch("template-src");
 
         // 用户自定义的模板：`Template:` 里的一页
-        database.create("Template:卡片").unwrap();
+        database.create("Template:嵌入测试卡片").unwrap();
         database
-            .commit("Template:卡片", "<b>嵌进来的卡片</b>", None)
+            .commit("Template:嵌入测试卡片", "<b>嵌进来的卡片</b>", None)
             .unwrap();
 
         // 三种写法都该认
-        for name in ["卡片", "Template:卡片", "template:卡片", " 卡片 "] {
+        for name in [
+            "嵌入测试卡片",
+            "Template:嵌入测试卡片",
+            "template:嵌入测试卡片",
+            "  嵌入测试卡片  ",
+        ] {
             let html = database
                 .render_html(&format!("::html src=\"{name}\"\n"), "某页")
                 .unwrap();

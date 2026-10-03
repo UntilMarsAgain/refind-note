@@ -671,9 +671,12 @@ fn render_theme(template: &Template, node: &Node, fmt: &mut dyn Renderer) {
 /// 前端在正文注入 DOM 之后把 `<script>` 重新装成真节点（`v-html` 塞进去的脚本不会执行），
 /// 所以这段代码才会真的跑起来。
 fn render_js(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
-    let Some(source) = fill::source_of(template) else {
-        render_problem(template, fmt, "src= 指的是模板命名空间里的一页（`Template:名字`）—— 没有这一页，或者它读不出来");
-        return;
+    let source = match fill::source_of(template) {
+        Ok(source) => source,
+        Err(why) => {
+            render_problem(template, fmt, &why);
+            return;
+        }
     };
     let filled = fill::substitute(&source, template, &template.body);
 
@@ -823,9 +826,12 @@ fn render_code(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
 ///
 /// 内容里的 `{{参数}}` 会被替换；`</style` 会被去掉，免得提前闭合样式块。
 fn render_css(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
-    let Some(source) = fill::source_of(template) else {
-        render_problem(template, fmt, "src= 指的是模板命名空间里的一页（`Template:名字`）—— 没有这一页，或者它读不出来");
-        return;
+    let source = match fill::source_of(template) {
+        Ok(source) => source,
+        Err(why) => {
+            render_problem(template, fmt, &why);
+            return;
+        }
     };
     let css = fill::sanitize_css(&fill::substitute(&source, template, &template.body));
     // 收进这一页：不然一条 `* { }` 就能把整个界面改掉
@@ -842,9 +848,12 @@ fn render_css(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
 /// 默认**过滤**掉会执行脚本的东西（`<script>`、`on*=` 事件属性、`javascript:` 协议）；
 /// 只有显式写了 `js`（或 `js=true`）才原样放行。默认安全，要开就得自己写出来。
 fn render_html(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
-    let Some(source) = fill::source_of(template) else {
-        render_problem(template, fmt, "src= 指的是模板命名空间里的一页（`Template:名字`）—— 没有这一页，或者它读不出来");
-        return;
+    let source = match fill::source_of(template) {
+        Ok(source) => source,
+        Err(why) => {
+            render_problem(template, fmt, &why);
+            return;
+        }
     };
     let filled = fill::substitute(&source, template, &template.body);
     let html = if fill::allows_js(template) {

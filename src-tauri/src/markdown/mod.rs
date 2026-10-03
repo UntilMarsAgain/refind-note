@@ -69,16 +69,25 @@ thread_local! {
     static CURRENT_TEMPLATE_PAGES: RefCell<Option<TemplatePages>> = const { RefCell::new(None) };
 }
 
-/// 模板页的正文表：**小写页面名 → 正文**。
+/// 一页模板页在**这一刻**的样子
+#[derive(Debug, Clone, PartialEq)]
+pub enum TemplatePage {
+    /// 取到了：正文
+    Ready(String),
+    /// 有这一页，但这一刻读不出来（没解锁、或者坏了）—— 里面是一句给人看的原因
+    Unreadable(String),
+}
+
+/// 模板页的表：**小写页面名 → 那一页**。
 ///
 /// 由仓库那一层在渲染前备好（见 `vault::notes` 里 `render_html` 旁边那段说明）。
-pub type TemplatePages = std::sync::Arc<std::collections::HashMap<String, String>>;
+pub type TemplatePages = std::sync::Arc<std::collections::HashMap<String, TemplatePage>>;
 
-/// 取 `src=` 指向的那一页正文。
+/// 取 `src=` 指向的那一页。
 ///
 /// 名字认三种写法：`甲`、`Template:甲`、`template:甲`（大小写与首尾空白都宽松）——
 /// 都指 `Template:` 命名空间里的那一页。
-pub fn template_page(name: &str) -> Option<String> {
+pub fn template_page(name: &str) -> Option<TemplatePage> {
     let key = template_page_key(name);
     CURRENT_TEMPLATE_PAGES.with(|cell| {
         cell.borrow()
