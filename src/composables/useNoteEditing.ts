@@ -100,6 +100,12 @@ export interface NoteEditing {
     recordEditing: () => void;
     /** 把光标与滚动放回原位 */
     restoreEditing: (state: { cursor: number; scroll: number }) => void;
+    /**
+     * 把欠下的那一次还原补上 —— 装载早于编辑器建起来时用。
+     *
+     * 由组件在 `codeMirror.mount()` **之后**调一次；没有欠账时它什么都不做。
+     */
+    applyPendingRestore: () => void;
     /** 离开这一页：清自动保存计时器、记下样子、把草稿落一次盘 */
     flushOnLeave: () => void;
 }
@@ -233,16 +239,55 @@ export function useNoteEditing(host: NoteEditingHost): NoteEditing {
         loading.value = false;
     }
 
-    /** 把光标与滚动放回原位（文档内容由外面那个 `watch(markdown)` 推进编辑器） */
-    function restoreEditing(state: { cursor: number; scroll: number }) {
-        const editor = view.value;
-        if (!editor) {
-            return;
-        }
+    /**
+     * 装载已经要还原、但编辑器还没建起来时的那一份。
+     *
+     * 为什么需要它：`load()` 一定跑在 `mount()` **之前** —— CodeMirror 的初始文档
+     * 就是装载的结果，所以顺序反不了。而 `load()` 里正好要调 `restoreEditing`，
+     * 那一刻 `view` 还是 `null`。原来那份实现在这里直接 return，于是
+     * "切回这个标签页时视线落回原处"只在"重试"那条路上生效（那时编辑器已经在了）。
+     *
+     * 所以先把这份记下来，等编辑器建好之后由组件补一次
+     * [`applyPendingRestore`]。
+     */
+    let pendingRestore: { cursor: number; scroll: number } | null = null;
+
+    /** 真的把光标与滚动放回原位（前提是编辑器已经在了） */
+    function applyRestore(editor: EditorView, state: { cursor: number; scroll: number }) {
+        // 位置可能被 clamp：正文在这一趟里变短过，旧的 offset 未必还落在文档里
         const at = Math.max(0, Math.min(state.cursor, editor.state.doc.length));
         editor.dispatch({ selection: { anchor: at } });
         editor.scrollDOM.scrollTop = state.scroll;
         editor.focus();
+    }
+
+    /** 把光标与滚动放回原位（文档内容由外面那个 `watch(markdown)` 推进编辑器） */
+    function restoreEditing(state: { cursor: number; scroll: number }) {
+        const editor = view.value;
+        if (!editor) {
+            pendingRestore = state;
+            return;
+        }
+        applyRestore(editor, state);
+    }
+
+    /**
+     * 编辑器刚建起来时，把上面欠下的那一次补上。
+     *
+     * 没欠账、或者编辑器仍然不在（这一页压根没建编辑器）时什么都不做 —— 欠账要
+     * **留着**，不能因为这次没补上就丢掉。
+     */
+    function applyPendingRestore() {
+        if (!pendingRestore) {
+            return;
+        }
+        const editor = view.value;
+        if (!editor) {
+            return;
+        }
+        const state = pendingRestore;
+        pendingRestore = null;
+        applyRestore(editor, state);
     }
 
     /** 记下这一刻的样子（字、光标、滚动）—— 切走时靠它还原 */
@@ -402,6 +447,7 @@ export function useNoteEditing(host: NoteEditingHost): NoteEditing {
         scheduleAutosave,
         recordEditing,
         restoreEditing,
+        applyPendingRestore,
         flushOnLeave,
     };
 }

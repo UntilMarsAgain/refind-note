@@ -115,6 +115,11 @@ onMounted(async () => {
         return;
     }
     codeMirror.mount();
+    // 编辑器建起来了，把装载时欠下的那次光标/滚动还原补上。
+    // 这一步不能省：load() 必须跑在 mount() 之前（初始文档就是装载的结果），
+    // 所以装载那一刻要还原的位子只能先记着 —— 少了这一次，"切回这个标签页时
+    // 视线落回原处"就只在"重试"那条路上生效。
+    editor.applyPendingRestore();
     void preview.refresh(editor.markdown.value);
 });
 
