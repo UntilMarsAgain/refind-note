@@ -58,8 +58,12 @@ export const ACTIONS: ShortcutAction[] = [
     { id: "find-previous", label: "上一个", keys: ["Shift", "F3"], group: "查找" },
 
     // —— 页面
-    { id: "back", label: "后退", keys: ["Alt", "Left"], group: "页面" },
-    { id: "forward", label: "前进", keys: ["Alt", "Right"], group: "页面" },
+    // 方向键写 `ArrowLeft` / `ArrowRight`：**`event.key` 就是这个**。
+    // 写成 `"Left"` 是老代码里那个已废弃的别名 —— 后果是键位永远匹配不上
+    // （提示里写着 Alt+←，按了没反应），而显示那侧因为不认识它，
+    // 还会把 `←` 原样打出来，看着倒像是对的。
+    { id: "back", label: "后退", keys: ["Alt", "ArrowLeft"], group: "页面" },
+    { id: "forward", label: "前进", keys: ["Alt", "ArrowRight"], group: "页面" },
     { id: "home", label: "首页", keys: ["Alt", "H"], group: "页面" },
     { id: "menu", label: "菜单", keys: ["Alt", "M"], group: "页面" },
     { id: "reload", label: "重载", keys: ["Ctrl", "R"], group: "页面" },
@@ -89,9 +93,18 @@ export function bindingOf(action: ShortcutAction): Binding {
     return effective.value[action.id] ?? action.keys;
 }
 
-/** 某个动作用户**有没有改过**（界面据此决定"恢复默认"是不是可点的） */
+/**
+ * 某个动作用户**有没有改过**（界面据此决定"恢复默认"是不是可点的）。
+ *
+ * 判的是**当前键位与出厂的那一串不一样**，不是"表里有没有这一项"。
+ *
+ * 这个区别很要紧：后端送来的键位表是**出厂那份全的**（`keymap.rs` 里的
+ * `Keymap::defaults()`），表里每一项都在。所以按"有没有这一项"来判的话，
+ * 刚装好、一个键都没改过的用户会看到**每一行都挂着"恢复默认"** ——
+ * 而"恢复默认"该有的那个前提是"你改过它"。
+ */
 export function isCustomized(action: ShortcutAction): boolean {
-    return action.id in keymap.value;
+    return bindingOf(action).join("+") !== action.keys.join("+");
 }
 
 /** 按 id 找动作；不认识返回 null（而不是给个假的 —— 假的会显示成"这个动作存在"） */
@@ -123,8 +136,9 @@ export async function resetBinding(action: ShortcutAction): Promise<void> {
 
 /** 落盘并刷新运行时那一份（后端可能又收了一遍，写回来的是它真正的样子） */
 async function persist(next: Keymap): Promise<void> {
-    keymap.value = next;
-    effective.value = await invoke<Keymap>("save_keymap", { keymap: next });
+    const sparse = sparseOf(next);
+    keymap.value = sparse;
+    effective.value = effectiveOf(await invoke<Keymap>("save_keymap", { keymap: sparse }));
 }
 
 /**
@@ -141,10 +155,36 @@ function effectiveOf(map: Keymap): Keymap {
     return out;
 }
 
+/**
+ * 只留**与出厂不同**的那些项。
+ *
+ * 后端送来的表是**出厂那份全的**（`keymap.rs` 里 `Keymap::defaults()` 是完整一张），
+ * 而存盘要的是**稀疏**的：文件平时几乎是空的，手改时看得懂，将来出厂键位一改，
+ * 那份全表里的旧值就会变成过时覆盖。
+ *
+ * 所以这张表**每次进出都要过这一遍**：进去（存盘前）滤成稀疏，出来（读回后）也滤成
+ * 稀疏 —— 否则 `setBinding` 拿 `keymap.value` 一摊开，存下去的就是全表。
+ */
+function sparseOf(map: Keymap): Keymap {
+    const out: Keymap = {};
+    for (const action of ACTIONS) {
+        const keys = map[action.id];
+        // 不认识的动作顺手也丢了：它只可能来自手改或旧版本，留着只会让人困惑
+        if (!keys || keys.length === 0) {
+            continue;
+        }
+        if (keys.join("+") !== action.keys.join("+")) {
+            out[action.id] = [...keys];
+        }
+    }
+    return out;
+}
+
 /** 启动时读一次 */
 export async function loadKeymap(): Promise<void> {
     try {
-        const stored = await invoke<Keymap>("load_keymap");
+        // 滤成稀疏：后端送的是出厂全表，而 `keymap.value` 要的是"用户改过的那些"
+        const stored = sparseOf(await invoke<Keymap>("load_keymap"));
         keymap.value = stored;
         effective.value = effectiveOf(stored);
     } catch (reason) {

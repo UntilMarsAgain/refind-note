@@ -62,8 +62,11 @@ pub const DEFAULTS: &[(&str, &[&str])] = &[
     ("find-next", &["F3"]),
     ("find-previous", &["Shift", "F3"]),
     // 页面
-    ("back", &["Alt", "Left"]),
-    ("forward", &["Alt", "Right"]),
+    // 方向键是 `ArrowLeft` / `ArrowRight` —— 前端 `core/keymap.ts` 的 `ACTIONS`
+    // 里必须一字不差地写同样这两个（那边认的是 `event.key`，规范里的写法就是它；
+    // `"Left"` 是已废弃的旧别名，键位会永远匹配不上）。
+    ("back", &["Alt", "ArrowLeft"]),
+    ("forward", &["Alt", "ArrowRight"]),
     ("home", &["Alt", "H"]),
     ("menu", &["Alt", "M"]),
     ("reload", &["Ctrl", "R"]),
@@ -351,6 +354,26 @@ mod tests {
         assert_eq!(load(&workspace).unwrap(), Keymap::defaults());
 
         cleanup(&workspace);
+    }
+
+    #[test]
+    fn no_default_binding_uses_a_deprecated_key_name() {
+        // `KeyboardEvent.key` 对方向键给的是 `ArrowLeft`/`ArrowRight`。
+        // 写成 `"Left"`（老代码里那个已废弃的别名）的话，键位**永远匹配不上** ——
+        // 而显示那侧因为不认识它会把 `←` 原样打出来，看着倒像是对的，
+        // 于是"提示里写着 Alt+←、按了没反应"这种问题极难发现。
+        //
+        // 前端 `core/keymap.ts` 的 `ACTIONS` 里必须写同样这几个字，两边对不上
+        // 就是按不出来，所以这里挡一次。
+        let deprecated = ["Left", "Right", "Up", "Down", "Esc", "Spacebar", "Del"];
+        for (action, keys) in DEFAULTS {
+            for key in *keys {
+                assert!(
+                    !deprecated.contains(&key),
+                    "「{action}」用了已废弃的键名 {key}（应为 Arrow{key} 之类）"
+                );
+            }
+        }
     }
 
     #[test]
