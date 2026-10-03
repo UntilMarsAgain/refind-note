@@ -1,0 +1,79 @@
+/*
+ * 存储徽标的**细节卡**样式 —— 由 `ProtectionReport.vue` 用
+ * `<style scoped src="./protection-report.css">` 引用。
+ *
+ * 这一块能独立成文件，是因为它**刻意不依赖徽标的 class**：
+ * 卡片靠 `position: absolute` 挂在 `.storage`（父组件里那个 `position: relative`）
+ * 底下 —— 拆成子组件之后最近的那个定位祖先仍然是 `.storage`，位置分毫不差，
+ * 而卡片自己的作用域不必知道徽章长什么样。
+ *
+ * 用 `<style scoped src>` 而不是 `@import`：编译结果等价，但 `src` 让"这张卡的
+ * 样式就摆在这个组件旁边"一眼看得出来。**仍然是 scoped**。
+ */
+
+/* 细节卡：贴在这行徽章底下 */
+.report {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: max-content;
+  max-width: min(420px, 70vw);
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  /* 不透明：它压在正文上，半透明会让底下的字透上来 */
+  background: var(--surface);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 30%);
+  font-size: 12.5px;
+  letter-spacing: normal;
+  white-space: normal;
+}
+
+.report__row {
+  display: grid;
+  grid-template-columns: minmax(64px, auto) 1fr;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.report__label {
+  color: var(--text-dim);
+}
+
+.report__action {
+  margin-top: 2px;
+}
+
+.report__btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.report__btn:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.report__note {
+  color: var(--text-dim);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.report__value {
+  color: var(--text);
+  overflow-wrap: anywhere;
+  /* 这些值是要抄下来贴进别处的 */
+  -webkit-user-select: text;
+  user-select: text;
+}

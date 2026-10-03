@@ -1,0 +1,228 @@
+/*
+ * GPG 密钥页的样式 —— 由 `KeysPage.vue` 用 `<style scoped src="./keys.css">` 引用。
+ *
+ * 拆出来的理由与 `namespace.css` 那份是同一条：**一枚密钥是一行三段**（用户标识与徽章 /
+ * 指纹与时间 / 三个按钮），三段各自的零件都只在这一行里出现，混在脚本旁边读不到。
+ *
+ * 用 `<style scoped src>` 而不是 `@import`：编译结果等价，但 `src` 让"这一页的样式
+ * 就摆在这个组件旁边"一眼看得出来。**仍然是 scoped**：`.keys__btn` 这种短名字不该
+ * 泄到全局去。
+ *
+ * 顺序：页首 → 说明与提示（问题 / 提醒 / 提示行）→ 列表与每一行 → 徽章 → 动作按钮。
+ * `.keys__notice`（提醒，主题色）与 `.keys__problem`（错误，红）挨着且长得几乎一样，
+ * 特意各自留了注释 —— 它们是两个不同的东西，别在整理时并成一个。
+ */
+
+.keys {
+  padding-top: 18px;
+}
+
+.keys__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.keys__title {
+  margin: 0;
+  font-size: 1.7em;
+}
+
+.keys__count {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.keys__import {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  margin-left: auto;
+  padding: 5px 12px;
+  border: 1px solid var(--accent-soft);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent-soft);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.keys__import:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--text);
+}
+
+.keys__import:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.keys__lead {
+  margin: 10px 0 18px;
+  color: var(--text-dim);
+  font-size: 0.95em;
+  line-height: 1.8;
+}
+
+.keys__problem {
+  margin: 12px 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--danger);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* 导入带了私钥这类提醒：是提示，不是错误，所以用主题色 */
+.keys__notice {
+  margin: 12px 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--accent-soft);
+  border-radius: 6px;
+  background: var(--accent-tint);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.keys__hint {
+  color: var(--text-dim);
+  font-size: 13.5px;
+}
+
+.keys__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.keys__item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.keys__item:first-child {
+  border-top: 0;
+}
+
+.keys__item:nth-child(odd) {
+  background: var(--surface);
+}
+
+.keys__line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.keys__uids {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  min-width: 0;
+}
+
+.keys__uid {
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.keys__badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.keys__badge {
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.keys__badge--own,
+.keys__badge--on {
+  border-color: var(--accent-soft);
+  color: var(--accent-soft);
+}
+
+.keys__badge--bad {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.keys__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: baseline;
+}
+
+.keys__fingerprint {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--hover);
+  color: var(--text-dim);
+  font-family: var(--mono-font);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.keys__when {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.keys__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.keys__btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.keys__btn:hover:not(:disabled) {
+  border-color: var(--accent-soft);
+  background: var(--accent-tint);
+  color: var(--text);
+}
+
+.keys__btn--on {
+  border-color: var(--accent-soft);
+  color: var(--accent-soft);
+}
+
+.keys__btn--danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: transparent;
+  color: var(--danger);
+}
+
+.keys__btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

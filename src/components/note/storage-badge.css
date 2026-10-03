@@ -1,0 +1,70 @@
+/*
+ * 存储徽标那一排的样式 —— 由 `StorageBadge.vue` 用
+ * `<style scoped src="./storage-badge.css">` 引用。
+ *
+ * 只管**徽章**（`.storage` 与 `.storage__badge*`）。点开后的那张细节卡是另一个组件
+ * （`ProtectionReport.vue` + `protection-report.css`）—— 它压在正文上、有阴影，
+ * 与这一排小标签不是一路长相，凑在一起只会让两边都不好读。
+ *
+ * 用 `<style scoped src>` 而不是 `@import`：编译结果等价，但 `src` 让"徽章的样子
+ * 就摆在这个组件旁边"一眼看得出来。**仍然是 scoped**：`.storage__badge` 这种短名字
+ * 不该泄到全局去 —— 它要出现在**历史列表的行按钮里面**，泄出去会给别处也染上。
+ *
+ * 颜色 class 与 `composables/useProtectionLayers.ts` 里那张映射表是一一对应的：
+ * `--sign` / `--encrypt` / `--symmetric` 三档各一个调子，扫一眼就知道这一版是怎么存的。
+ * 压缩那一层没有专属颜色（它不改变"读不读得动"这件事）。**加层时两处一起改。**
+ */
+
+.storage {
+  position: relative;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.storage__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/*
+ * 每一层一个调子：扫一眼就知道这一版是怎么存的。
+ * 颜色都取自主题变量，深浅两套主题下都成立。
+ */
+.storage__badge--sign {
+  border-color: var(--link-green);
+  color: var(--link-green);
+}
+
+.storage__badge--encrypt {
+  border-color: var(--link-blue);
+  color: var(--link-blue);
+}
+
+.storage__badge--symmetric {
+  border-color: var(--accent-soft);
+  color: var(--accent-soft);
+}
+
+/* 点得开的徽章：悬停给一点提示，免得人不知道这里能点 */
+.storage__badge--ask {
+  cursor: pointer;
+}
+
+.storage__badge--ask:hover,
+.storage__badge--ask:focus-visible {
+  outline: none;
+  border-color: var(--accent-soft);
+  color: var(--text);
+}
