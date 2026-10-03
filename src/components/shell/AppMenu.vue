@@ -22,7 +22,12 @@ import { BookOpen } from "@lucide/vue";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openMenu } from "../../dom/context-menu.ts";
 import type { HelpPage } from "../../ipc/help.ts";
-import { FALLBACK_GROUP, metaOf, SPECIAL_GROUPS } from "../../core/special.ts";
+import {
+  FALLBACK_GROUP,
+  metaOf,
+  shortcutKeysOf,
+  SPECIAL_GROUPS,
+} from "../../core/special.ts";
 import { logoSrc } from "../../core/theme.ts";
 
 /**
@@ -193,9 +198,10 @@ const groups = computed(() =>
                 :stroke-width="1.6"
               />
               <span class="menu__label">{{ metaOf(page).label }}</span>
-              <!-- 快捷键提示：登记了才显示（现在还没有，见 `special.ts`） -->
-              <span v-if="metaOf(page).shortcut?.length" class="menu__keys">
-                <kbd v-for="key in metaOf(page).shortcut" :key="key" class="menu__key">
+              <!-- 快捷键提示：登记了动作才显示，而且显示的是**当前生效**的那一串
+                   （用户改过键，菜单得跟着变，见 `special.ts` 的 `shortcut`） -->
+              <span v-if="shortcutKeysOf(page).length" class="menu__keys">
+                <kbd v-for="key in shortcutKeysOf(page)" :key="key" class="menu__key">
                   {{ key }}
                 </kbd>
               </span>

@@ -25,6 +25,7 @@
  */
 
 import type { Component } from "vue";
+import { actionById, bindingOf, label } from "./keymap.ts";
 import {
     Clock,
     Dices,
@@ -47,12 +48,23 @@ export interface SpecialPageMeta {
     /** 菜单里的图标；没登记的可以不给 */
     icon?: Component;
     /**
-     * 菜单右侧那排小方键（`["Alt", "G"]`）。
+     * 菜单右侧那排小方键：**绑到哪个动作上了**（`"back"` / `"home"` …）。
      *
-     * 只负责**显示**已有的快捷键；程序里还没配快捷键的条目就别填 ——
-     * 菜单上写着按不出来，比不写更糟。
+     * 这里只登记"这个页面对应哪个动作"，**不写键本身** —— 键位是用户能改的，
+     * 写死一份在这儿，用户改了键菜单上还显示旧的，等于菜单在骗人。
+     * 显示时去 [`./keymap.ts`] 取当前生效的那一串。
+     *
+     * 没登记的条目就别登记：菜单上写着按不出来，比不写更糟。
      */
-    shortcut?: string[];
+    shortcut?: string;
+    // 与 `ACTIONS` 里的动作 id 一一对应（见 `core/keymap.ts`）。
+    //
+    // **目前一个都没填**，这是对的：已配的键（`back` / `forward` / `home` /
+    // `menu` / `reload`）作用在**外壳**上，不是"打开某个系统页面" ——
+    // 后退不打开浏览历史页，菜单也不打开设置页。硬把它们挂到某个页面上，
+    // 菜单上就会写着一个能按的键，而按了去的是别处。
+    //
+    // 哪天真给某个页面配了快捷键，这里填它的动作 id。
     /** 菜单里的分组 */
     group: string;
 }
@@ -105,6 +117,22 @@ export function metaOf(page: string): SpecialPageMeta {
             group: FALLBACK_GROUP,
         }
     );
+}
+
+/**
+ * 某个特殊页面在菜单右边该显示哪几个键（**给键盘上印着的字**：`Cmd` / `Option` / `←`）。
+ *
+ * 返回空数组表示"没登记" —— 与 `shortcut` 那个字段的注释一个意思：
+ * 菜单上写着按不出来，比不写更糟。
+ */
+export function shortcutKeysOf(page: string): string[] {
+    const actionId = metaOf(page).shortcut;
+    if (!actionId) {
+        return [];
+    }
+    const action = actionById(actionId);
+    // 表里没有这个动作 id：那是代码写错了，摆出来只会误导
+    return action ? label(bindingOf(action)).split("+") : [];
 }
 
 /** 只要一句话名字的地方（标签栏标题）用它 */
