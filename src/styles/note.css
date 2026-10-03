@@ -27,6 +27,11 @@
  *                          行号、行内代码复制、外链的「跳出去」符号）
  *   3. `note/templates.css` 内置模板渲染出来的结构（`::aside` / `::banner` / `::quote` …）
  *   4. `note/media.css`     图片、音视频、外部嵌入，以及"取不到 / 没解锁"的占位
+ *   5. `note/find.css`      页内查找留在正文里的高亮（`mark.find-hit`）
+ *
+ * 5 放**最后**是有意的：查找高亮要压在任何正文样式之上 ——
+ * 命中的那几段字可能被 `<em>`、模板块的着色、`a` 的链接色写过，
+ * 谁的特异度高谁赢，所以它得排最后才对谁都盖得住。
  *
  * 为什么必须是这个次序（挑的都是**特异度相同、只能靠"写在后面"取胜**的规则）：
  *   - 1 → 2：`.note-body pre { margin: 1em 0 }` 要先于 `.code-frame pre { margin: 0 }`，
@@ -42,3 +47,4 @@
 @import "./note/code.css";
 @import "./note/templates.css";
 @import "./note/media.css";
+@import "./note/find.css";

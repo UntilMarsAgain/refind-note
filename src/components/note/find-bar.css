@@ -1,0 +1,98 @@
+/*
+ * 页内查找那条输入框的样式（`FindBar.vue`）。
+ *
+ * 单独一个文件而不是写进组件：那个 `⤢` 的定位与 `z-index` 要与
+ * 渲染区（`RenderPane` 的 `.pane`）、悬浮工具（`.corner`，z-index 30）、
+ * 大图查看器（z-index 60）这**几处各处的层叠关系**说清楚，所以那段说明
+ * 放在这里更合适（放在组件里会被 scoped 的属性选择器淹没）。
+ */
+
+/*
+ * 贴着渲染区右上角浮着。
+ *
+ * `right: 16px` 对齐的是悬浮工具那一列（`App.vue` 的 `.corner`，也是 16px），
+ * 所以查找条与那排圆按钮看着在一条竖线上。
+ *
+ * `top` 不用 0：标题栏在顶上，贴到 0 会被它压着 —— 而查找条是**当前**该被看见的东西，
+ * 被别的盖住就等于没有。
+ *
+ * `z-index: 40` 是排在 `.corner`（30）之上、大图查看器（60）之下：
+ * 查找时肯定希望它还在，但图片放大起来时不该浮在图片上面。
+ */
+.findbar {
+  position: fixed;
+  top: 46px;
+  right: 16px;
+  z-index: 40;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  /* 不透明：底下压着正文时不该透出字来 */
+  background: var(--surface);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 18%);
+}
+
+.findbar__icon {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+}
+
+/* 框里那一格：按住不放 —— 查找是个"我在这儿改"的动作 */
+.findbar__input {
+  width: 168px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--field-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.findbar__input:focus {
+  outline: none;
+  border-color: var(--accent-soft);
+}
+
+/* "3/12"；没找到时那一格变红 —— 找不着是最需要立刻知道的 */
+.findbar__count {
+  min-width: 34px;
+  color: var(--text-dim);
+  font-size: 12px;
+  text-align: center;
+  /* 数字跳动时不抖：等宽 */
+  font-variant-numeric: tabular-nums;
+}
+
+.findbar__count--none {
+  color: var(--danger);
+}
+
+.findbar__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.findbar__btn:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.findbar__btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

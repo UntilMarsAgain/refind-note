@@ -62,6 +62,13 @@ const emit = defineEmits<{
     (e: "navigate-new-tab", input: string): void;
     /** 点了正文里的锚点：把章节叠进地址（上层拼输入） */
     (e: "section", section: string): void;
+    /**
+     * 当前页里有可查的东西（`NoteView` / `HelpView` 的正文）。
+     *
+     * 带的是 `true`/`false` 而不是"要不要开"：这一层知道自己现在渲染的是哪一页，
+     * 而 `find` 动作在全局（见 `App.vue`）—— 所以由这一层答"这里有正文可查吗"。
+     */
+    (e: "find", available: boolean): void;
     /** 编辑器提交完成或取消：它也要换地址，同样交给上层 */
     (e: "edit-navigate", input: string): void;
     /** 要看历史里的某一版。地址由上层拼 —— 渲染区不自己拼地址 */
@@ -222,12 +229,52 @@ function onScroll() {
 }
 
 /** 右下角那组按钮要能滚动渲染区，而滚动容器在这里 */
+// ------------------------------------------------------------ 页内查找
+
+/**
+ * 当前这一页有没有正文可查。
+ *
+ * 由**当前渲染的那个页面**报上来（`NoteView` / `HelpView` 在有正文时报 true）：
+ * 这一层知道现在渲染的是哪一页，但不知道"正文"在哪、也拿不到它的容器 ——
+ * 所以让页面自己答。
+ */
+const findable = ref(false);
+
+/** 递增的信号：要"打开查找条" */
+const findRequest = ref(0);
+
+/** 递增的信号：要"下一个/上一个"（带方向） */
+const findStep = ref({ step: 0, dir: "next" as "next" | "previous" });
+
 defineExpose({
     scrollToTop() {
         scroller.value?.scrollTo({ top: 0, behavior: "smooth" });
     },
     scrollToBottom() {
         scroller.value?.scrollTo({ top: scroller.value.scrollHeight, behavior: "smooth" });
+    },
+    /**
+     * 打开页内查找（`find` 动作走这里；具体是哪个页面自己知道）。
+     *
+     * 返回 false = 当前这一页没有正文可查（`findable` 是页面报上来的）——
+     * 调用方据此给一句提示。按了没反应是最糟的反馈。
+     */
+    showFind() {
+        if (!findable.value) {
+            return false;
+        }
+        findRequest.value += 1;
+        return true;
+    },
+    /** 下一个命中；没有可查的返回 false（调用方据此给一句提示） */
+    findNext() {
+        findStep.value = { step: findStep.value.step + 1, dir: "next" };
+        return findable.value;
+    },
+    /** 上一个命中 */
+    findPrevious() {
+        findStep.value = { step: findStep.value.step + 1, dir: "previous" };
+        return findable.value;
     },
 });
 </script>
@@ -351,9 +398,12 @@ defineExpose({
             :editable="route?.editable ?? false"
             :starred="starredHere"
             :collapsed="collapsed"
+            :find-request="findRequest"
+            :find-step="findStep"
             @navigate="emit('navigate', $event)"
             @section="emit('section', $event)"
             @toggle-star="onToggleStar"
+            @find="findable = $event"
         />
 
         <NewTabView v-else-if="isNewTab" :key="viewKey('newtab')" @open="emit('navigate', $event)"/>
@@ -367,12 +417,15 @@ defineExpose({
             :collapsed="collapsed"
             :via="route?.via ?? null"
             :starred="starredHere"
+            :find-request="findRequest"
+            :find-step="findStep"
             @navigate="emit('navigate', $event)"
             @toggle-star="onToggleStar"
             @redirect="emit('redirect', $event)"
             @leave="emit('leave')"
             @navigate-new-tab="emit('navigate-new-tab', $event)"
             @section="emit('section', $event)"
+            @find="findable = $event"
         />
 
         <NoteEditor

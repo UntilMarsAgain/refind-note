@@ -207,6 +207,12 @@ const debugOpen = ref(false);
 const renderPane = useTemplateRef<{
   scrollToTop: () => void;
   scrollToBottom: () => void;
+  /** 打开页内查找；当前页没有正文可查时返回 false（好给一句提示） */
+  showFind: () => boolean;
+  /** 下一个命中；没有可查的返回 false（好给一句提示） */
+  findNext: () => boolean;
+  /** 上一个命中 */
+  findPrevious: () => boolean;
 }>("renderPane");
 
 function toggleDebug() {
@@ -241,11 +247,23 @@ function onShortcut(action: string) {
       if (openEditorSearch()) {
         return;
       }
-      flash("页内查找还没接上");
-      break;
+      // 页面上有没有正文可查由当前那一页自己说（`RenderPane` 收集），
+      // 这一层不知道现在渲染的是笔记、帮助还是设置页
+      if (!renderPane?.value?.showFind()) {
+        flash("这一页没有可以查找的正文");
+      }
+      return;
     case "find-next":
+      if (renderPane?.value?.findNext()) {
+        return;
+      }
+      flash("还没开始查找");
+      break;
     case "find-previous":
-      flash("页内查找还没接上");
+      if (renderPane?.value?.findPrevious()) {
+        return;
+      }
+      flash("还没开始查找");
       break;
     case "back":
       goBack();
@@ -484,6 +502,7 @@ async function interceptClose() {
         @toggle-width="toggleWidth"
         @scroll-top="renderPane?.scrollToTop()"
         @scroll-bottom="renderPane?.scrollToBottom()"
+        @find="onShortcut('find')"
     />
   </div>
 

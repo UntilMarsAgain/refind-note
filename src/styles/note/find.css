@@ -1,0 +1,43 @@
+/*
+ * 页内查找在正文里留下的高亮。
+ *
+ * ## 为什么这些规则只写 `.find-hit`，不写裸 `mark`
+ *
+ * `<mark>` 在本程序里有**别的用途**：作者可以在 `::html` 里自己写标记，
+ * 净化白名单也放它过去（`html.rs` 的 `RULES` 里 `("mark", COMMON)`，
+ * `COMMON` 含 `class`）。所以正文里本来就会有别人的 `<mark>`。
+ *
+ * 查找高亮是**临时状态**（换个查询就全拆），作者的标记是**内容**。
+ * 两者混起来的症状很具体：换一次查询就把作者高亮好的重点全拆没了。
+ *
+ * 所以定死一条：查找包出来的 `<mark>` 一律带 `find-hit`
+ * （见 `dom/find-in-page.ts`），这里也**只**给 `.find-hit` 上色 ——
+ * 绝不用裸 `mark` 选择器，那样会把作者的标记一起染了。
+ */
+
+.note-body mark.find-hit {
+  /*
+   * 用强调色的一层淡底，而不是浏览器默认的荧光黄。
+   *
+   * 荧光黄在任何主题上都很跳，而查找高亮常常一次几十处 —— 太跳的话，
+   * 正文反而读不下去（眼睛不知道该看高亮还是看字）。
+   * 淡底 + 一圈更实一点的边，是"看得见但不吵"的那个程度。
+   */
+  padding: 0 1px;
+  border-radius: 2px;
+  background-color: var(--find-hit-bg);
+  box-shadow: inset 0 -1px 0 var(--find-hit-edge);
+  color: inherit;
+}
+
+/*
+ * 当前看的那一个：边加重、底再淡一点。
+ *
+ * 一处加重比"换一种颜色"更好认 —— 几十处命中里要能一眼认出"现在看的是哪一个"，
+ * 否则按"下一个"看起来像没反应。`useFindInPage` 会把
+ * `mark.find-hit-selected` 挂到当前那个上。
+ */
+.note-body mark.find-hit-selected {
+  background-color: var(--find-hit-current-bg);
+  box-shadow: inset 0 -2px 0 var(--find-hit-current-edge);
+}

@@ -21,6 +21,8 @@ import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { BookOpen, Code } from "@lucide/vue";
 import type { HelpPage } from "../../ipc/help.ts";
+import { useFindInPage } from "../../composables/useFindInPage.ts";
+import FindBar from "../note/FindBar.vue";
 import NoteContent from "../note/NoteContent.vue";
 import PageHeader, { type PageAction } from "../note/PageHeader.vue";
 import SourceView from "../note/SourceView.vue";
@@ -48,13 +50,78 @@ const props = defineProps<{
   editable: boolean;
   /** 这一页星标过没有 */
   starred?: boolean;
+  /** 上层让"打开查找条"（递增的信号，理由见 `NoteView` 里同样的字段） */
+  findRequest?: number;
+  /** 上层让"下一个/上一个" */
+  findStep?: { step: number; dir: "next" | "previous" };
 }>();
+
+// 给默认值的理由：这两个是**可选** prop，不给默认值的话 watch 回调里拿到的是
+// `undefined`，每次都得判一遍"有没有信号"—— 而"没给"与"给了 0"在这里本来就是
+// 同一件事（0 = 还没触发过）。
+const findRequest = computed(() => props.findRequest ?? 0);
+const findStep = computed(() => props.findStep ?? { step: 0, dir: "next" as const });
 
 const emit = defineEmits<{
   (e: "navigate", input: string): void;
   (e: "section", id: string): void;
   (e: "toggle-star"): void;
+  /**
+   * 当前页里有可查的正文。
+   *
+   * 带的是 `true`/`false`：全局那个 `find` 动作在 `App.vue`，
+   * 而"这一页有没有正文可查"只有这一层知道。
+   * 摊开源码那一支（`props.source`）报 false —— 那是编辑器，找是编辑器的事。
+   */
+  (e: "find", available: boolean): void;
 }>();
+
+const find = useFindInPage();
+
+/** `NoteContent` 用 `defineExpose` 交出来的正文容器（查找要往里包 `<mark>`） */
+const contentRef = ref<InstanceType<typeof NoteContent> | null>(null);
+
+// 把容器交给查找层；换了容器就收掉高亮（它属于旧正文）
+watch(
+  contentRef,
+  (component) => {
+    find.root.value = component?.rootEl ?? null;
+    find.hide();
+  },
+  { immediate: true },
+);
+
+// 告诉上层"这里能查/不能查"：正文那一支能查，源码那一支不归它
+watch(
+  [() => props.source, () => entry.value],
+  () => emit("find", !props.source && entry.value !== null),
+  { immediate: true },
+);
+
+// 上层让"打开查找条"（全局 `find` 动作走这条线）
+watch(
+  () => findRequest.value,
+  (value) => {
+    if (value > 0) {
+      find.show();
+    }
+  },
+);
+
+// 上层让"下一个/上一个"
+watch(
+  () => findStep.value,
+  (value, previous) => {
+    if (value.step === previous.step || !find.open.value) {
+      return;
+    }
+    if (value.dir === "next") {
+      find.next();
+    } else {
+      find.previous();
+    }
+  },
+);
 
 const entry = ref<HelpPage | null>(null);
 const problem = ref("");
@@ -122,10 +189,22 @@ function onAction() {
 
       <NoteContent
           v-else
+          ref="contentRef"
           :html="entry.html"
           @wikilink="emit('navigate', $event.title)"
           @wikilink-new="emit('navigate', $event)"
           @section="emit('section', $event)"
+      />
+
+      <!-- 页内查找：帮助页也是正文，一样能找（`find-bar.css` 写了层叠关系） -->
+      <FindBar
+          :open="find.open.value"
+          :total="find.total.value"
+          :index="find.index.value"
+          @query="find.search"
+          @next="find.next"
+          @previous="find.previous"
+          @close="find.hide"
       />
     </template>
   </div>

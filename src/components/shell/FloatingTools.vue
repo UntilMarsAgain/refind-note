@@ -26,6 +26,7 @@ import {
   Moon,
   Monitor,
   Scan,
+  Search,
   Sun,
 } from "@lucide/vue";
 import type { ThemeMode } from "../../ipc/settings.ts";
@@ -54,6 +55,8 @@ const emit = defineEmits<{
   (e: "toggle-width"): void;
   (e: "scroll-top"): void;
   (e: "scroll-bottom"): void;
+  /** 页内查找（`find` 动作，与快捷键同一条路） */
+  (e: "find"): void;
 }>();
 
 const THEME_ICONS: Record<ThemeMode, Component> = {
@@ -109,6 +112,18 @@ const themeTip = computed(() => `深浅色：${THEME_LABELS[props.theme]}（点�
         <Scan class="swap__icon swap__icon--limited" :size="16" :stroke-width="1.9" />
         <ArrowLeftRight class="swap__icon swap__icon--wide" :size="16" :stroke-width="1.9" />
       </span>
+    </button>
+
+    <!-- 查找放在这排按钮的最上头：它是这一组里唯一"会往界面里加东西"的
+         （弹出输入条），其余几个只切状态或滚动 -->
+    <button
+      class="tool tip--left"
+      type="button"
+      data-tip="在正文里查找"
+      aria-label="在正文里查找"
+      @click="emit('find')"
+    >
+      <Search :size="16" :stroke-width="1.9" />
     </button>
 
     <button

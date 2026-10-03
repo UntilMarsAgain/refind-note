@@ -68,6 +68,20 @@
     --selection-bg: rgba(91, 141, 214, 0.5);
 
     /*
+     * 页内查找的命中高亮（`note/find.css`）。
+     *
+     * 不直接用 `--selection-bg`：那个是给**选中**用的，色太实，
+     * 一次几十处命中时正文就没法读了。查找要的是"看得见但不吵"。
+     *
+     * 深浅两套都要给足对比 —— 淡底靠那条边撑着，而边在深色底下
+     * 若还照抄浅色那组就会糊掉（深色底 + 浅边 = 看不清在哪结束）。
+     */
+    --find-hit-bg: rgba(255, 214, 102, 0.28);
+    --find-hit-edge: rgba(190, 140, 20, 0.55);
+    --find-hit-current-bg: rgba(255, 190, 70, 0.5);
+    --find-hit-current-edge: #d99b0a;
+
+    /*
      * 链接颜色**钉死**，不跟主题色走。
      *
      * 蓝 = 有对应页面的内部链接与外链；红 = 红链（页面不存在）；绿 = 跨站链接。
@@ -134,6 +148,11 @@
     --code-bg: rgba(0, 0, 0, 0.06);
     --icon: #3a3434;
     --selection-bg: rgba(47, 111, 196, 0.22);
+    /* 页内查找：深色底下用偏冷的青，与浅色那组��黄区分开（见上面那段说明） */
+    --find-hit-bg: rgba(120, 200, 255, 0.18);
+    --find-hit-edge: rgba(140, 205, 255, 0.5);
+    --find-hit-current-bg: rgba(140, 210, 255, 0.34);
+    --find-hit-current-edge: #6cc4f5;
     --link-blue: #2f6fc4;
     --link-green: #2f7a4a;
     --link-missing: #b02a2a;

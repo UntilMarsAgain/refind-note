@@ -44,6 +44,16 @@ const emit = defineEmits<{
 
 const rootEl = ref<HTMLElement | null>(null);
 
+/**
+ * 把正文那个容器交给外面（页内查找要往里包 `<mark>`）。
+ *
+ * 为什么不放在 `NoteContent` 里自己查找：查找条（输入框、上下一个按钮）是**界面**，
+ * 该跟着窗口走；查找状态却**跟着正文走** —— 正文换了一篇、`v-html` 换了一次，
+ * 那些高亮就得重做。两者分开，`NoteContent` 只出容器，具体怎么查由外面决定
+ * （见 `dom/find-in-page.ts`）。
+ */
+defineExpose({ rootEl });
+
 const COPY_TEXT = "复制";
 const COPIED_TEXT = "已复制";
 const FAILED_TEXT = "复制失败";

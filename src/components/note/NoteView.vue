@@ -25,6 +25,8 @@ import type { Note, Reading } from "../../ipc/note.ts";
 import { parentOf } from "../../core/title.ts";
 import { flash } from "../../core/notice.ts";
 import { saveNoteMarkdown } from "../../dom/file-save.ts";
+import { useFindInPage } from "../../composables/useFindInPage.ts";
+import FindBar from "./FindBar.vue";
 import NoteContent from "./NoteContent.vue";
 import PageHeader, { type PageAction } from "./PageHeader.vue";
 import StorageBadge from "./StorageBadge.vue";
@@ -51,7 +53,22 @@ const props = defineProps<{
     via?: Via | null;
     /** 这一页星标过没有 */
     starred?: boolean;
+    /**
+     * 上层让"打开查找条"：是个**递增的信号**而不是布尔开关。
+     *
+     * 用计数的理由：同一页里可以反复"打开查找"（关掉再开），而布尔量
+     * 在已经为 true 时再设 true 不会触发 watch —— 那第二次就开不出来了。
+     */
+    findRequest?: number;
+    /** 上层让"下一个/上一个"：`step` 递增触发，`dir` 说往哪边 */
+    findStep?: { step: number; dir: "next" | "previous" };
 }>();
+
+// 给默认值的理由：这两个是**可选** prop，不给默认值的话 watch 回调里拿到的是
+// `undefined`，每次都得判一遍"有没有信号"—— 而"没给"与"给了 0"在这里本来就是
+// 同一件事（0 = 还没触发过）。
+const findRequest = computed(() => props.findRequest ?? 0);
+const findStep = computed(() => props.findStep ?? { step: 0, dir: "next" as const });
 
 const emit = defineEmits<{
     /** 点了内部链接：算一次跳转 */
@@ -74,6 +91,11 @@ const emit = defineEmits<{
     (e: "leave"): void;
     /** 加/去星标 */
     (e: "toggle-star"): void;
+    /**
+     * 当前页里有可查的正文（全局那个 `find` 动作在 `App.vue`，它不知道这一页有没有）。
+     * 加载中或出错时是 false —— 那时候没有正文可找。
+     */
+    (e: "find", available: boolean): void;
 }>();
 
 const note = ref<Note | null>(null);
@@ -147,6 +169,61 @@ async function exportMarkdown() {
         flash(`导出失败：${error}`);
     }
 }
+
+// ------------------------------------------------------------ 页内查找
+
+const find = useFindInPage();
+
+/** `NoteContent` 用 `defineExpose` 交出来的正文容器（查找要往里包 `<mark>`） */
+const contentRef = ref<InstanceType<typeof NoteContent> | null>(null);
+
+// 把容器交给查找层；换了一篇就重建 —— 高亮属于旧正文，留着会罩在不相干的内容上
+watch(
+  contentRef,
+  (component) => {
+    find.root.value = component?.rootEl ?? null;
+    // `NoteContent` 是 `v-else-if` 分支，正文换了组件也会换；
+    // 所以连查过的结果一起收掉，免得"3/12"对着另一篇的正文
+    find.hide();
+  },
+  { immediate: true },
+);
+
+// 告诉上层"这里能查/不能查"：加载中与出错时都没有正文可查
+watch(
+  [loading, error, note],
+  () => emit("find", !loading.value && !error.value && note.value !== null),
+  { immediate: true },
+);
+
+// 上层让"打开查找条"（全局 `find` 动作走这条线）
+watch(
+  () => findRequest.value,
+  (value) => {
+    if (value > 0) {
+      find.show();
+    }
+  },
+);
+
+// 上层让"下一个/上一个"：用 `findStep` 的递增次数触发，
+// 所以连按同一个键也能触发（与上一次的次数不同）
+watch(
+  () => findStep.value,
+  (value, previous) => {
+    if (value.step === previous.step) {
+      return;
+    }
+    if (!find.open.value) {
+      return;
+    }
+    if (value.dir === "next") {
+      find.next();
+    } else {
+      find.previous();
+    }
+  },
+);
 
 async function load() {
     loading.value = true;
@@ -247,10 +324,22 @@ watch(
       </header>
 
       <NoteContent
+          ref="contentRef"
           :html="note.html"
           @wikilink="emit('navigate', $event.title)"
           @wikilink-new="emit('navigate-new-tab', $event)"
           @section="emit('section', $event)"
+      />
+
+      <!-- 页内查找：贴在渲染区右上角（`find-bar.css` 里写了层叠关系） -->
+      <FindBar
+          :open="find.open.value"
+          :total="find.total.value"
+          :index="find.index.value"
+          @query="find.search"
+          @next="find.next"
+          @previous="find.previous"
+          @close="find.hide"
       />
     </template>
   </div>
