@@ -30,8 +30,10 @@ import { javascriptLanguage } from "@codemirror/lang-javascript";
 import { HighlightStyle, foldService, syntaxHighlighting } from "@codemirror/language";
 import { highlightTree, tags } from "@lezer/highlight";
 import type { Extension } from "@codemirror/state";
+import { EditorState, Prec } from "@codemirror/state";
 import type { DecorationSet, ViewUpdate } from "@codemirror/view";
-import { Decoration, MatchDecorator, ViewPlugin } from "@codemirror/view";
+import { Decoration, keymap, MatchDecorator, ViewPlugin } from "@codemirror/view";
+import { openSearchPanel, search } from "@codemirror/search";
 import { resolvedTheme } from "../core/theme.ts";
 import {
     scriptRanges,
@@ -102,6 +104,110 @@ export const appTheme = EditorView.theme(
         dark: resolvedTheme.value === "dark",
     },
 );
+
+/**
+ * 查找与替换面板。
+ *
+ * `basicSetup` 里**已经有 `searchKeymap`**（Ctrl+F / Ctrl+H / Ctrl+G 都绑好了），
+ * 唯独没装 `search()` 本身 —— 键是按的，面板不开。现在把它装上。
+ *
+ * `top: true` 让面板贴在编辑器**顶上**：默认是沉在底下，而源码栏下面还有状态栏，
+ * 沉底容易被那一行挡住，也离视线更远。
+ *
+ * ## 为什么要自己拿掉 `Mod-f`
+ *
+ * 全局的 Ctrl+F 现在归**键位表**管（见 `core/keymap.ts`），而 CM6 自带的
+ * `Mod-f` 打开的是它自己那套面板 —— 用户改了键（比如改成 `Alt+K`）之后，
+ * 按新键走我们的、按 Ctrl+F 走它的，同一个功能两个入口两套行为。
+ *
+ * 所以从 `basicSetup` 的键位表里把 `Mod-f` 摘掉，**只留替换与查找下一个**
+ * （`Mod-h` / `Mod-g` 是"面板开着时"才用的，不冲突）。
+ * `search()` 提供的 `openSearchPanel` 仍在，摘掉的是键位不是命令。
+ */
+
+/**
+ * 编辑器里的查找：面板 + 高亮 + 键位（我们自己的键位表那份另算，见
+ * `App.vue` 的 `onShortcut` —— 它管的是**页面**上的查找，编辑器里这个是
+ * 编辑器自己的事，两处各按各的上下文）。
+ *
+ * 高亮颜色接项目的 token，所以跟着主题与主题色走：
+ * - 全部命中 `var(--selection-bg)` 的淡染（它本来就表示"选中"）；
+ * - 当前那个命中 `var(--accent-tint)`，再配一条强调色的边 —— 几十处命中时，
+ *   一眼要能认出"现在看的是哪一个"，否则"下一个"按了等于没按。
+ */
+const editorSearch = [
+    // 面板上的字全是英文（"Find" / "Replace"）—— CM6 有官方的翻译机制
+    // （`EditorState.phrases`，见下面 `phrase()` 的用法），用它，别去改 DOM。
+    EditorState.phrases.of({
+        Find: "查找",
+        Replace: "替换",
+        replace: "替换",
+        next: "下一个",
+        previous: "上一个",
+        all: "全部替换",
+        // 按钮上那个词是 `"replace all"`（小写、带空格），与 `"Replace"` 不是同一个 key
+        "replace all": "全部替换",
+        matchCase: "区分大小写",
+        regexp: "正则",
+        byLine: "逐行",
+        "Find next occurrence of query relative to cursor": "从光标处找下一个",
+        "Find previous occurrence of query": "找上一个",
+        "Replace current match": "替换这一个",
+        "Replace all occurrences": "替换全部",
+    }),
+    search({ top: true }),
+    // `Mod-f` 让给键位表（见上面那段说明）。
+    //
+    // 注意这里**不是**"再绑一次盖住它"：CM6 里两条同键的键位不会互相抵消 ——
+    // `basicSetup` 那条照样命中，面板照样开。要让某个键**什么都不发生**，
+    // 唯一可靠的办法是用最高优先级绑一个返回 true 的空动作把它吃掉。
+    //
+    // 空动作里什么都不做（连查找面板也不开）：真正的"打开查找"由全局键位表
+    // 那条 `find` 动作负责，它知道该开哪个查找 —— 页面上的那个，或者是编辑器里这个。
+    // `keymap.of` 只收一个参数，优先级靠 `Prec` 套一层
+    Prec.highest(keymap.of([{ key: "Mod-f", run: () => true }])),
+    // 查找命中的配色。
+    //
+    // 必须用 **`&`** 起头（`"& .cm-searchMatch"`）而不是 `".cm-searchMatch"`：
+    // `search()` 自己带了一整套浅色/深色默认（浅色底下是荧光黄、深色底下是荧光青），
+    // 而它是 `EditorView.baseTheme` 的一部分。我们的 `appTheme` 排在它后面，
+    // 选择器写对了才盖得住 —— 写错了就是"两套配色打架"，实测里我一开始就踩了这个。
+    //
+    // 类名是查过源码的：CM 用的是 `cm-searchMatch` 与
+    // `cm-searchMatch cm-searchMatch-selected`（见 `@codemirror/search` 的 `selectedMatchMark`）。
+    EditorView.theme({
+        "& .cm-searchMatch": {
+            backgroundColor: "var(--accent-tint)",
+            outline: "1px solid var(--accent-soft)",
+            borderRadius: "2px",
+        },
+        "& .cm-searchMatch-selected": {
+            // 不写 `var(--selection-bg)` 当底色：那个变量是给**选中**用的，
+            // 拿来做"当前这一个"在浅色底下几乎看不出差别。这里靠更重的边框认它 ——
+            // 几十处命中时，一眼要能认出"现在看的是哪一个"。
+            outline: "2px solid var(--accent)",
+        },
+        "& .cm-panel input, & .cm-panel button": {
+            fontFamily: "var(--mono-font)",
+        },
+        // 面板按钮在深色底下默认是浅灰，点了几乎看不出来
+        "& .cm-button": {
+            backgroundImage: "none",
+            border: "1px solid var(--border)",
+            borderRadius: "4px",
+            color: "var(--text-dim)",
+            cursor: "pointer",
+        },
+        "& .cm-button:hover": {
+            backgroundColor: "var(--hover)",
+            color: "var(--text)",
+        },
+        "& .cm-button[disabled]": {
+            opacity: "0.5",
+            cursor: "default",
+        },
+    }),
+];
 
 /**
  * 与后端渲染器对齐的 markdown 解析。
@@ -312,9 +418,61 @@ export function sourceExtensions(): Extension[] {
         syncedMarkdown(),
         appTheme,
         syntaxHighlighting(appHighlight),
+        ...editorSearch,
         wikilinkHighlight,
         templateHighlight,
         scriptHighlight,
         templateFold,
     ];
+}
+
+// ----------------------------------------------------- 活着的编辑器实例
+
+/**
+ * 当前活着的编辑器实例（后建的在前）。
+ *
+ * 为什么需要这份登记：全局那个 `find` 动作是从 `window` 上的按键发起的，
+ * 手里只有一个"动作 id"，拿不到"该对哪个编辑器开面板"。而
+ * `openSearchPanel` 是个 `Command`，要的就是一个 `view`。
+ *
+ * 不用全局变量硬存一个"当前那个"：同时可能有两个编辑器（编辑态左右两个窗格，
+ * 见 `EditorPanes.vue`），"当前"取决于焦点在哪，而焦点我们不跟踪 —— 所以登记
+ * 全部，取**有焦点**的那个，没有就取最近一个。
+ */
+const liveViews: EditorView[] = [];
+
+/** 编辑器建好时登记 */
+export function registerEditorView(view: EditorView): void {
+    liveViews.unshift(view);
+}
+
+/** 编辑器拆掉时销号（不销号就会一直指着已经 `destroy()` 的实例） */
+export function unregisterEditorView(view: EditorView): void {
+    const at = liveViews.indexOf(view);
+    if (at >= 0) {
+        liveViews.splice(at, 1);
+    }
+}
+
+/** 眼下该对哪个编辑器动手：有焦点的那个，没有就最近一个；一个都没有返回 null */
+export function focusedEditorView(): EditorView | null {
+    const focused = liveViews.find((view) => view.hasFocus);
+    return focused ?? liveViews[0] ?? null;
+}
+
+/**
+ * 打开编辑器的查找面板（全局 `find` 动作在**编辑器里**时走这里）。
+ *
+ * 一个编辑器都没有就返回 false —— 调用方据此知道"这里没东西可找"，
+ * 该去页面上找，而不是把面板开在空气上。
+ */
+export function openEditorSearch(): boolean {
+    const view = focusedEditorView();
+    if (!view) {
+        return false;
+    }
+    // `openSearchPanel` 本身就是 `Command`（`(view) => boolean`），不是带 `.run` 的对象
+    openSearchPanel(view);
+    view.focus();
+    return true;
 }

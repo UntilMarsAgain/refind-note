@@ -37,6 +37,7 @@ import { dismissNotice, flash, notice } from "./core/notice.ts";
 import { syncBeforeClose, syncClosing, syncProgress } from "./core/sync.ts";
 import { currentWindow } from "./core/window-api.ts";
 import { setOpenInNewTab } from "./dom/note-html.ts";
+import { openEditorSearch } from "./dom/editor-setup.ts";
 import {
   cycleTheme,
   flushPreferences,
@@ -232,8 +233,14 @@ function retryStartup() {
 function onShortcut(action: string) {
   switch (action) {
     case "find":
-      // 页内查找由阅读页自己接（它得知道当前显示的是哪一页）；
-      // 还没有实现时先说清楚，而不是按了什么都不发生
+      // 编辑器里有焦点就开**它**的查找面板；没有就开页面上那个。
+      //
+      // 顺序是有意的：人在编辑器里按 Ctrl+F，想找的多半是编辑器里那段源码
+      // （那才是他正在看的东西）。反过来先开页面上的查找的话，
+      // 在编辑器里按 Ctrl+F 会在看不见的地方弹出个查找框。
+      if (openEditorSearch()) {
+        return;
+      }
       flash("页内查找还没接上");
       break;
     case "find-next":

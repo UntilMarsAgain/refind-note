@@ -21,7 +21,11 @@ import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { basicSetup } from "codemirror";
-import { sourceExtensions } from "../../dom/editor-setup.ts";
+import {
+    registerEditorView,
+    sourceExtensions,
+    unregisterEditorView,
+} from "../../dom/editor-setup.ts";
 
 /**
  * **只看不改**的源码视图。
@@ -62,6 +66,8 @@ onMounted(() => {
         return;
     }
     view = new EditorView({ parent: hostEl.value, state: readonlyState(props.markdown) });
+    // 登记：全局那个 `find` 动作要靠它找到"该对哪个编辑器开面板"
+    registerEditorView(view);
 });
 
 // 换了一页就整篇换掉：内容与折叠、滚动位置一起归零，看到的是新那一页
@@ -76,6 +82,10 @@ watch(
 );
 
 onBeforeUnmount(() => {
+    if (view) {
+        // 先销号：不销号的话登记表里会一直指着这个已经 `destroy()` 的实例
+        unregisterEditorView(view);
+    }
     view?.destroy();
     view = null;
 });

@@ -36,7 +36,11 @@ import { EditorView } from "@codemirror/view";
 // `codemirror` 是元包（提供 basicSetup 等），EditorState 由 @codemirror/state 提供 ——
 // 后者必须作为**直接依赖**安装：pnpm 的严格 node_modules 下，传递依赖不可直接导入。
 import { basicSetup } from "codemirror";
-import { sourceExtensions } from "../dom/editor-setup.ts";
+import {
+    registerEditorView,
+    sourceExtensions,
+    unregisterEditorView,
+} from "../dom/editor-setup.ts";
 
 export interface CodeMirrorHost {
     /**
@@ -115,6 +119,8 @@ export function useCodeMirror(host: CodeMirrorHost): CodeMirrorEditor {
                 ],
             }),
         });
+        // 登记：全局那个 `find` 动作要靠它找到"该对哪个编辑器开面板"
+        registerEditorView(view.value);
     }
 
     /**
@@ -136,6 +142,11 @@ export function useCodeMirror(host: CodeMirrorHost): CodeMirrorEditor {
 
     /** 拆掉实例（卸载时由组件在记完状态之后调，见上面 `destroy` 那段说明） */
     function destroy() {
+        if (view.value) {
+            // 先销号再拆：不销号的话，登记表里会一直指着一个已经 `destroy()` 的
+            // 实例，而 `find` 动作拿它开面板就会炸在"对一个死视图 dispatch"上
+            unregisterEditorView(view.value);
+        }
         view.value?.destroy();
         view.value = null;
     }

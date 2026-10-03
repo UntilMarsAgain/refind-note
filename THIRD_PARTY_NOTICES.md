@@ -4,6 +4,7 @@
 - [@codemirror/lang-javascript@6.2.5](https://github.com/codemirror/lang-javascript): (c) @codemirror/lang-javascript contributors
 - [@codemirror/lang-markdown@6.5.2](git+https://code.haverbeke.berlin/codemirror/lang-markdown): (c) @codemirror/lang-markdown contributors
 - [@codemirror/language@6.12.4](git+https://code.haverbeke.berlin/codemirror/language): (c) @codemirror/language contributors
+- [@codemirror/search@6.7.2](git+https://code.haverbeke.berlin/codemirror/search): (c) @codemirror/search contributors
 - [@codemirror/state@6.7.6](git+https://code.haverbeke.berlin/codemirror/state): (c) @codemirror/state contributors
 - [@codemirror/view@6.43.13](git+https://code.haverbeke.berlin/codemirror/view): (c) @codemirror/view contributors
 - [@lezer/highlight@1.2.5](git+https://code.haverbeke.berlin/lezer/highlight): (c) @lezer/highlight contributors
