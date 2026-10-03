@@ -122,6 +122,7 @@ pub fn run() {
             commands::files::delete_file,
             commands::files::export_file,
             commands::help::help_pages,
+            commands::help::all_help_pages,
             commands::help::read_help,
             commands::keys::gpg_keys,
             commands::keys::import_gpg_key,

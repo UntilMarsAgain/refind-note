@@ -96,9 +96,24 @@ fn all_sources() -> Vec<(&'static str, &'static str)> {
     pages
 }
 
-/// 全部帮助页（渲染在调用时发生，所以这一步要一个仓库 —— 渲染器在它身上）
+/// **菜单里**那几页（渲染在调用时发生，所以这一步要一个仓库 —— 渲染器在它身上）
 pub fn pages(database: &Database) -> Vec<HelpPage> {
     menu_sources()
+        .into_iter()
+        .map(|(slug, source)| page_of(database, slug, source))
+        .collect()
+}
+
+/// `help/` 目录里**所有**的页（按页面名排）
+///
+/// 与 [`pages`] 的区别就是"菜单里列没列它"：菜单只列 [`PAGES`] 那三页，
+/// 但新丢进来的文件照样打得开（见 [`all_sources`]）。而「全部页面」那一页
+/// 回答的是"**这儿有哪些页面**"，所以它要的是全部 —— 把只列三页的那份给它，
+/// 等于让用户在一个声称完整的清单里看到不完整的内容。
+///
+/// 正文照样是渲染时给的（`::html src=` 那几页用得上）。
+pub fn every_page(database: &Database) -> Vec<HelpPage> {
+    all_sources()
         .into_iter()
         .map(|(slug, source)| page_of(database, slug, source))
         .collect()
@@ -180,6 +195,61 @@ mod tests {
             vec!["首页", "目录", "语法速览"],
             "菜单就是这三页、这个顺序"
         );
+
+        cleanup(&database);
+    }
+
+    /// 「全部页面」要的是**全部**帮助页：菜单里那三页之外的文件也得在
+    /// —— 否则一个自称完整的清单里缺着几页，比只列三页更糟。
+    ///
+    /// 同时盯着 `PAGES` 里那几页**都**在（不能少也不能多）。
+    #[test]
+    fn the_full_list_covers_every_file_including_the_ones_not_in_the_menu() {
+        let database = scratch("all");
+
+        let every: Vec<String> = every_page(&database).into_iter().map(|p| p.slug).collect();
+
+        // 目录里每个文件都在
+        for file in HELP.files() {
+            let Some(stem) = file.path().file_stem().and_then(|stem| stem.to_str()) else {
+                continue;
+            };
+            assert!(every.iter().any(|slug| slug == stem), "{stem} 少了");
+        }
+
+        // 菜单那几页一个都不能少
+        for menu in PAGES {
+            assert!(every.iter().any(|slug| slug == menu), "菜单里的 {menu} 少了");
+        }
+
+        // 按文件名排（与 `all_sources` 一致，所以这一页的列表顺序是稳定的）
+        let mut sorted = every.clone();
+        sorted.sort();
+        assert_eq!(every, sorted, "该按页面名排");
+
+        // 确实比菜单那三页多（不然这个测试就是在测一个空集）
+        assert!(
+            every.len() >= PAGES.len(),
+            "全表不该少于菜单：{} < {}",
+            every.len(),
+            PAGES.len()
+        );
+
+        cleanup(&database);
+    }
+
+    /// 菜单那三页与全表**都是能打开的**（不是"列出来却是死的"）
+    #[test]
+    fn every_page_listed_is_actually_openable() {
+        let database = scratch("openable");
+
+        for page in every_page(&database) {
+            assert!(
+                find(&database, &page.slug).is_some(),
+                "{} 出现在全表里，就该打得开",
+                page.slug
+            );
+        }
 
         cleanup(&database);
     }
