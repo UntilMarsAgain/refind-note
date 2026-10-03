@@ -318,7 +318,7 @@ mod tests {
         );
 
         // 不认识的动作：丢（它是哪来的只能是人手写错的）
-        assert!(map.bindings.get("no-such-action").is_none());
+        assert!(!map.bindings.contains_key("no-such-action"));
         // 空键位也丢：留着等于"什么都触发不了"，反而不如走出厂的
         assert!(
             !map.keys_of("close-tab").is_empty(),
