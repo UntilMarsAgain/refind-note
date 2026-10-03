@@ -61,6 +61,46 @@ thread_local! {
     /// 正在进行的渲染打断（并行跑测试就复现了）。`parse(&self, src)` 又没有 env
     /// 参数，所以用线程局部变量承载：解析本身是同步的，规则必然跑在同一个线程上。
     static CURRENT_RESOLVER: RefCell<Option<Resolver>> = const { RefCell::new(None) };
+
+    /// 当前渲染拿得到的**模板页正文**（`Template:` 命名空间里那几页）：名字 → 正文。
+    ///
+    /// 与解析器同一个理由：`Template::render` 只拿得到节点，够不着仓库 ——
+    /// 而 `::html src="某张卡片"` 要的正是"另一个页面的正文"。
+    static CURRENT_TEMPLATE_PAGES: RefCell<Option<TemplatePages>> = const { RefCell::new(None) };
+}
+
+/// 模板页的正文表：**小写页面名 → 正文**。
+///
+/// 由仓库那一层在渲染前备好（见 `vault::notes` 里 `render_html` 旁边那段说明）。
+pub type TemplatePages = std::sync::Arc<std::collections::HashMap<String, String>>;
+
+/// 取 `src=` 指向的那一页正文。
+///
+/// 名字认三种写法：`甲`、`Template:甲`、`template:甲`（大小写与首尾空白都宽松）——
+/// 都指 `Template:` 命名空间里的那一页。
+pub fn template_page(name: &str) -> Option<String> {
+    let key = template_page_key(name);
+    CURRENT_TEMPLATE_PAGES.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .and_then(|pages| pages.get(&key).cloned())
+    })
+}
+
+/// 页名的归一写法（`Template:甲` 与 `甲` 是同一个键；统一小写）
+pub fn template_page_key(name: &str) -> String {
+    let trimmed = name.trim();
+    let page = match trimmed.split_once(':') {
+        Some((prefix, rest))
+            if prefix
+                .trim()
+                .eq_ignore_ascii_case(crate::vault::namespace::TEMPLATE_NAME) =>
+        {
+            rest.trim()
+        }
+        _ => trimmed,
+    };
+    page.to_lowercase()
 }
 
 /// 取当前渲染的解析器（供自定义语法使用）
@@ -125,16 +165,28 @@ pub fn render(markdown: &str) -> String {
 
 /// 带链接解析的渲染：`[[目标]]` 会额外带上 `data-key` / `data-title` / `data-missing`。
 pub fn render_with(markdown: &str, resolver: Option<&Resolver>) -> String {
+    render_with_pages(markdown, resolver, None)
+}
+
+/// 带链接解析、并且带上**模板页正文**的渲染（模板的 `src=` 用得上后者）。
+pub fn render_with_pages(
+    markdown: &str,
+    resolver: Option<&Resolver>,
+    pages: Option<TemplatePages>,
+) -> String {
     // 目标里的空格先补成 `%20`：CommonMark 不认带空格的目标（见下面那个函数）
     let markdown = &encode_spaces_in_targets(markdown);
 
     // 存下旧值、用完还原：若出现嵌套渲染，也不会互相踩
     let previous = CURRENT_RESOLVER.with(|cell| cell.borrow().clone());
+    let previous_pages = CURRENT_TEMPLATE_PAGES.with(|cell| cell.borrow().clone());
     CURRENT_RESOLVER.with(|cell| *cell.borrow_mut() = resolver.cloned());
+    CURRENT_TEMPLATE_PAGES.with(|cell| *cell.borrow_mut() = pages);
 
     let html = MARKDOWN.parse(markdown).render();
 
     CURRENT_RESOLVER.with(|cell| *cell.borrow_mut() = previous);
+    CURRENT_TEMPLATE_PAGES.with(|cell| *cell.borrow_mut() = previous_pages);
     html
 }
 

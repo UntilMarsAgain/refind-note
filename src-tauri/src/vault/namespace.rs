@@ -39,6 +39,9 @@ pub const MAIN_ID: &str = "0";
 pub const SPECIAL_ID: &str = "special";
 /// 保留命名空间 `template` 的标识。
 pub const TEMPLATE_ID: &str = "template";
+
+/// 模板命名空间在地址里写的那一段（`Template:卡片`）
+pub const TEMPLATE_NAME: &str = "template";
 /// 虚拟命名空间 `help` 的标识：里面的页面是**编进程序里的用户帮助**。
 pub const HELP_ID: &str = "help";
 /// 它的规范名（地址里写 `Help:入门`）
@@ -135,7 +138,7 @@ impl NamespaceTable {
                 },
                 Namespace {
                     id: TEMPLATE_ID.to_string(),
-                    name: TEMPLATE_ID.to_string(),
+                    name: TEMPLATE_NAME.to_string(),
                     aliases: Vec::new(),
                     storable: true,
                     site: None,

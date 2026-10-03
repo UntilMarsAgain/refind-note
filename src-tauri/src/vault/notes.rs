@@ -824,7 +824,46 @@ impl Database {
     /// 与"存下来再读是什么样"不会分家。
     pub fn render_html(&self, markdown: &str, title: &str) -> Result<String, String> {
         let resolver = self.resolver_for(title);
-        Ok(crate::markdown::render_with(markdown, Some(&resolver)))
+        Ok(crate::markdown::render_with_pages(
+            markdown,
+            Some(&resolver),
+            Some(std::sync::Arc::new(self.template_pages(markdown))),
+        ))
+    }
+
+    /// `Template:` 里每一页的正文 —— 模板的 `src=` 要把另一页嵌进来（见 `markdown::TemplatePages`）。
+    ///
+    /// **只有正文里写了 `src=` 才去取**：每次渲染都把那些模板页读一遍太亏，
+    /// 而 `src=` 必须原样写在正文里，漏不掉（认错的代价只是白读几页）。
+    ///
+    /// 读不出来的（加密的、坏掉的）就当没有这一页 —— 渲染处会说"取不到它"。
+    fn template_pages(&self, markdown: &str) -> std::collections::HashMap<String, String> {
+        let mut pages = std::collections::HashMap::new();
+        if !markdown.contains("src=") {
+            return pages;
+        }
+
+        let table = self.namespaces();
+        let Ok(titles) = self.titles() else {
+            return pages;
+        };
+
+        for title in titles.notes.values() {
+            let Ok(parsed) = crate::vault::title::parse(title, &table) else {
+                continue;
+            };
+            if parsed.ns != crate::vault::namespace::TEMPLATE_ID {
+                continue;
+            }
+            if let Ok(Reading::Ready { note }) = self.read_note(title, None) {
+                pages.insert(
+                    crate::markdown::template_page_key(&parsed.page),
+                    note.markdown,
+                );
+            }
+        }
+
+        pages
     }
 
     /// 给"当前页是某一页"的一次渲染装配解析器（红蓝链、`[[/子页]]` 都靠它）
@@ -1081,6 +1120,46 @@ mod tests {
         if let Some(root) = database.root().parent() {
             let _ = fs::remove_dir_all(root);
         }
+    }
+
+    /// **模板嵌入**：`src=` 指的是 `Template:` 命名空间里的一页，真的取得到。
+    ///
+    /// 这一条是从一个"看着像坏了"的地方补上的：`src=` 那条路以前**永远**返回
+    /// "取不到它"（谁也没实现），于是用户定义的模板一个都嵌不进来。
+    #[test]
+    fn a_template_page_can_be_embedded_by_name() {
+        let database = scratch("template-src");
+
+        // 用户自定义的模板：`Template:` 里的一页
+        database.create("Template:卡片").unwrap();
+        database
+            .commit("Template:卡片", "<b>嵌进来的卡片</b>", None)
+            .unwrap();
+
+        // 三种写法都该认
+        for name in ["卡片", "Template:卡片", "template:卡片", " 卡片 "] {
+            let html = database
+                .render_html(&format!("::html src=\"{name}\"\n"), "某页")
+                .unwrap();
+            assert!(html.contains("嵌进来的卡片"), "src={name:?} 没取到：{html}");
+            assert!(!html.contains("template--problem"), "src={name:?}：{html}");
+        }
+
+        // 没有这一页：摆问题框，把话说清楚
+        let missing = database
+            .render_html("::html src=\"没有这张卡\"\n", "某页")
+            .unwrap();
+        assert!(missing.contains("template--problem"), "{missing}");
+
+        // 普通命名空间里的页面**不是**模板页：`src=` 取不到它（只认 `Template:`）
+        database.create("一张普通笔记").unwrap();
+        database.commit("一张普通笔记", "不该被嵌进来", None).unwrap();
+        let ordinary = database
+            .render_html("::html src=\"一张普通笔记\"\n", "某页")
+            .unwrap();
+        assert!(!ordinary.contains("不该被嵌进来"), "{ordinary}");
+
+        cleanup(&database);
     }
 
     /// 口令是**进程内共享**的（`session`）：用那把全局的锁，别的模块也一样拿它

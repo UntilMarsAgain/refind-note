@@ -672,7 +672,7 @@ fn render_theme(template: &Template, node: &Node, fmt: &mut dyn Renderer) {
 /// 所以这段代码才会真的跑起来。
 fn render_js(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
     let Some(source) = fill::source_of(template) else {
-        render_problem(template, fmt, "src= 指向模板页，取不到它");
+        render_problem(template, fmt, "src= 指的是模板命名空间里的一页（`Template:名字`）—— 没有这一页，或者它读不出来");
         return;
     };
     let filled = fill::substitute(&source, template, &template.body);
@@ -824,7 +824,7 @@ fn render_code(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
 /// 内容里的 `{{参数}}` 会被替换；`</style` 会被去掉，免得提前闭合样式块。
 fn render_css(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
     let Some(source) = fill::source_of(template) else {
-        render_problem(template, fmt, "src= 指向模板页，取不到它");
+        render_problem(template, fmt, "src= 指的是模板命名空间里的一页（`Template:名字`）—— 没有这一页，或者它读不出来");
         return;
     };
     let css = fill::sanitize_css(&fill::substitute(&source, template, &template.body));
@@ -843,7 +843,7 @@ fn render_css(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
 /// 只有显式写了 `js`（或 `js=true`）才原样放行。默认安全，要开就得自己写出来。
 fn render_html(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
     let Some(source) = fill::source_of(template) else {
-        render_problem(template, fmt, "src= 指向模板页，取不到它");
+        render_problem(template, fmt, "src= 指的是模板命名空间里的一页（`Template:名字`）—— 没有这一页，或者它读不出来");
         return;
     };
     let filled = fill::substitute(&source, template, &template.body);

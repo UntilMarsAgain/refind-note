@@ -52,10 +52,13 @@ pub fn substitute(text: &str, template: &Template, body: &str) -> String {
 
 /// 模板的正文：块自身的内容；带 `src=` 的取不到（它指向命名空间里的模板页）。
 pub fn source_of(template: &Template) -> Option<String> {
-    match template.param("src") {
-        Some(_) => None,
-        None => Some(template.body.clone()),
-    }
+    let Some(name) = template.param("src") else {
+        return Some(template.body.clone());
+    };
+
+    // `src=` 指的是**模板命名空间**里的一页（`Template:卡片`）：正文由仓库那一层
+    // 在渲染前备好，这里只查表 —— 渲染器自己够不着仓库（见 `markdown::TemplatePages`）。
+    crate::markdown::template_page(name)
 }
 
 /// 开关式参数开没开：写了 `flag`、`flag=true`、`flag=yes`、`flag=on` 都算开了。
