@@ -31,6 +31,24 @@
 //! ```
 //!
 //! 目录与那些 JSON 在打开时按需建出来：第一次启动就该是完整的，不必等写了一次才出现。
+//!
+//! ## 这一层怎么分的
+//!
+//! | 文件 | 管什么 |
+//! |---|---|
+//! | 本文件 | 库布局、`Meta`/`Config`、认领标记，以及打开库时把目录骨架铺出来 |
+//! | [`facts`] | 仓库里有多少东西 —— 诊断页与设置页要的那些数字 |
+//!
+//! `Database` 是这一层的**能力句柄**：笔记、命名空间、草稿那些方法都挂在它身上，
+//! 各自住在 [`crate::vault::notes`] / [`crate::vault::namespace`] 里。
+
+mod facts;
+#[cfg(test)]
+mod tests;
+
+pub use facts::RepositoryFacts;
+
+use facts::{count_files, directory_bytes};
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -44,7 +62,6 @@ use crate::storage::store::BlobStore;
 use crate::storage::workspace::{write_json, Workspace};
 use crate::vault::namespace::{NamespaceTable, MAIN_ID};
 
-/// 认领标记：`meta.json` 里是它，才认这是重逢笔记的数据库
 pub const KIND: &str = "refind-note";
 
 /// 数据模型版本。**改数据格式就要动它**：不兼容的改动升主版本号。
@@ -352,232 +369,4 @@ pub fn now() -> String {
     OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .unwrap_or_default()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "refind-note-database-test-{}-{name}",
-            std::process::id()
-        ));
-        let _ = fs::remove_dir_all(&dir);
-        dir
-    }
-
-    /// 从暂存目录开一个库（工作目录的骨架先建出来）
-    fn open(dir: &Path) -> Result<Database, String> {
-        let workspace = Workspace::open(dir.to_path_buf())?;
-        Database::open(&workspace)
-    }
-
-    #[test]
-    fn a_fresh_directory_becomes_a_database() {
-        let root = scratch("fresh");
-        let database = open(&root).unwrap();
-
-        assert_eq!(database.meta().kind, KIND);
-        assert_eq!(database.meta().version, MODEL_VERSION);
-        OffsetDateTime::parse(&database.meta().created_at, &Rfc3339).expect("该是 RFC3339");
-
-        // 目录骨架与那几张表第一次打开就该在
-        assert!(database
-            .blobs()
-            .path_of("x")
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .is_dir());
-        assert!(database.drafts_dir().is_dir());
-        // 空表**不写**：写下来会被同步当成"本机改过"（新机器上尤其），
-        // 读到的是默认值，第一次真正改名/建页时才落盘
-        assert!(!database.titles_path().is_file());
-        assert!(
-            database.namespaces().get("0").is_some(),
-            "内建命名空间要读得到"
-        );
-        // 压缩默认开着：正文多半是文本，压一下几乎总是划算，而且无感
-        let default_protection = database.config().protection;
-        assert!(default_protection.compress);
-        assert!(default_protection.gpg_sign.is_none());
-        assert!(default_protection.gpg_encrypt.is_none());
-        assert!(!default_protection.symmetric);
-
-        // 重新打开认得出来，且不新建
-        let again = open(&root).unwrap();
-        assert_eq!(again.meta().created_at, database.meta().created_at);
-
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    /// 仓库规模数得对（诊断页报的就是这一串）
-    ///
-    /// 顺带钉住路径的基准：`root` **就是 `db/` 那一层** —— 数内容块时写成
-    /// `db/blobs` 会数到零（第一版就写错过）。
-    #[test]
-    fn facts_count_what_is_really_there() {
-        let root = scratch("facts");
-        let database = open(&root).unwrap();
-
-        // 刚建出来的库：三处都空着（`db/` 目录本身已经在了）
-        let empty = database.facts();
-        assert_eq!(empty.logs, 0, "{empty:?}");
-        assert_eq!(empty.blobs, 0, "{empty:?}");
-        assert_eq!(empty.drafts, 0, "{empty:?}");
-        assert_eq!(empty.trash, 0, "{empty:?}");
-
-        // 各丢一份进去：内容块（内容寻址那两级目录）、事件日志、草稿、回收站
-        let blob = database.blobs().path_of("abc123");
-        fs::create_dir_all(blob.parent().unwrap()).unwrap();
-        fs::write(&blob, vec![0u8; 100]).unwrap();
-
-        let log = database.objects_dir().join(MAIN_ID).join("1.log");
-        fs::write(&log, "{}\n").unwrap();
-        let draft = database.drafts_dir().join("1");
-        fs::write(&draft, "写了一半").unwrap();
-        let trashed = database.trash_dir().join(MAIN_ID).join("2.log");
-        fs::create_dir_all(trashed.parent().unwrap()).unwrap();
-        fs::write(&trashed, "{}\n").unwrap();
-
-        let facts = database.facts();
-        assert_eq!(facts.logs, 1, "{facts:?}");
-        assert_eq!(facts.blobs, 1, "{facts:?}");
-        assert_eq!(facts.blob_bytes, 100, "{facts:?}");
-        assert_eq!(facts.drafts, 1, "{facts:?}");
-        assert_eq!(facts.trash, 1, "{facts:?}");
-        assert!(facts.database_bytes >= 100, "{facts:?}");
-
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    /// 老仓库里的 `config.json` 会被搬成 `repository.json`，设置不丢
-    #[test]
-    fn the_old_config_file_is_moved_to_its_new_name() {
-        let root = scratch("legacy-config");
-        {
-            // 老样子：先用旧名字写一份非默认的设置
-            let workspace = Workspace::open(root.clone()).unwrap();
-            let settings = workspace.settings_dir();
-            fs::create_dir_all(&settings).unwrap();
-            fs::write(
-                settings.join(LEGACY_CONFIG_FILE),
-                r#"{"trash_keep_days":7,"gc_interval_days":3}"#,
-            )
-            .unwrap();
-        }
-
-        let database = open(&root).unwrap();
-        assert!(
-            !database.settings.join(LEGACY_CONFIG_FILE).exists(),
-            "旧的该搬走"
-        );
-        assert!(database.settings.join(CONFIG_FILE).is_file());
-
-        // 搬过来的是**内容**，不是一份新的默认值
-        let config = database.config();
-        assert_eq!(config.trash_keep_days, 7);
-        assert_eq!(config.gc_interval_days, 3);
-
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn a_foreign_directory_is_refused() {
-        let root = scratch("foreign");
-        let database_dir = root.join("db");
-        fs::create_dir_all(&database_dir).unwrap();
-        fs::write(
-            database_dir.join(META_FILE),
-            r#"{"kind":"别的东西","version":"1.0.0","created_at":"2026-01-01T00:00:00Z"}"#,
-        )
-        .unwrap();
-
-        let error = open(&root).unwrap_err();
-        assert!(error.contains("不是重逢笔记的数据库"), "{error}");
-
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn a_version_mismatch_is_refused() {
-        let root = scratch("version");
-        let database_dir = root.join("db");
-        fs::create_dir_all(&database_dir).unwrap();
-        fs::write(
-            database_dir.join(META_FILE),
-            r#"{"kind":"refind-note","version":"9.9.9","created_at":"2026-01-01T00:00:00Z"}"#,
-        )
-        .unwrap();
-
-        let error = open(&root).unwrap_err();
-        assert!(
-            error.contains("9.9.9") && error.contains(MODEL_VERSION),
-            "{error}"
-        );
-
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn broken_metadata_is_refused_instead_of_being_overwritten() {
-        let root = scratch("broken");
-        let database_dir = root.join("db");
-        fs::create_dir_all(&database_dir).unwrap();
-        fs::write(database_dir.join(META_FILE), "{ 这不是 JSON").unwrap();
-
-        assert!(open(&root).is_err());
-        // 没有被当成"新建"而覆盖掉 —— 内容还在，人还能去看
-        assert!(fs::read_to_string(database_dir.join(META_FILE))
-            .unwrap()
-            .contains("这不是 JSON"));
-
-        let _ = fs::remove_dir_all(&root);
-    }
-}
-
-/// 仓库里有多少东西（诊断页）
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct RepositoryFacts {
-    /// 事件日志几份（`db/objects/<命名空间>/<id>.log`）
-    pub logs: usize,
-    /// 草稿槽位几个（`db/drafts/`，写了一半的）
-    pub drafts: usize,
-    /// 回收站里几条（`trash/`）
-    pub trash: usize,
-    /// 内容块几个（`db/blobs/ab/<sha256>`，内容寻址）
-    pub blobs: usize,
-    /// 内容块一共占多少字节（磁盘上那份，含压缩/加密后的封装）
-    pub blob_bytes: u64,
-    /// `db/` 整个目录占多少字节
-    pub database_bytes: u64,
-}
-
-/// 数一数目录里有多少个文件、一共多少字节（子目录也算；数不出来就是 0）
-fn count_files(directory: &std::path::Path) -> (usize, u64) {
-    let Ok(entries) = std::fs::read_dir(directory) else {
-        return (0, 0);
-    };
-
-    let mut count = 0usize;
-    let mut bytes = 0u64;
-    for entry in entries.flatten() {
-        let Ok(kind) = entry.file_type() else { continue };
-        if kind.is_dir() {
-            let (inner, inner_bytes) = count_files(&entry.path());
-            count += inner;
-            bytes += inner_bytes;
-            continue;
-        }
-        count += 1;
-        bytes += entry.metadata().map(|meta| meta.len()).unwrap_or(0);
-    }
-    (count, bytes)
-}
-
-/// 整个目录占多少字节（数不出来就是 0）
-fn directory_bytes(directory: &std::path::Path) -> u64 {
-    count_files(directory).1
 }
