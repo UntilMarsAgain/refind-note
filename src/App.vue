@@ -46,6 +46,7 @@ import {
   updatePreferences,
 } from "./core/preferences.ts";
 import { restartStartup, startupPhase } from "./core/startup.ts";
+import { loadKeymap } from "./core/keymap.ts";
 import { formatBytes, type MaintenanceReport } from "./ipc/maintenance.ts";
 import { useTabs } from "./core/tabs.ts";
 import { useNavigation } from "./composables/useNavigation.ts";
@@ -221,8 +222,46 @@ function retryStartup() {
   void openWorkspace();
 }
 
-/** 浏览器习惯的快捷键。同样只把标签页能力递进去，状态不在这里多一份 */
-const { onKeydown } = useShortcuts({ activeIndex, newTab, close, reopenClosed });
+/**
+ * 其余快捷键动作：查找、翻页、菜单那些。
+ *
+ * 标签页那三个由 `useShortcuts` 自己跑（它们就是标签页的事）；这里接的是
+ * **别处的动作**，顺带接住将来新加的 —— 所以末尾那个 `default` 是刻意的：
+ * 加一个动作忘了在这儿接，表现是"设置页能改、菜单上写着、按了没反应"。
+ */
+function onShortcut(action: string) {
+  switch (action) {
+    case "find":
+      // 页内查找由阅读页自己接（它得知道当前显示的是哪一页）；
+      // 还没有实现时先说清楚，而不是按了什么都不发生
+      flash("页内查找还没接上");
+      break;
+    case "find-next":
+    case "find-previous":
+      flash("页内查找还没接上");
+      break;
+    case "back":
+      goBack();
+      break;
+    case "forward":
+      goForward();
+      break;
+    case "home":
+      openHome();
+      break;
+    case "menu":
+      void onMenu();
+      break;
+    case "reload":
+      flash("重载还没接上");
+      break;
+    default:
+      console.warn("这个快捷键动作还没接上：", action);
+  }
+}
+
+/** 全局快捷键。同样只把标签页能力递进去，状态不在这里多一份 */
+const { onKeydown } = useShortcuts({ activeIndex, newTab, close, reopenClosed }, onShortcut);
 
 /**
  * 开机那一轮维护：清过期的回收站条目、回收没人引用的内容块。
@@ -304,6 +343,9 @@ watch(
 const unlistenAddress: (() => void)[] = [];
 
 onMounted(() => {
+  // 认键是在每次按键时去 `core/keymap.ts` 查的，所以这里的先后无所谓；
+  // 读回来之前用的是出厂键位（那也正是"还没读"的正确样子）。
+  void loadKeymap();
   window.addEventListener("keydown", onKeydown);
   window.addEventListener("beforeunload", flushOnUnload);
   installWheelZoom();

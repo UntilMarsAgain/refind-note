@@ -269,6 +269,36 @@ mod tests {
     }
 
     #[test]
+    fn the_file_is_flat_so_a_person_can_edit_it() {
+        let workspace = scratch("flat");
+
+        let map = Keymap {
+            bindings: [
+                ("find".to_string(), vec!["Ctrl".to_string(), "F".to_string()]),
+                ("new-tab".to_string(), vec!["Ctrl".to_string(), "T".to_string()]),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        save(&workspace, map).unwrap();
+
+        let text = fs::read_to_string(workspace.settings_file(KEYMAP_FILE)).unwrap();
+        // **摊平**一层（`#[serde(flatten)]`）：手改时一眼看得出是什么。
+        // 前端 `src/ipc/keymap.ts` 的形状就是照这个写的 —— 嵌一层那边就得跟着改。
+        // （别去断言 `"find": ["Ctrl", "F"]` 那种写法：`to_vec_pretty` 会把数组
+        //   的每个元素各占一行，这里只关心结构，不关心换行。）
+        assert!(text.contains(r#""find""#), "{text}");
+        assert!(!text.contains("bindings"), "不该嵌一层：\n{text}");
+        // 顶层的键就是动作 id
+        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let object = parsed.as_object().expect("顶层该是对象");
+        assert!(object.contains_key("find") && object.contains_key("new-tab"), "{text}");
+        assert_eq!(object["find"][0], "Ctrl");
+
+        cleanup(&workspace);
+    }
+
+    #[test]
     fn modifier_spellings_are_folded_to_one() {
         let map = from_json(r#"{"find": ["control", "SHIFT", "f"]}"#);
         assert_eq!(map.keys_of("find"), vec!["Ctrl", "Shift", "f"]);
