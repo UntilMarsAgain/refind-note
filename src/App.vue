@@ -278,7 +278,12 @@ function onShortcut(action: string) {
       void onMenu();
       break;
     case "reload":
-      flash("重载还没接上");
+      // 整个窗口重载（连后端状态一起重新读一遍）。
+      //
+      // 而不是 `restartStartup()`：那只是把启动那一轮重跑，界面不重画，
+      // 标签页、滚动位置、打开着的编辑器全都还在 —— 与"重载"这两个字给人的预期
+      // 不是一回事。真出问题时（界面冻住了、某处状态不对）人要的是彻底重来一次。
+      window.location.reload();
       break;
     default:
       console.warn("这个快捷键动作还没接上：", action);
