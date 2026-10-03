@@ -30,15 +30,23 @@
 //!   它们不读块正文，而是各节已解析好的子节点。
 //! - [`embeds`]：把内容**原样写出去**的块（`code` / `mermaid` / `math` / `css` / `html` / `js`）。
 //!   正文一概不按 markdown 解析：代码、图定义、TeX、样式里的记号都是它们自己的。
+//! - [`callouts`]：提示框（`note` / `tip` / `warning` / `danger` / `error`）。**形状完全
+//!   一样**，差别只是"哪一种"，所以共用一个渲染器 + 一张五行的小表；加第六种 = 加一行。
 //!
-//! [`size_rule`] 留在本文件：它是文字组（`banner` 的 `height=`）与媒体组都要过的一道尺寸
-//! 校验，放在任一组都会让另一组跨界来取，所以它是这一层的公共件。
+//! 留在本文件的三个公共件：[`size_rule`]`（尺寸参数 → 一条 CSS 声明）、
+//! [`normalize_hex`]（`color=` 只认十六进制）与 [`text_on`]（底色 → 字色）。它们都是
+//! **多组共用**的：尺寸是文字组与媒体组都要过，颜色的两个是 `::banner` 与提示框都要过。
+//! 放在任一组都会让另一组跨界来取，所以它们是这一层的公共件。
+mod callouts;
 mod embeds;
 mod media;
 mod panels;
 mod text;
 
 use super::dispatch::TemplateRenderer;
+use callouts::{
+    render_danger, render_error, render_note, render_tip, render_warning,
+};
 use embeds::{render_code, render_css, render_html, render_js, render_math, render_mermaid};
 use media::{render_audio, render_image, render_video};
 use panels::{render_tabs, render_theme};
@@ -65,6 +73,11 @@ pub static TEMPLATES: &[(&str, TemplateRenderer)] = &[
     ("mermaid", render_mermaid),
     ("math", render_math),
     ("signature", render_signature),
+    ("note", render_note),
+    ("tip", render_tip),
+    ("warning", render_warning),
+    ("danger", render_danger),
+    ("error", render_error),
 ];
 
 /// 内容按 `[标签]` 分节的模板。
@@ -103,4 +116,41 @@ pub(super) fn size_rule(name: &str, value: &str) -> Option<String> {
     }
     let unit = if unit.is_empty() { "px" } else { unit };
     Some(format!("{name}: {digits}{unit};"))
+}
+
+/// `#abc` / `#aabbcc` → 规范的 `#aabbcc`；别的写法一律不认。
+///
+/// 放在这一层而不是 [`text`] 里：`color=` 有两组模板认它（`::banner` 与提示框那一族），
+/// 留在任一组都会让另一组跨界来取 —— 与 [`size_rule`] 是同一个理由。
+pub(super) fn normalize_hex(text: &str) -> Option<String> {
+    let body = text.trim().strip_prefix('#')?;
+    let expanded: String = match body.len() {
+        3 => body.chars().flat_map(|ch| [ch, ch]).collect(),
+        6 => body.to_string(),
+        _ => return None,
+    };
+    if !expanded.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(format!("#{}", expanded.to_lowercase()))
+}
+
+/// 底色 → 该配什么颜色的字。
+///
+/// 作者只给底色，字色由这里定：深底配深字是最常见的"自己给自己挖坑"。
+/// 用 sRGB 亮度的常见近似，够用且一眼能看懂为什么这么算。
+pub(super) fn text_on(background: &str) -> &'static str {
+    let Some(body) = background.strip_prefix('#') else {
+        return "var(--text)";
+    };
+    let Ok(value) = u32::from_str_radix(body, 16) else {
+        return "var(--text)";
+    };
+    let (r, g, b) = ((value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff);
+    let luminance = (0.299 * r as f64 + 0.587 * g as f64 + 0.114 * b as f64) / 255.0;
+    if luminance > 0.6 {
+        "#101010"
+    } else {
+        "#f5f5f5"
+    }
 }

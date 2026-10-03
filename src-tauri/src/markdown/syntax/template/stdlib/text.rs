@@ -15,7 +15,8 @@
 
 use super::super::dispatch::render_problem;
 use super::super::parse::Template;
-use super::size_rule;
+// 颜色那两个工具现在住在 stdlib 那一层：`color=` 有两组模板认它
+use super::{normalize_hex, size_rule, text_on};
 use markdown_it::plugins::cmark::block::paragraph::Paragraph;
 use markdown_it::{Node, Renderer};
 
@@ -250,40 +251,6 @@ fn inline_or_blocks<'a>(node: &'a Node) -> InlineOrBlocks<'a> {
     match node.children.as_slice() {
         [only] if only.is::<Paragraph>() => InlineOrBlocks::Inline(&only.children),
         _ => InlineOrBlocks::Blocks,
-    }
-}
-
-/// `#abc` / `#aabbcc` → 规范的 `#aabbcc`；别的写法一律不认
-fn normalize_hex(text: &str) -> Option<String> {
-    let body = text.trim().strip_prefix('#')?;
-    let expanded: String = match body.len() {
-        3 => body.chars().flat_map(|ch| [ch, ch]).collect(),
-        6 => body.to_string(),
-        _ => return None,
-    };
-    if !expanded.chars().all(|ch| ch.is_ascii_hexdigit()) {
-        return None;
-    }
-    Some(format!("#{}", expanded.to_lowercase()))
-}
-
-/// 底色 → 该配什么颜色的字。
-///
-/// 作者只给底色，字色由这里定：深底配深字是最常见的"自己给自己挖坑"。
-/// 用 sRGB 亮度的常见近似，够用且一眼能看懂为什么这么算。
-fn text_on(background: &str) -> &'static str {
-    let Some(body) = background.strip_prefix('#') else {
-        return "var(--text)";
-    };
-    let Ok(value) = u32::from_str_radix(body, 16) else {
-        return "var(--text)";
-    };
-    let (r, g, b) = ((value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff);
-    let luminance = (0.299 * r as f64 + 0.587 * g as f64 + 0.114 * b as f64) / 255.0;
-    if luminance > 0.6 {
-        "#101010"
-    } else {
-        "#f5f5f5"
     }
 }
 

@@ -27,6 +27,8 @@
  *   `.aside`         `::aside` 信息栏；      `.fields`      `::fields` 属性表；
  *   `.banner`        `::banner` 横条；       `.title-block` `::title` 居中大标题；
  *   `.tabs`          `::tabs` 选项卡；       `.theme__part*` `::theme` 深浅两版；
+ *   `.callout*`      提示框 `::note` / `::tip` / `::warning` / `::danger` / `::error`
+ *                    —— 五个共用一个渲染器（`stdlib/callouts.rs`），档位只切颜色；
  *   `.math*`         `::math`（排版由 KaTeX 在前端做）；`.diagram` / `pre.mermaid` `::mermaid`；
  *   `.signature`     `::signature` 落款。
  * 媒体类（`::image` / `::video` / `::audio` / 外部嵌入）与"取不到 / 没解锁"的占位
@@ -424,4 +426,79 @@
 
 .note-body .signature p {
   margin: 0;
+}
+
+/* ---------- 提示框：::note / ::tip / ::warning / ::danger / ::error ----------
+
+   五个模板共用一个渲染器（见 `stdlib/callouts.rs`），形状完全一样，差别只是
+   "哪一种" —— 所以这里也只有一个规则块，颜色由 `callout--note` 那一档切进来。
+
+   **档位只管颜色，底色一律 `--field-bg`**：五种底色在深色主题上要各自调不透明度
+   才不刺眼，那五份数值迟早互相漂移。靠左边那条 3px 竖条 + 标题颜色来区分轻重，
+   一眼扫过去认的是**竖条**，不是底色。
+
+   颜色**钉死**在 theme.css 里、不从 `--accent` 派生：提示的轻重是含义，换了主题色
+   之后"危险"仍然是危险，它不能变成一片温和的蓝。 */
+.note-body .callout {
+  margin: 1em 0;
+  padding: 0.7em 1em;
+  border-left: 3px solid var(--callout-info);
+  border-radius: 0 4px 4px 0;
+  background: var(--field-bg);
+  /* 标题与正文之间靠标题那一行的下边距，不要再给每个块补一遍 */
+  color: var(--text);
+}
+
+.note-body .callout--tip {
+  border-left-color: var(--callout-tip);
+}
+.note-body .callout--warning {
+  border-left-color: var(--callout-warn);
+}
+.note-body .callout--danger {
+  border-left-color: var(--callout-danger);
+}
+.note-body .callout--error {
+  border-left-color: var(--callout-error);
+}
+
+/* 作者自己给了 color=：底色与字色都由后端定死了（字色按底色亮度算），
+   这时左边那条竖条跟着底色走，免得框里一半是他定的一半是我们定 */
+.note-body .callout--custom {
+  border-left-color: currentColor;
+}
+
+/* 标题：一个记号 + 一行字。记号带 aria-hidden，读屏软件只读到标题文字 */
+.note-body .callout__title {
+  margin: 0 0 0.4em;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.note-body .callout--note .callout__title {
+  color: var(--callout-info);
+}
+.note-body .callout--tip .callout__title {
+  color: var(--callout-tip);
+}
+.note-body .callout--warning .callout__title {
+  color: var(--callout-warn);
+}
+.note-body .callout--danger .callout__title {
+  color: var(--callout-danger);
+}
+.note-body .callout--error .callout__title {
+  color: var(--callout-error);
+}
+
+/* 记号单独一层是为了能把它摆正：跟标题文字之间留一点缝，字号略大一点才像"记号" */
+.note-body .callout__mark {
+  margin-right: 0.45em;
+  font-size: 1.05em;
+  /* 与标题同色，不必再指定 */
+}
+
+/* 正文最后一块不要再多留一行白：框内最后一段紧贴下边距不好看 */
+.note-body .callout > :last-child {
+  margin-bottom: 0;
 }

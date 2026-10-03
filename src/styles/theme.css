@@ -77,6 +77,21 @@
     --link-green: #8ac48f;
     --link-missing: #e2645c;
 
+    /*
+     * 提示框的配色，同样**钉死**（`::note` / `::tip` / `::warning` / `::danger` /
+     * `::error`）。理由与上面三条一样：提示的轻重是**含义**，不该跟着主题色跑 ——
+     * 换了主题色之后"危险"仍然是危险，它不能变成一片温和的蓝。
+     *
+     * 只给**颜色**，不给底色：底色一律 `--field-bg`，五档共用。靠左边那条 3px 竖条与
+     * 标题颜色来区分档位，而不是五种底色 —— 五种底色在深色主题上要各自调不透明度才
+     * 不刺眼，那五份数值迟早互相漂移。
+     */
+    --callout-info: #8ab4f8;
+    --callout-tip: #8ac48f;
+    --callout-warn: #e0a458;
+    --callout-danger: #e88a5c;
+    --callout-error: #e2645c;
+
     /* 代码高亮配色：highlight.js 只负责分词，颜色由 CSS 给，这样才能跟着深浅色走 */
     --syntax-comment: #7f8c8d;
     --syntax-keyword: #c678dd;
@@ -122,6 +137,12 @@
     --link-blue: #2f6fc4;
     --link-green: #2f7a4a;
     --link-missing: #b02a2a;
+    /* 提示框五档：与深色那一组一一对应，只是不透明度按浅底重调过 */
+    --callout-info: #2f6fc4;
+    --callout-tip: #2f7a4a;
+    --callout-warn: #8a5a12;
+    --callout-danger: #a8441a;
+    --callout-error: #b02a2a;
     --syntax-comment: #6a737d;
     --syntax-keyword: #a626a4;
     --syntax-string: #50a14f;

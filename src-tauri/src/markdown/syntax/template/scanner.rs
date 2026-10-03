@@ -178,23 +178,28 @@ fn section_label(line: &str) -> Option<String> {
 mod tests {
     use crate::markdown::render;
 
+    // 这一组测的是**块边界怎么划**，所以占位名必须挑一个**不是内置模板**的
+    // （`::外层` / `::inner`）：内置模板各有各的渲染器，`::note` 这类名字一旦
+    // 进了注册表，块就渲染成了那个样子，边界反而测不出来了。
+    // 曾经这几个测试拿 `::note` 当占位名，加提示框模板那天它们就红了 —— 根因在此。
+
     #[test]
     fn indentation_separates_inside_from_outside() {
-        let html = render("::note\n  块内\n块外\n");
+        let html = render("::外层\n  块内\n块外\n");
         assert!(html.contains("块内"), "{html}");
         assert!(html.contains("<p>块外</p>"), "{html}");
     }
 
     #[test]
     fn deeper_levels_stay_inside() {
-        let html = render("::note\n  第一层\n    ::inner\n      第二层\n");
+        let html = render("::外层\n  第一层\n    ::inner\n      第二层\n");
         assert!(html.contains("::inner"), "{html}");
         assert!(html.contains("第二层"), "{html}");
     }
 
     #[test]
     fn blank_line_inside_stays_inside() {
-        let html = render("::note\n  第一段\n\n  第二段\n");
+        let html = render("::外层\n  第一段\n\n  第二段\n");
         assert!(html.contains("第一段"), "{html}");
         assert!(html.contains("第二段"), "{html}");
         assert!(!html.contains("<p>第二段</p>"), "第二段仍应在块内：{html}");
@@ -202,14 +207,14 @@ mod tests {
 
     #[test]
     fn blank_line_before_unindented_text_ends_the_block() {
-        let html = render("::note\n  块内\n\n块外\n");
+        let html = render("::外层\n  块内\n\n块外\n");
         assert!(html.contains("块内"), "{html}");
         assert!(html.contains("<p>块外</p>"), "{html}");
     }
 
     #[test]
     fn dedent_keeps_relative_structure() {
-        let html = render("::note\n    两空格缩进之下\n      再深一层\n");
+        let html = render("::外层\n    两空格缩进之下\n      再深一层\n");
         assert!(html.contains("两空格缩进之下"), "{html}");
         assert!(html.contains("再深一层"), "{html}");
     }
