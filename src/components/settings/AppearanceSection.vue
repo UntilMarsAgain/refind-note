@@ -102,6 +102,25 @@ function setRailDefault(event: Event) {
   updatePreferences({ rail_collapsed: (event.target as HTMLInputElement).checked });
 }
 
+/**
+ * 常驻标签页数：送出去之前先自己夹一道。
+ *
+ * Rust 那边也会夹（`Preferences::sanitized`），这里先夹是为了**界面立刻显示夹后的
+ * 那个数** —— 否则用户填了 999，框里还写着 999，要等他切走再回来才看到真值。
+ */
+const RESIDENT_MIN = 2;
+const RESIDENT_MAX = 64;
+
+function submitResidentTabs(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const wanted = Number.parseInt(input.value, 10);
+  const settled = Number.isFinite(wanted)
+    ? Math.min(RESIDENT_MAX, Math.max(RESIDENT_MIN, wanted))
+    : RESIDENT_MIN;
+  input.value = String(settled);
+  updatePreferences({ resident_tabs: settled });
+}
+
 function isFocused(id: string): boolean {
   return props.focus === id;
 }
@@ -218,6 +237,30 @@ function isFocused(id: string): boolean {
         @change="setRailDefault"
       />
       <span>下次启动时收起标签栏（仅显示图标）</span>
+    </label>
+  </div>
+
+  <div
+    id="resident-tabs"
+    class="row"
+    :class="{ 'row--target': isFocused('resident-tabs') }"
+  >
+    <span class="row__label">常驻标签页</span>
+    <code class="row__id">#resident-tabs</code>
+    <label class="row__check">
+      <input
+        class="row__number"
+        type="number"
+        min="2"
+        max="64"
+        step="1"
+        :value="preferences.resident_tabs"
+        @change="submitResidentTabs"
+      />
+      <span>
+        同时保持多少个标签页的页面不销毁（编辑器、选区、浮层原样留着）。
+        超出的按最近没用过的先踢；调小省内存，调大切回来更顺手。
+      </span>
     </label>
   </div>
 </template>

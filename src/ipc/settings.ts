@@ -45,6 +45,8 @@ export interface Preferences {
     code_line_numbers: boolean;
     /** 记不记浏览历史（记下来的在 settings/browsing.jsonl，可单独清空） */
     record_history: boolean;
+    /** 同时常驻的标签页数（超出的按最近没用先踢） */
+    resident_tabs: number;
     /** 星标过的页面（新标签页上那一片） */
     starred: Star[];
 }

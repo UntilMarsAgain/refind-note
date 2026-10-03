@@ -46,6 +46,7 @@ export const preferences = ref<Preferences>({
     rail_collapsed: false,
     code_line_numbers: true,
     record_history: true,
+    resident_tabs: 10,
     starred: [],
 });
 

@@ -38,6 +38,15 @@ const DEFAULT_ACCENT: &str = "#5b8dd6";
 /// 认得的深浅色。其余值一律当「跟随系统」
 const THEMES: [&str; 3] = ["system", "light", "dark"];
 
+/// 常驻标签页数的默认值与范围。
+///
+/// 下限是 2：一个常驻不住任何东西的设置没有意义，而"1"会让人以为切标签页时
+/// 另一个真的还在。上限 64 是内存那一头 —— 每个编辑器实例在长笔记上要几 MB，
+/// 再多就不是"省内存"而是"吃内存"了。
+const DEFAULT_RESIDENT_TABS: usize = 10;
+const RESIDENT_TABS_MIN: usize = 2;
+const RESIDENT_TABS_MAX: usize = 64;
+
 /// 星标（收藏）的一页
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Star {
@@ -67,6 +76,11 @@ pub struct Preferences {
     pub code_line_numbers: bool,
     /// 记不记浏览历史（记下来的在 `settings/browsing.jsonl`，随时可以单独清空）
     pub record_history: bool,
+    /// 同时**常驻**的标签页数（超出的按"最近没用的先踢"腾地方）。
+    ///
+    /// 常驻的意思是那个视图不被销毁 —— 于是编辑器实例、选区、浮层这些**组件自己的
+    /// 状态**都原样留着，切回来不用重新搭。省下来的代价是内存，所以这个数要能调。
+    pub resident_tabs: usize,
     /// 星标过的页面（新标签页上那一片）
     pub starred: Vec<Star>,
 }
@@ -81,6 +95,7 @@ impl Default for Preferences {
             rail_collapsed: false,
             code_line_numbers: true,
             record_history: true,
+            resident_tabs: DEFAULT_RESIDENT_TABS,
             starred: Vec::new(),
         }
     }
@@ -119,6 +134,8 @@ impl Preferences {
         if !THEMES.contains(&self.theme.as_str()) {
             self.theme = "system".to_string();
         }
+
+        self.resident_tabs = self.resident_tabs.clamp(RESIDENT_TABS_MIN, RESIDENT_TABS_MAX);
 
         self
     }
@@ -257,6 +274,27 @@ mod tests {
         assert_eq!(saved.theme, "system");
         // 限宽是布尔，没有"不合法"可言，原样留着
         assert!(!saved.limit_width);
+
+        cleanup(&workspace);
+    }
+
+    /// 常驻标签页数要夹进范围：手改的数字与前端送来的都不可信
+    #[test]
+    fn the_resident_tab_count_is_clamped() {
+        let workspace = scratch("resident-clamp");
+        let path = workspace.settings_file(PREFERENCES_FILE);
+
+        let mut preferences = Preferences::default();
+        preferences.resident_tabs = 9999;
+        assert_eq!(save(&workspace, preferences).unwrap().resident_tabs, RESIDENT_TABS_MAX);
+
+        let mut preferences = Preferences::default();
+        preferences.resident_tabs = 0;
+        assert_eq!(save(&workspace, preferences).unwrap().resident_tabs, RESIDENT_TABS_MIN);
+
+        // 没写这一项的老文件用默认值
+        fs::write(&path, r#"{"zoom":1.0}"#).unwrap();
+        assert_eq!(load(&workspace).unwrap().resident_tabs, DEFAULT_RESIDENT_TABS);
 
         cleanup(&workspace);
     }
