@@ -28,6 +28,8 @@
 //!
 //! - [`parse`]：头解析（引号、转义）—— 这里能写的东西最多，所以单独一个文件；
 //! - [`scanner`]：块级规则本身 —— 认出 `::` 那一行、往下量缩进、切分节；
+//! - [`html`]：`::html` 的**净化器** —— 按 HTML5 规范解析后按白名单重建，
+//!   并且认 `<markdown>`：HTML 里反过来用本程序自己的方言；
 //! - [`expand`]：**用户自定义模板**的展开（`Template:名字` 那一页的正文填好参数再解析）；
 //! - [`fill`]：`{{}}` 填空与 HTML / CSS 过滤；
 //! - [`dispatch`]：按名字分发，查不到就渲染"未知模板"的框；
@@ -39,6 +41,7 @@
 mod dispatch;
 mod expand;
 mod fill;
+mod html;
 mod parse;
 mod scanner;
 mod stdlib;

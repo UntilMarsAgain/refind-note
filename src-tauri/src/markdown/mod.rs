@@ -191,6 +191,18 @@ pub fn render(markdown: &str) -> String {
     render_with(markdown, None)
 }
 
+/// 再渲染一段 markdown，**沿用当前这一趟的解析器与模板页表**。
+///
+/// 给 `::html` 里的 `<markdown>` 用：它在渲染途中回调进来，得接着用同一份上下文，
+/// 否则那一段里的内部链接会一律变成红链、`::html src=` 也会取不到页。
+///
+/// 走 [`render_with_pages`] 那套存旧值/还原的逻辑，所以嵌套渲染不会互相踩。
+pub fn render_nested(markdown: &str) -> String {
+    let resolver = current_resolver();
+    let pages = CURRENT_TEMPLATE_PAGES.with(|cell| cell.borrow().clone());
+    render_with_pages(markdown, resolver.as_ref(), pages)
+}
+
 /// 带链接解析的渲染：`[[目标]]` 会额外带上 `data-key` / `data-title` / `data-missing`。
 pub fn render_with(markdown: &str, resolver: Option<&Resolver>) -> String {
     render_with_pages(markdown, resolver, None)

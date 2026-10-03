@@ -16,8 +16,9 @@
 
 //! 模板的"填空"与过滤。
 //!
-//! 两件事各管一半：`{{}}` 把参数与块内容填进模板；过滤决定放行的 HTML 能做什么。
-//! 单独一个文件，是因为这里"能写的东西很多"：替换、HTML 过滤、CSS 收窄各有一套规则。
+//! 三件事各管一半：`{{}}` 把参数与块内容填进模板；CSS 收窄把样式关进这一页；
+//! `::html` 的正文净化转发给 [`super::html`]（真正干活的地方在那儿）。
+//! 单独一个文件，是因为这里"能写的东西很多"：替换、CSS 收窄、HTML 净化各有一套规则。
 use super::parse::Template;
 
 /// 把 `{{名字}}` 换成参数值，`{{body}}` 换成块内容。
@@ -120,86 +121,14 @@ pub fn escape_script_end(code: &str) -> String {
     }
 }
 
-/// 去掉会执行脚本的东西：`<script>` 整块、`on*=` 事件属性、`javascript:` 协议。
+/// `::html` 的正文净化 —— 转发给 [`super::html`]。
 ///
-/// **这不是一个完整的 HTML 净化器** —— 它只挡住"打开就会跑代码"这条线，够用于
-/// "默认安全、要开 JS 得自己写出来"这个约定。要按白名单解析整个 HTML 是另一套东西。
+/// 这一层以前自己手写了一份，只挡 `<script>` / `on*=` / `javascript:` 三样，
+/// 它自己的注释就写着"这不是一个完整的 HTML 净化器"。那套东西删了：白名单净化
+/// 见 [`super::html`] 的模块头 —— 为什么按 HTML5 规范解析、为什么是白名单而不是
+/// 黑名单、`<markdown>` 怎么反过来调本解析器，都写在那儿。
 pub fn sanitize_html(html: &str) -> String {
-    let mut out = String::with_capacity(html.len());
-    let mut rest = html;
-
-    // 1) `<script …>…</script>` 整块拿掉；只剩开标签的也拿掉
-    while let Some(start) = find_tag(rest, "script") {
-        out.push_str(&rest[..start]);
-        let after_open = &rest[start..];
-        let close = find_ci(after_open, "</script", 0);
-        match close {
-            Some(position) => {
-                let tail = &after_open[position..];
-                let end = find_ci(tail, ">", 0)
-                    .map(|i| position + i + 1)
-                    .unwrap_or(position);
-                rest = &after_open[end..];
-            }
-            None => {
-                rest = "";
-            }
-        }
-    }
-    out.push_str(rest);
-    let html = out;
-
-    // 2) `on*=` 事件属性。只在**标签内部**认它 ——
-    //    正文里写 `one=1`、`onboarding=2` 不该被当成事件属性拿掉。
-    let mut out = String::with_capacity(html.len());
-    let bytes: Vec<char> = html.chars().collect();
-    let mut index = 0usize;
-    let mut in_tag = false;
-    while index < bytes.len() {
-        if bytes[index] == '<' {
-            in_tag = true;
-            out.push('<');
-            index += 1;
-            continue;
-        }
-        if bytes[index] == '>' {
-            in_tag = false;
-            out.push('>');
-            index += 1;
-            continue;
-        }
-        if in_tag && is_on_attribute(&bytes, index) {
-            // 跳到值结束：引号包住就跳到配对的引号，否则跳到空白或 `>`
-            let mut cursor = index;
-            while cursor < bytes.len() && bytes[cursor] != '=' {
-                cursor += 1;
-            }
-            cursor += 1;
-            while cursor < bytes.len() && bytes[cursor].is_whitespace() {
-                cursor += 1;
-            }
-            if cursor < bytes.len() && (bytes[cursor] == '"' || bytes[cursor] == '\'') {
-                let quote = bytes[cursor];
-                cursor += 1;
-                while cursor < bytes.len() && bytes[cursor] != quote {
-                    cursor += 1;
-                }
-                cursor += 1;
-            } else {
-                while cursor < bytes.len() && !bytes[cursor].is_whitespace() && bytes[cursor] != '>'
-                {
-                    cursor += 1;
-                }
-            }
-            index = cursor;
-            continue;
-        }
-        out.push(bytes[index]);
-        index += 1;
-    }
-
-    // 3) `javascript:` 协议
-    strip_protocol(&out, "javascript:")
+    super::html::sanitize(html)
 }
 
 /// 把用户写的 CSS 收进**这一页**：每条选择器都加 `.pane__column` 前缀。
@@ -375,50 +304,10 @@ pub fn sanitize_css(css: &str) -> String {
     out
 }
 
-/// 找 `<tag`（大小写不敏感，且后面不是字母，免得把 `<scripted` 当成 `<script`）
-fn find_tag(haystack: &str, tag: &str) -> Option<usize> {
-    let mut from = 0;
-    while let Some(position) = find_ci(haystack, &format!("<{tag}"), from) {
-        let after = haystack[position + 1 + tag.len()..].chars().next();
-        let boundary = match after {
-            None => true,
-            Some(ch) => !ch.is_alphanumeric() && ch != '-',
-        };
-        if boundary {
-            return Some(position);
-        }
-        from = position + 1;
-    }
-    None
-}
-
-fn is_on_attribute(chars: &[char], index: usize) -> bool {
-    if chars[index] != 'o' && chars[index] != 'O' {
-        return false;
-    }
-    if index > 0 && (chars[index - 1].is_alphanumeric() || chars[index - 1] == '-') {
-        return false;
-    }
-    let mut cursor = index + 1;
-    if cursor >= chars.len() || (chars[cursor] != 'n' && chars[cursor] != 'N') {
-        return false;
-    }
-    cursor += 1;
-    let mut letters = 0;
-    while cursor < chars.len() && (chars[cursor].is_alphanumeric() || chars[cursor] == '-') {
-        cursor += 1;
-        letters += 1;
-    }
-    if letters == 0 {
-        return false;
-    }
-    while cursor < chars.len() && chars[cursor].is_whitespace() {
-        cursor += 1;
-    }
-    cursor < chars.len() && chars[cursor] == '='
-}
-
-/// 大小写不敏感地找子串（只用于 ASCII 标签名与协议名）
+/// 找一段子串（大小写不敏感）。
+///
+/// CSS 那几处也在用它（找 `</style`、找 `@import`），所以它留在这儿而不是跟着
+/// 删掉的 HTML 净化器一起走。
 fn find_ci(haystack: &str, needle: &str, from: usize) -> Option<usize> {
     if from > haystack.len() {
         return None;
@@ -426,18 +315,6 @@ fn find_ci(haystack: &str, needle: &str, from: usize) -> Option<usize> {
     let hay = haystack[from..].to_lowercase();
     let needle = needle.to_lowercase();
     hay.find(&needle).map(|position| position + from)
-}
-
-/// 去掉某个协议（大小写不敏感）
-fn strip_protocol(html: &str, protocol: &str) -> String {
-    let mut out = String::with_capacity(html.len());
-    let mut rest = html;
-    while let Some(position) = find_ci(rest, protocol, 0) {
-        out.push_str(&rest[..position]);
-        rest = &rest[position + protocol.len()..];
-    }
-    out.push_str(rest);
-    out
 }
 
 #[cfg(test)]

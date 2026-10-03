@@ -255,6 +255,7 @@
 - [log@0.4.34](https://github.com/rust-lang/log): The Rust Project Developers
 - [markdown-it@0.6.1](https://github.com/markdown-it-rust/markdown-it): Alex Kocharin <alex@kocharin.ru>
 - [markup5ever@0.39.0](https://github.com/servo/html5ever): The html5ever Project Developers
+- [markup5ever_rcdom@0.39.0+unofficial](https://github.com/servo/html5ever): The html5ever Project Developers
 - [mdurl@0.3.1](https://github.com/rlidwka/mdurl.rs): Alex Kocharin <alex@kocharin.ru>
 - [memchr@2.8.3](https://github.com/BurntSushi/memchr): Andrew Gallant <jamslam@gmail.com>|bluss
 - [memoffset@0.7.1, 0.9.1](https://github.com/Gilnaa/memoffset): Gilad Naaman <gilad.naaman@gmail.com>
@@ -529,6 +530,7 @@
 - [x11-dl@2.21.0](https://github.com/AltF02/x11-rs.git): daggerbot <daggerbot@gmail.com>|Erle Pereira <erle@erlepereira.com>|AltF02 <contact@altf2.dev>
 - [x11rb@0.13.2](https://github.com/psychon/x11rb): Uli Schlachter <psychon@znc.in>|Eduardo Sánchez Muñoz <eduardosm-dev@e64.io>|notgull <jtnunley01@gmail.com>
 - [x11rb-protocol@0.13.2](https://github.com/psychon/x11rb): Uli Schlachter <psychon@znc.in>|Eduardo Sánchez Muñoz <eduardosm-dev@e64.io>|notgull <jtnunley01@gmail.com>
+- [xml5ever@0.39.0](https://github.com/servo/html5ever): The xml5ever project developers
 - [yoke@0.8.3](https://github.com/unicode-org/icu4x): Manish Goregaokar <manishsmail@gmail.com>
 - [yoke-derive@0.8.4](https://github.com/unicode-org/icu4x): Manish Goregaokar <manishsmail@gmail.com>
 - [zbus@5.19.0](https://github.com/z-galaxy/zbus/): Zeeshan Ali Khan <zeeshanak@gnome.org>

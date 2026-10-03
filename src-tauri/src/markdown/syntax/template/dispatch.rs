@@ -34,6 +34,41 @@ pub fn render(template: &Template, node: &Node, fmt: &mut dyn Renderer) {
     render_unknown(template, fmt);
 }
 
+/// `problem` —— **模板页读不出来**时用的那个内部模板。
+///
+/// 它必须**真的在注册表里**（[`TEMPLATES`] 里的 `"problem"` 那一行）。原因在
+/// [`crate::markdown::syntax::template::expand`]：那里拿不到节点，就手工拼一个
+/// `name: "problem"` 的 `Template` 交给分发，而分发只认注册表。
+///
+/// 它**不在**表里的时候，"这一页没解锁"会被显示成 `未知模板 :: problem` ——
+/// 作者看到的是自己写错了模板名，而真正的原因是**模板页上了锁**，两边对不上，
+/// 这正是最难查的一类。
+///
+/// 与 [`render_problem`] 分开是因为**原因不同**：一个是"名字认识、用法不对"，
+/// 一个是"名字没问题，但它指的那一页读不出来"。所以这里**不回显模板名与参数** ——
+/// 出问题的不是这次用法，回显出来只会把作者引到错的地方。
+pub(super) fn render_problem_page(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
+    fmt.cr();
+    fmt.open(
+        "div",
+        &[("class", "template template--problem".to_string())],
+    );
+    fmt.cr();
+    fmt.open("p", &[("class", "template__head".to_string())]);
+    fmt.open("span", &[("class", "template__badge".to_string())]);
+    fmt.text("模板页读不出来");
+    fmt.close("span");
+    fmt.close("p");
+    fmt.cr();
+    // `expand::text_node` 把那句话整个放进 body 了，这里原样写出来
+    fmt.open("p", &[("class", "template__why".to_string())]);
+    fmt.text(&template.body);
+    fmt.close("p");
+    fmt.cr();
+    fmt.close("div");
+    fmt.cr();
+}
+
 /// 名字查不到时的兜底：渲染一个框，把名字与参数原样列出，内容仍用代码块裹住。
 ///
 /// 这是**给作者看的错误提示**，不是"不认识就静静丢掉"。参数回显成等号写法，
@@ -121,6 +156,17 @@ mod tests {
                 "{name} 在分节表里，却不在模板表里"
             );
         }
+    }
+
+    /// `expand::text_node` 造的是 `name: "problem"` 的节点，而分发只认注册表。
+    /// 它不在表里的话，"模板页没解锁"会被显示成"未知模板 :: problem" ——
+    /// 作者看到的是自己写错了模板名，真正原因（那一页上了锁）一个字都不提。
+    #[test]
+    fn the_problem_template_is_really_registered() {
+        assert!(
+            TEMPLATES.iter().any(|(name, _)| *name == "problem"),
+            "problem 不在模板表里，模板页读不出来会被显示成未知模板"
+        );
     }
 
     #[test]
