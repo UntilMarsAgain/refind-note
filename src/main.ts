@@ -33,13 +33,31 @@
 import { createApp } from "vue";
 import App from "./App.vue";
 import { openWorkspace } from "./core/preferences.ts";
+import { flash } from "./core/notice.ts";
 // 全局样式要在挂载前就位，否则首帧会是浏览器默认的那套配色
 import "./styles/base.css";
 import "./styles/theme.css";
 import "./styles/note.css";
 import "./styles/tooltip.css";
 
+const app = createApp(App);
+
+/**
+ * 渲染出错要说给人听。
+ *
+ * Vue 在渲染抛异常时会**保留上一次成功的 DOM** —— 于是界面看着好好的（停在最后一帧），
+ * 而数据已经变了：地址栏换了页、内容却不动，点击也没反应。**这种失效最难查**，因为
+ * 屏幕上什么都没有指出来。
+ *
+ * 所以这里把错误**摆到界面上**，而不只是打进控制台：至少能看见"出了什么事"，
+ * 也能从提示里抄到去哪儿看详细。
+ */
+app.config.errorHandler = (error, _instance, info) => {
+    console.error("[渲染出错]", info, error);
+    flash(`界面出了点问题：${error instanceof Error ? error.message : String(error)}`);
+};
+
 // 先把壳挂起来：启动还没跑完时主区域显示的是加载页（见 startup.ts）。
 // 偏好读回来之后主题、主题色、缩放立刻应用（见 openWorkspace）。
-createApp(App).mount("#app");
+app.mount("#app");
 void openWorkspace();

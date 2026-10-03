@@ -119,13 +119,22 @@ const isNewTab = computed(() => route.value === null || specialPage.value === "n
 const limited = computed(() => preferences.value.limit_width);
 
 /**
- * 同时**常驻**几个标签页的视图（设置里可调）。
+ * 同时**常驻**几个标签页的视图。
  *
- * 常驻 = 那个视图不被销毁，于是编辑器实例、选区、预览栏滚动、图片查看器这些
- * **组件自己的状态**都原样留着 —— 切回来不用重新搭。这是"切出去再切回来不自然"
- * 的解药：以前靠的是"销毁之后手工把状态搬回来"，而搬漏一项就露一次馅。
+ * 常驻 = 那个视图不被销毁，于是编辑器实例、选区、预览栏滚动这些**组件自己的
+ * 状态**都原样留着 —— 切回来不用重新搭。这是"切出去再切回来不自然"的解药：
+ * 以前靠的是"销毁之后手工把状态搬回来"，而搬漏一项就露一次馅。
+ *
+ * **兜一个默认值**：偏好是后端送来的，而后端可能还是旧的（没重新编译），那一份里
+ * 就没有这个字段。没有它 `<KeepAlive :max>` 拿到的是 `undefined` —— 缓存不设上限，
+ * 开着十几个标签页就能把内存吃光。宁可用一个保守的数，也不要没有上限。
  */
-const residentLimit = computed(() => preferences.value.resident_tabs);
+const FALLBACK_RESIDENT = 8;
+
+const residentLimit = computed(() => {
+    const wanted = Number(preferences.value.resident_tabs);
+    return Number.isFinite(wanted) && wanted >= 2 ? Math.floor(wanted) : FALLBACK_RESIDENT;
+});
 
 /**
  * 视图在缓存里的身份。
