@@ -1,0 +1,52 @@
+# Android 交叉编译配置 —— C/C++ 依赖靠它，Rust 自身不需要。
+#
+# ## 为什么需要这个文件
+#
+# `ring`（rustls 的后端，`reqwest` → `rustls` 一路带进来）这类 crate 里带 C/汇编代码，
+# 要用**交叉编译器**编。cargo 找编译器的规则是按 target 拼名字：
+#
+#     aarch64-linux-android → aarch64-linux-android-clang
+#
+# 而 NDK 里的编译器带 API level 后缀（`aarch64-linux-android21-clang`，21 = minSdk）。
+# 没有这个文件时 cargo 找不到，报的是：
+#
+#     failed to find tool "aarch64-linux-android-clang"
+#
+# ## 为什么 API level 写 21 而 minSdk 是 24
+#
+# NDK 从 r23 起不再提供不带 API level 的包装器，只能显式指定。
+# 这里取 **21**（NDK 支持的最低值）—— 它编出来的产物在 minSdk 24 的设备上一样能跑，
+# 反过来（用 24）在更低的设备上就装不了了。**能低不高**。
+#
+# 与 `tauri.conf.json` 的 `minSdk = 24` 不冲突：那是**运行**要求，这里是**编译目标 API**。
+#
+# ## 关于 ranlib
+#
+# 曾经在这里写 `ranlib = "llvm-ranlib"`，cargo 报
+# `expected a table, but found a string for target.*.ranlib` ——
+# 它要的是**子表**而不是字符串。
+#
+# 但没必要写：cargo 默认调用的那个 `ar` 已被指到 NDK 的 `llvm-ar`，而
+# `llvm-ar` 本身就带 ranlib 的功能（LLVM 的 ar 默认会生成符号索引）。
+# 多写一行只会多一个写错的机会。
+#
+# ## 改了这里可能要 cargo clean
+#
+# linker 变了但 target 目录里的旧产物还在时，cargo 有时仍会用旧配置编出来的东西。
+
+# ---- 四个 ABI 的交叉编译器 ----
+[target.aarch64-linux-android]
+linker = "aarch64-linux-android21-clang"
+ar = "llvm-ar"
+
+[target.armv7-linux-androideabi]
+linker = "armv7a-linux-androideabi21-clang"
+ar = "llvm-ar"
+
+[target.i686-linux-android]
+linker = "i686-linux-android21-clang"
+ar = "llvm-ar"
+
+[target.x86_64-linux-android]
+linker = "x86_64-linux-android21-clang"
+ar = "llvm-ar"

@@ -18,6 +18,25 @@ packaging/arch/src/
 packaging/arch/pkg/
 packaging/arch/*.pkg.tar.*
 
+# ---- Android 工程（`tauri android init` 生成）----
+#
+# **工程源入库、构建产物忽略**：
+# 工程源要留着是因为里面可能有我们自己的改动（比如 `app/build.gradle.kts` 里的
+# debug 签名配置），重新 init 会覆盖掉那些，所以得能进版本库。
+# 而构建产物动辄两百多 MB，且换个平台/工具链就作废，入库纯属负担。
+src-tauri/gen/android/.gradle/
+src-tauri/gen/android/build/
+src-tauri/gen/android/app/build/
+src-tauri/gen/android/buildSrc/build/
+src-tauri/gen/android/buildSrc/.gradle/
+
+# 构建时软链进去的 `.so`：指向的是**绝对路径**（本机的 target/），
+# 跟着别人的机器必然全断 —— 入库只会让人 checkout 出一堆断链。
+src-tauri/gen/android/app/src/main/jniLibs/
+
+# Gradle 本地状态（缓存的构建信息，每次构建都在变）
+src-tauri/gen/android/.kotlin/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
