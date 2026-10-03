@@ -1,0 +1,50 @@
+/*
+ * 文件页那几个 `.file__btn` 的样式 —— 由 `FileView.vue`、`FileUnlockBox.vue`、
+ * `FileActionBar.vue`、`FileRenameBar.vue` 各自用 `<style scoped src="./file-buttons.css">`
+ * 引用。
+ *
+ * 为什么不并进某一个组件：这套按钮在文件页里出现**四处**（解锁框、改名、动作条、
+ * 出错重试），而 `<style scoped>` 的作用域是**按组件**的 —— 父组件里写，
+ * 子组件的元素照样匹配不到，所以这段样式得每个用到它的组件自己带一份。
+ *
+ * 用 `<style scoped src="./…">` 引用，而不是 `@import`：两者在编译结果上等价，
+ * 但 `src` 让"这个组件的按钮就是这几行"在源码里一眼看得出来。
+ * **仍然是 scoped**：`.file__btn` 这种名字不该泄到全局去。
+ */
+
+/* 文件页的动作按钮：与页头那一排分开，它们说的是"这一份文件能做的事" */
+.file__btn {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.file__btn:hover:not(:disabled) {
+  border-color: var(--accent-soft);
+  background: var(--accent-tint);
+  color: var(--text);
+}
+
+.file__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 这一版要办的那件事（解锁、确认改名、确认打开）：描边用强调色，免得被淹在一排灰按钮里 */
+.file__btn--go {
+  border-color: var(--accent-soft);
+  color: var(--accent-soft);
+}
+
+.file__btn--go:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--bg);
+}

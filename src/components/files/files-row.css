@@ -1,0 +1,170 @@
+/*
+ * 文件列表里**那一行**的样式 —— 由 `FileListRow.vue` 用
+ * `<style scoped src="./files-row.css">` 引用（列表页 `FilesPage.vue` 不再带它：
+ * 那一行连同它的排版整个搬走了）。
+ *
+ * 为什么仍然是 scoped 而不是搬进 `src/styles/`：`.files__item` 这种类名只有这一个
+ * 列表在用，落到全局只多一次误伤别的页面的机会；而 scoped 让"那一行归这个组件管"
+ * 在编译器层面就说清楚了。
+ *
+ * `:first-child` / `:nth-child(odd)` 这两条**留在这一份里**：它们说的其实是
+ * "第一行不要上边框、隔行换个底色"，那是这一行的排版，不是列表容器的 —— 列表容器
+ * 自己那份（`.files__list` 的边框与圆角）在 `FilesPage.vue` 里。
+ *
+ * 用 `src` 引用而不是 `@import`：编译结果等价，但 `src` 让"这一行的样式就是这些行"
+ * 在源码里一眼看得出来。
+ */
+
+.files__item {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.files__item:first-child {
+  border-top: 0;
+}
+
+.files__item:nth-child(odd) {
+  background: var(--surface);
+}
+
+.files__thumb {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg);
+  cursor: pointer;
+}
+
+.files__thumb:hover {
+  border-color: var(--accent-soft);
+}
+
+.files__thumb img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: cover;
+}
+
+.files__lock {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent-soft);
+}
+
+.files__ext {
+  color: var(--text-dim);
+  font-family: var(--mono-font);
+  font-size: 11px;
+}
+
+.files__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  align-items: flex-start;
+}
+
+.files__name {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.files__name:hover {
+  color: var(--accent-soft);
+  text-decoration: underline;
+}
+
+.files__rename {
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--accent-soft);
+  border-radius: 6px;
+  background: var(--field-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.files__rename:focus {
+  outline: none;
+}
+
+.files__meta {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.files__ref {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--hover);
+  color: var(--text-dim);
+  font-family: var(--mono-font);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.files__actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.files__btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.files__btn:hover:not(:disabled) {
+  border-color: var(--accent-soft);
+  background: var(--accent-tint);
+  color: var(--text);
+}
+
+.files__btn--go {
+  border-color: var(--accent-soft);
+  color: var(--accent-soft);
+}
+
+.files__btn--danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: transparent;
+  color: var(--danger);
+}
+
+.files__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

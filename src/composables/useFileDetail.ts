@@ -26,8 +26,8 @@
  * 两步确认的"用系统应用打开"、页内改名。两者变更的原因不同 —— 挪一下预览的尺寸
  * 不该动到这里，而"加密的要先说清楚会写出明文"这种事不该散在模板里。
  *
- * 与文件列表页（`special:files`）的关系：共用的那几件动作在 `use-file-actions.ts`，
- * "这一版怎么存"那一栏在 `use-file-storage.ts`。**删除**故意不共用：这一页的
+ * 与文件列表页（`special:files`）的关系：共用的那几件动作在 `useFileActions.ts`，
+ * "这一版怎么存"那一栏在 `useFileStorage.ts`。**删除**故意不共用：这一页的
  * 「删除」是跳到与笔记共用的 `@delete` 确认页上去（那一页对笔记与附件是同一套）。
  */
 
@@ -38,8 +38,8 @@ import type { PageAction } from "../components/note/PageHeader.vue";
 import { flash } from "../core/notice.ts";
 import { readable as infoReadable } from "../dom/file-unlock.ts";
 import type { FileEntry, FileInfo } from "../ipc/files.ts";
-import { useFileActions } from "./use-file-actions.ts";
-import { useFileStorage } from "./use-file-storage.ts";
+import { useFileActions } from "./useFileActions.ts";
+import { useFileStorage } from "./useFileStorage.ts";
 
 /** 这一页由外面给的：看哪一页、往哪儿跳 */
 export interface FileDetailSource {
@@ -148,7 +148,7 @@ export function useFileDetail(source: FileDetailSource): FileDetail {
   /**
    * 这一份现在读得动吗。
    *
-   * 判法不在这里另写一份：正文里那张图（`dom/image-viewer.ts`）问的是同一件事，
+   * 判法不在这里另写一份：正文里插进来的那张图（`dom/note-html.ts`）问的是同一件事，
    * 那条规矩写在 `dom/file-unlock.ts` 的 `readable()` 里 —— 两处各判一次，
    * 改了一边另一边就会安静地判错（表现为"解锁按钮不见了"）。
    */

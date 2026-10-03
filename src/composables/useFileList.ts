@@ -27,7 +27,7 @@
  * 位置不该动到这里，而"删除要问两次"这种事也不该散在模板里。
  *
  * 与另一个文件页（`File:` 页面）的关系：共用的那几件动作在
- * `use-file-actions.ts`，"这一版怎么存"那一栏在 `use-file-storage.ts`，
+ * `useFileActions.ts`，"这一版怎么存"那一栏在 `useFileStorage.ts`，
  * 那边自己管自己的一份。**删除**故意不共用：文件页的「删除」是跳到与笔记共用的
  * `@delete` 确认页上去（那一页对笔记与附件是同一套），只有这一列是在行内两步确认。
  */
@@ -39,8 +39,8 @@ import { flash } from "../core/notice.ts";
 import { requestSyncAfterCommit } from "../core/sync.ts";
 import { clipboardFiles, uploadPasted } from "../dom/paste-files.ts";
 import type { FileEntry, Uploaded } from "../ipc/files.ts";
-import { useFileActions } from "./use-file-actions.ts";
-import { useFileStorage } from "./use-file-storage.ts";
+import { useFileActions } from "./useFileActions.ts";
+import { useFileStorage } from "./useFileStorage.ts";
 
 /** 那一列背后的东西：状态 + 动作，模板只管把它们摆出来 */
 export interface FileList {
@@ -60,8 +60,6 @@ export interface FileList {
   updating: Ref<string>;
   /** 「上传文件」：选一批，路径交给后端，字节不经过前端 */
   pick: () => Promise<void>;
-  /** 把一批文件收进来（粘贴进来的那一批） */
-  collect: (picked: File[]) => Promise<void>;
   /** 给一个已有的文件传新版 */
   update: (file: FileEntry) => Promise<void>;
   /** 开始改名 / 确认改名 */
@@ -269,7 +267,6 @@ export function useFileList(): FileList {
     confirming,
     updating,
     pick,
-    collect,
     update,
     startRename,
     saveRename,
