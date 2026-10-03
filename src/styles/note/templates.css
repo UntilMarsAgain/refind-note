@@ -1,0 +1,427 @@
+/*
+  Refind Note is a note-taking software.
+  Copyright (C) 2026 Until Mars Again
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU Affero General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU Affero General Public License for more details.
+
+  You should have received a copy of the GNU Affero General Public License
+  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+/*
+ * 笔记正文的**第三层**：内置模板渲染出来的东西。
+ *
+ * 这里的每一个选择器都能在 `src-tauri/src/markdown/syntax/template/stdlib.rs`
+ * 的某个渲染器里找到出处 —— 模板名与 class 一一对应：
+ *   `.template*`     未知模板 / 用法有问题的**提示框**（给作者看，不是静悄悄丢掉）；
+ *   `.quote` / `.quote__origin`   `::quote`，署名单独一行靠右下角；
+ *   `pre.pre--marked` / `.code-marks`  `::code` 里被强调的行；
+ *   `.aside`         `::aside` 信息栏；      `.fields`      `::fields` 属性表；
+ *   `.banner`        `::banner` 横条；       `.title-block` `::title` 居中大标题；
+ *   `.tabs`          `::tabs` 选项卡；       `.theme__part*` `::theme` 深浅两版；
+ *   `.math*`         `::math`（排版由 KaTeX 在前端做）；`.diagram` / `pre.mermaid` `::mermaid`；
+ *   `.signature`     `::signature` 落款。
+ * 媒体类（`::image` / `::video` / `::audio` / 外部嵌入）与"取不到 / 没解锁"的占位
+ * 挪去了 `media.css` —— 那些是元素/资源本身的样子，不是版式。
+ *
+ * 顺序：排在 `code.css` 之后（`.template pre { margin: 0 }` 要赢过
+ * `.note-body pre` 的外边距），排在 `media.css` 之前（原来就是这个次序）。
+ * 内部各模板之间的先后照原样保留。
+ */
+
+/*
+ * 未知模板：**给作者看的提示框**，不是"不认识就静静丢掉"。
+ *
+ * 名字与参数按解析结果列出 —— 一眼能看出引号去了哪儿、空格有没有保住；
+ * 内容仍用代码块裹住，所以写错了也看得见自己写了什么。
+ * 左侧那条灰边与"未知模板"标：这不是危险操作，不该用红色。
+ */
+.note-body .template {
+  margin: 1em 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-dim);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.note-body .template__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.note-body .template__badge {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--code-bg);
+  color: var(--text-dim);
+  font-size: 12.5px;
+}
+
+.note-body .template__name {
+  background: none;
+  color: var(--link-blue);
+  font-weight: 600;
+}
+
+.note-body .template__param {
+  background: none;
+  color: var(--text-dim);
+  font-size: 0.9em;
+}
+
+/* 框里的代码块贴着框边，别再叠一层外边距 */
+.note-body .template pre {
+  margin: 0;
+}
+
+/*
+ * `::quote` 模板：等同引用块，署名单独一行靠右下角。
+ * 左侧那条竖线与缩进由正文既有的 blockquote 样式负责，这里只补署名。
+ */
+/*
+ * 署名靠右下角。
+ *
+ * 右边留出内边距，是为了让**嵌套的引用一层比一层靠内**：每一层 blockquote 都有自己的
+ * 右内边距，于是内层的右下角自然比外层更靠里。只靠 `text-align: right` 做不到这件事 ——
+ * 那样两层署名会落在同一条竖线上（看起来像并排，分不出谁是谁的）。
+ */
+.note-body blockquote.quote {
+  padding-right: 16px;
+}
+
+.note-body .quote__origin {
+  margin: 8px 0 0;
+  text-align: right;
+  color: var(--text-dim);
+  font-size: 0.92em;
+}
+
+/*
+ * `::code` 里被强调的行。
+ *
+ * 画的是**一层绝对定位的色带**，没有把代码拆成一行一个元素：拆行会破坏 highlight.js
+ * 已经生成的分词（它的 span 可能跨行），得不偿失。色带只按行高定位、不参与布局，
+ * 也不挡选中与复制（`pointer-events: none`）。
+ */
+.note-body pre.pre--marked {
+  position: relative;
+}
+
+.note-body pre.pre--marked code {
+  /* 代码压在色带之上：色带在背景，文字在它上面 */
+  position: relative;
+  z-index: 1;
+}
+
+.note-body .code-marks {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+}
+
+.note-body .code-mark {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: var(--accent-tint);
+}
+
+/* ---------- 内置模板：aside / fields / banner / title / tabs / theme ----------
+ * 原来是"aside / fields / banner / image"一整段；`::image` / `::video` /
+ * `::audio` / 外部嵌入与"取不到 / 没解锁"的占位拆去了 `media.css`，
+ * `::math` / `::mermaid` / `::signature` 留在本文件末尾。 */
+
+/*
+ * `::aside` 信息栏：右侧浮动，正文绕着它走 —— 这是信息栏该有的样子。
+ * 窄屏取消浮动：浮动的栏在窄屏上会把正文挤成一条。
+ */
+.note-body .aside {
+  float: right;
+  width: min(320px, 42%);
+  margin: 0 0 16px 20px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.note-body .aside__title {
+  margin: 0 0 8px;
+  font-weight: 600;
+  text-align: center;
+}
+
+@media (max-width: 720px) {
+  .note-body .aside {
+    float: none;
+    width: auto;
+    margin: 1em 0;
+  }
+}
+
+/* `::fields` 左右两栏的属性表 */
+.note-body .fields {
+  width: 100%;
+  margin: 1em 0;
+  border-collapse: collapse;
+}
+
+.note-body .fields th,
+.note-body .fields td {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  font-size: 0.95em;
+}
+
+.note-body .fields th {
+  width: 34%;
+  color: var(--text-dim);
+  font-weight: 400;
+  background: var(--surface);
+}
+
+/* `::banner` 方框标题带 */
+.note-body .banner {
+  margin: 1.2em 0;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--accent-solid);
+  color: var(--text);
+  text-align: center;
+  font-weight: 600;
+}
+
+/* 横条里的链接：底色是主题色，链接不能再是主题色（会糊在一起），
+   所以这里一律用当前文字色加下划线 */
+.note-body .banner a,
+.note-body .banner a.wikilink,
+.note-body .banner a.wikilink[data-missing="true"] {
+  color: inherit;
+  border-bottom: 1px solid currentColor;
+}
+
+/* 给了高度的横条：内容在条里**居中**。一条矮横条用不上（文字本来就在那一行上），
+   所以这条样式只在 height= 时才挂上来 —— 免得把"一行文字"也变成 flex 项 */
+.note-body .banner--sized {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* rounded=off：直角 */
+.note-body .banner--square {
+  border-radius: 0;
+}
+
+/* 正文里的外部嵌入（视频播放器、地图…）。
+   分享代码给的多半不带尺寸，默认是 300×150 的一个小框，塞在正文里又小又别扭；
+   没写尺寸的给一个 16:9 的位置，作者写了 width/height 就照作者的来。 */
+.note-body iframe {
+  display: block;
+  max-width: 100%;
+  margin: 1.2em auto;
+  border: 0;
+  border-radius: 6px;
+}
+
+.note-body iframe:not([width]):not([height]) {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+}
+
+/* `::title` 居中大标题（没有背景） */
+.note-body .title-block {
+  margin: 1.4em 0 0.8em;
+  color: var(--text);
+  text-align: center;
+  font-size: 1.75em;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.note-body div.title-block {
+  text-align: left;
+  font-weight: 400;
+}
+
+.note-body div.title-block > :first-child {
+  margin-top: 0;
+}
+
+.note-body div.title-block > :last-child {
+  margin-bottom: 0;
+}
+
+/* `::theme` 深浅色两版：两段都在 DOM 里，显示哪一段由当前主题决定 */
+.note-body .theme__part--dark {
+  display: none;
+}
+
+:root[data-theme="dark"] .note-body .theme__part--light {
+  display: none;
+}
+
+:root[data-theme="dark"] .note-body .theme__part--dark {
+  display: block;
+}
+
+/* `::tabs` 选项卡：条 + 面板；切换由前端接线（后端只给结构） */
+.note-body .tabs {
+  margin: 1.2em 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.note-body .tabs__bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 6px 6px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.note-body .tabs__tab {
+  appearance: none;
+  padding: 6px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.95em;
+  cursor: pointer;
+}
+
+.note-body .tabs__tab:hover {
+  color: var(--text);
+}
+
+.note-body .tabs__tab--on {
+  border-bottom-color: var(--accent-soft);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.note-body .tabs__panel {
+  padding: 2px 14px;
+}
+
+.note-body .tabs__panel > :first-child {
+  margin-top: 0.9em;
+}
+
+.note-body .tabs__panel > :last-child {
+  margin-bottom: 0.9em;
+}
+
+/* 横条里写了多段（少见）：左对齐读起来才不别扭 */
+.note-body div.banner {
+  text-align: left;
+  font-weight: 400;
+}
+
+.note-body div.banner > :first-child {
+  margin-top: 0;
+}
+
+.note-body div.banner > :last-child {
+  margin-bottom: 0;
+}
+
+/* 模板用法有问题：与"未知模板"同一套外观，只多一句为什么 */
+.note-body .template--problem {
+  border-left-color: var(--accent);
+}
+
+.note-body .template__why {
+  margin: 0 0 10px;
+  color: var(--text);
+}
+
+
+/* ---- 数学公式 ----
+   后端只认出公式并把 TeX 原文放在 data-tex 上，排版由 KaTeX 在前端做
+   （见 `dom/math.ts`）。没排上之前元素里显示的是原文，所以这里也管"原文的样子" */
+.note-body .math:not([data-math-ready]) {
+  font-family: var(--mono-font);
+  font-size: 0.94em;
+  color: var(--text-dim);
+}
+
+.note-body .math--display {
+  display: block;
+  margin: 0.9em 0;
+  text-align: center;
+  /* 又长又宽的公式让它自己横向滚，别把版面撑破 */
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* ---- mermaid 图 ----
+   没画出来之前是一段代码（原文），画出来之后里面是 SVG */
+.note-body .diagram {
+  margin: 1.1em 0;
+}
+
+.note-body pre.mermaid {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--code-bg);
+  font-family: var(--mono-font);
+  font-size: 0.9em;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+/* 画好了：原样的框收掉，让 SVG 自己站中间 */
+.note-body pre.mermaid[data-processed="true"] {
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: center;
+}
+
+.note-body pre.mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* 画不出来：留一条红线，原文还在，鼠标悬上去有原因 */
+.note-body pre.mermaid[data-problem] {
+  border-color: var(--danger);
+  border-left-width: 3px;
+}
+
+/* ---- 落款 ----
+   右对齐的一段；硬换行保留（名字一行、日期一行，照写就是两行） */
+.note-body .signature {
+  margin: 1.6em 0 0.4em;
+  text-align: right;
+  color: var(--text-dim);
+  white-space: pre-line;
+}
+
+.note-body .signature p {
+  margin: 0;
+}

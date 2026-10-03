@@ -1,0 +1,268 @@
+/*
+  Refind Note is a note-taking software.
+  Copyright (C) 2026 Until Mars Again
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU Affero General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU Affero General Public License for more details.
+
+  You should have received a copy of the GNU Affero General Public License
+  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+/*
+ * 笔记正文的**第一层**：`.note-body` 里标准 Markdown 元素长什么样。
+ *
+ * 标题、段落与行内元素、列表、引用、表格、其它，以及 `code` / `pre` 这两个
+ * 块元素本身 —— 它们都是 Markdown 语法直接产出的东西，与任何内置模板无关，
+ * 所以归在"正文基础"这一层。
+ *
+ * 套在 Markdown 输出上的东西不在这里：
+ *   - `code.css`      代码块容器与复制按钮、高亮配色、行号、行内代码复制、外链符号；
+ *   - `templates.css` 内置模板（`::aside` / `::banner` / `::quote` …）渲染出的结构；
+ *   - `media.css`     图片、音视频、外部嵌入，以及"取不到 / 没解锁"的占位。
+ *
+ * ⚠ 这一层必须排在 `code.css` 之前（次序由 `../note.css` 的 `@import` 定）：
+ * `.note-body pre { margin: 1em 0 }` 与 `.code-frame pre { margin: 0 }`
+ * **特异度完全相同**（一个类 + 一个类型），后者靠"写在后面"才赢得下来。
+ * 调换这两层的顺序，代码块就会重新长出外边距。
+ *
+ * 颜色一律走主题变量（`--text` / `--border` / `--accent-tint` …），
+ * 变量的定义在 `../theme.css`，本文件只管"用哪个变量"。
+ */
+.note-body {
+  /* body 上是 user-select:none，正文必须显式放开，否则笔记没法复制 */
+  user-select: text;
+  -webkit-user-select: text;
+
+  /* 限宽与居中交给外层的 .app__column（页头和正文共用同一条阅读栏） */
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.75;
+  overflow-wrap: break-word;
+}
+
+/* 第一块内容不要顶出多余留白 */
+.note-body > :first-child {
+  margin-top: 0;
+}
+
+/* ---------- 标题 ---------- */
+
+.note-body h1,
+.note-body h2,
+.note-body h3,
+.note-body h4,
+.note-body h5,
+.note-body h6 {
+  margin: 1.6em 0 0.6em;
+  font-weight: 600;
+  line-height: 1.35;
+  /* 页头是 sticky 的：跳转到某个标题时要给它让出位置，否则标题会被盖住 */
+  scroll-margin-top: 64px;
+}
+
+/* 刻意比页头那个页面标题（2.15em）小一档，正文里的 H1 不该压过页面标题 */
+.note-body h1 {
+  font-size: 1.55em;
+}
+
+.note-body h2 {
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--border);
+  font-size: 1.35em;
+}
+
+.note-body h3 {
+  font-size: 1.15em;
+}
+
+.note-body h4 {
+  font-size: 1em;
+}
+
+.note-body h5,
+.note-body h6 {
+  color: var(--text-dim);
+  font-size: 0.92em;
+}
+
+/* ---------- 段落与行内元素 ---------- */
+
+.note-body p {
+  margin: 0.9em 0;
+}
+
+.note-body strong {
+  font-weight: 600;
+}
+
+.note-body em {
+  font-style: italic;
+}
+
+.note-body s,
+.note-body del {
+  color: var(--text-dim);
+}
+
+.note-body a {
+  /* 钉死的蓝：内部链接（页面存在）与外链都用它，不跟主题色走 */
+  color: var(--link-blue);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  cursor: pointer;
+}
+
+.note-body a:hover {
+  border-bottom-color: currentColor;
+}
+
+/* 内部链接：用点状下划线跟外链区分开 */
+.note-body a.wikilink {
+  border-bottom-style: dotted;
+}
+
+.note-body a.wikilink:hover {
+  border-bottom-style: solid;
+}
+
+/* 红链：目标还没建立的内部链接。存在与否是后端渲染时判定的，
+   前端只负责上色。 */
+.note-body a.wikilink[data-missing="true"] {
+  color: var(--link-missing);
+}
+
+/* 绿链：跨站（interwiki）链接。前缀在命名空间配置里登记过站点地址时，
+   Rust 端渲染成带 data-interwiki 的链接，不再查本仓库有没有这一页。 */
+.note-body a.wikilink[data-interwiki="true"] {
+  color: var(--link-green);
+}
+
+/* ---------- 列表 ---------- */
+
+.note-body ul,
+.note-body ol {
+  margin: 0.9em 0;
+  padding-left: 1.7em;
+}
+
+.note-body ul {
+  list-style: disc;
+}
+
+.note-body ul ul {
+  list-style: circle;
+}
+
+.note-body ol {
+  list-style: decimal;
+}
+
+.note-body li {
+  margin: 0.3em 0;
+}
+
+.note-body li > ul,
+.note-body li > ol {
+  margin: 0.3em 0;
+}
+
+/* ---------- 引用 ---------- */
+
+.note-body blockquote {
+  margin: 1em 0;
+  padding: 0.1em 0 0.1em 1em;
+  border-left: 3px solid var(--accent);
+  color: var(--text-dim);
+}
+
+.note-body blockquote p {
+  margin: 0.4em 0;
+}
+
+/* ---------- 代码 ---------- */
+
+.note-body code {
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  background: var(--code-bg);
+  font-family: var(--mono-font);
+  font-size: 0.9em;
+}
+
+.note-body pre {
+  margin: 1em 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--code-bg);
+  overflow: auto;
+  /* 字号与行高必须设在 pre 上，不能只设在 code 上：
+     行盒高度取「块自身 strut」与内联盒的较大值，而 pre 继承的是 .note-body 的
+     15px/1.75 = 26.25px strut，比 code 的 13.2px/1.6 = 21.1px 更大，
+     于是每行被撑到 26px —— 表现出来就是选中的那一条明显比文字高出一截。 */
+  font-size: 0.88em;
+  line-height: 1.5;
+}
+
+/* 代码块里的 code 继承 pre 的字号与行高，并去掉二次内边距和底色 */
+.note-body pre code {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+/* ---------- 表格 ---------- */
+
+.note-body table {
+  width: 100%;
+  margin: 1em 0;
+  border-collapse: collapse;
+  font-size: 0.94em;
+}
+
+.note-body th,
+.note-body td {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.note-body th {
+  /*
+   * 表头底色跟主题色走，用它的淡染版本 --accent-tint。
+   * 文字颜色保持默认（回退了上一版把它设成 --accent 的改动）——底色已经带上了主题色，
+   * 再改文字反而抢。
+   * 主题色可在设置页更改：--accent 与 --accent-tint 都是运行时覆盖的，所以必须用变量。
+   */
+  background: var(--accent-tint);
+  font-weight: 600;
+}
+
+.note-body tbody tr:nth-child(even) {
+  background: var(--hover);
+}
+
+/* ---------- 其它 ---------- */
+
+.note-body hr {
+  margin: 1.8em 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.note-body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+}

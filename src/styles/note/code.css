@@ -1,0 +1,219 @@
+/*
+  Refind Note is a note-taking software.
+  Copyright (C) 2026 Until Mars Again
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU Affero General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU Affero General Public License for more details.
+
+  You should have received a copy of the GNU Affero General Public License
+  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+/*
+ * 笔记正文的**第二层**：代码与链接的叠加装饰。
+ *
+ * 这一层里的东西没有一条是 Markdown 元素本身，都是套在 Markdown 输出上的：
+ *   - `.code-frame` / `.code-copy`   代码块容器与复制按钮（由 NoteContent.vue 插入）；
+ *   - `.hljs-*`                      highlight.js 分词后的配色；
+ *   - `pre--numbered` / `.code-lines` 代码块行号（由 dom/code-blocks.ts 插入）；
+ *   - `:not(pre) > code.code--copied` 行内代码点击复制的反馈；
+ *   - `a[href]::after`               外链后面那个「跳出去」符号。
+ *
+ * 之所以与 `base.css` 分开：这些选择器都要靠 class 名去 DOM 里认元素
+ * （见 `dom/code-blocks.ts`、`dom/note-html.ts`、`components/note/NoteContent.vue`），
+ * 拆分的唯一目的就是让"Markdown 元素长什么样"和"前端往上挂了什么东西"能各自读懂。
+ * **选择器一个字都不能改** —— 改了就是改了 JS 行为。
+ *
+ * 顺序：必须排在 `base.css` 之后（`.code-frame pre` 要赢过 `.note-body pre` 的
+ * 外边距，见 base.css 头部的说明）。这一层内部 `.code-frame` → 高亮 → 外链符号
+ * → 行内代码 → 行号的次序照原样保留。
+ *
+ * 配色全走 `--syntax-*` 变量（定义在 `../theme.css`），所以浅色/深色自动跟随，
+ * 不要引入 highlight.js 自带主题那种写死的固定配色。
+ */
+
+/* ---------- 代码块容器与复制按钮 ---------- */
+
+/* 按钮放在 <pre> 外面而不是里面，两个原因：
+   1. pre 有 overflow:auto，按钮放里面会跟着横向滚动被裁掉；
+   2. 放外面，选中或复制代码时不会把按钮本身算进去。 */
+.code-frame {
+  position: relative;
+  margin: 1em 0;
+}
+
+/* 外边距已交给容器，避免两层间距叠加 */
+.code-frame pre {
+  margin: 0;
+}
+
+.code-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  /* 不透明，免得盖住底下的代码 */
+  background: var(--bg);
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: default;
+  /* 按钮不该被选中，也不要混进复制内容 */
+  user-select: none;
+  -webkit-user-select: none;
+  opacity: 0.65;
+  transition: opacity 120ms ease, color 120ms ease, background-color 120ms ease;
+}
+
+.code-frame:hover .code-copy,
+.code-copy:focus-visible {
+  opacity: 1;
+}
+
+.code-copy:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* ---------- 代码高亮 ----------
+ * highlight.js 只负责分词（给 <span class="hljs-xxx">），配色由上面的
+ * --syntax-* 变量决定，因此浅色/深色会自动跟随。这也是刻意不引入
+ * highlight.js 自带主题 CSS 的原因：那些是写死的固定配色。
+ */
+
+.note-body .hljs-comment,
+.note-body .hljs-quote {
+  color: var(--syntax-comment);
+  font-style: italic;
+}
+
+.note-body .hljs-keyword,
+.note-body .hljs-literal,
+.note-body .hljs-symbol,
+.note-body .hljs-bullet,
+.note-body .hljs-meta,
+.note-body .hljs-meta .hljs-keyword {
+  color: var(--syntax-keyword);
+}
+
+.note-body .hljs-string,
+.note-body .hljs-regexp,
+.note-body .hljs-addition,
+.note-body .hljs-meta .hljs-string {
+  color: var(--syntax-string);
+}
+
+.note-body .hljs-number {
+  color: var(--syntax-number);
+}
+
+.note-body .hljs-title,
+.note-body .hljs-section,
+.note-body .hljs-name {
+  color: var(--syntax-title);
+}
+
+.note-body .hljs-type,
+.note-body .hljs-built_in,
+.note-body .hljs-attr,
+.note-body .hljs-attribute,
+.note-body .hljs-variable,
+.note-body .hljs-template-variable,
+.note-body .hljs-tag,
+.note-body .hljs-selector-tag,
+.note-body .hljs-selector-id,
+.note-body .hljs-selector-class,
+.note-body .hljs-title.class_ {
+  color: var(--syntax-type);
+}
+
+.note-body .hljs-deletion,
+.note-body .hljs-subst {
+  color: var(--syntax-deleted);
+}
+
+.note-body .hljs-emphasis {
+  font-style: italic;
+}
+
+.note-body .hljs-strong {
+  font-weight: 600;
+}
+
+/*
+ * 外链后面挂一个小「跳出去」符号，与内部链接区分开。
+ *
+ * - 内部链接（wikilink）故意不带 href，所以 `a[href]` 就是外链；
+ * - 页内锚点 href="#…" 不是外链，排除；
+ * - 用 mask 而不是背景图：符号跟随文字颜色，浅色/深色主题都不用另配色。
+ */
+/* 跨站链接不带站外小箭头：它是"另一个 wiki 的条目"，不是普通外链，
+   箭头会让人以为点出去是原始网页。 */
+.note-body a[href]:not([href^="#"]):not([data-interwiki="true"])::after {
+  content: "";
+  display: inline-block;
+  width: 0.62em;
+  height: 0.62em;
+  margin-left: 0.18em;
+  vertical-align: 0.02em;
+  background-color: currentColor;
+  opacity: 0.7;
+  -webkit-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M9.5 3H13v3.5'/><path d='M13 3 7.5 8.5'/><path d='M12 10.5V13a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 2 13V4a.5.5 0 0 1 .5-.5H5'/></svg>") center / contain no-repeat;
+  mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M9.5 3H13v3.5'/><path d='M13 3 7.5 8.5'/><path d='M12 10.5V13a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 2 13V4a.5.5 0 0 1 .5-.5H5'/></svg>") center / contain no-repeat;
+}
+
+/*
+ * 行内代码可点击复制。
+ *
+ * 代码块里的 code 由它自己的复制按钮负责，所以这里用 :not(pre) > code 限定为行内代码。
+ * 反馈只改一次背景色，600ms 后由 JS 摘掉 —— 不插入元素、不弹提示。
+ */
+.note-body :not(pre) > code {
+  cursor: pointer;
+}
+
+.note-body :not(pre) > code.code--copied {
+  background: var(--accent);
+  color: #fff;
+}
+
+/*
+ * 代码块行号。
+ *
+ * 行号是 <pre> 里的**独立一列**（不写进代码文本，复制时不会带上，也不会被分词）。
+ * 两列的行高必须完全一致才能对齐：字号与行高都由 pre 统一给出（见上面那条注释），
+ * 这里只负责把内边距挪到各自那一列上，并让行号列在横向滚动时留在原地。
+ */
+.note-body pre.pre--numbered {
+  display: flex;
+  align-items: stretch;
+  padding: 0;
+}
+
+.note-body pre.pre--numbered .code-lines {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  padding: 14px 10px 14px 14px;
+  color: var(--text-dim);
+  text-align: right;
+  user-select: none;
+  /* 代码横向滚动时，行号留在原地 */
+  position: sticky;
+  left: 0;
+  background: var(--code-bg);
+}
+
+.note-body pre.pre--numbered code {
+  flex: 1 1 auto;
+  padding: 14px 16px 14px 12px;
+}

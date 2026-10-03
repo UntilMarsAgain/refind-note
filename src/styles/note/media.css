@@ -1,0 +1,209 @@
+/*
+  Refind Note is a note-taking software.
+  Copyright (C) 2026 Until Mars Again
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU Affero General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU Affero General Public License for more details.
+
+  You should have received a copy of the GNU Affero General Public License
+  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+/*
+ * 笔记正文的**第四层**：媒体与"取不到 / 没解锁"的占位。
+ *
+ *   `.image` / `.image--*` / `figcaption`   `::image`，尺寸是上限、位置由 align 决定；
+ *   `.media video|audio` / `.media--*` / `.note-media`  `::video` / `::audio`，以及
+ *     正文里按名字引用的音视频（`![](片子.mp4)` 被 dom/note-html.ts 换成播放器）；
+ *   `iframe`         正文里的外部嵌入（视频播放器、地图…），没写尺寸的给 16:9；
+ *   `.image-missing`  图片取不到时的说明（前后两条都在，**顺序有意义**，见下）；
+ *   `img { cursor: zoom-in }`  正文图片可点开（见 dom/note-html.ts）；
+ *   `.file-locked*`  加密文件的解锁框，它**站在图片的位置上**。
+ *
+ * `.image-missing` 之所以有两条：第二条是后来调的尺寸，**靠写在后面赢过第一条**
+ * （padding 6px→2px、字号 0.9em→0.92em）。谁要"整理"掉前一条，先确认这一点。
+ * 两段注释也一并留着，不只是规则。
+ *
+ * 顺序：最后一层。前面几层没有任何选择器与这一层抢同一条属性，
+ * 所以它排在 `templates.css` 之后不会改变任何一处显示。
+ */
+
+/* `::video` / `::audio`：与图片同一套摆放（尺寸是上限，位置由 align 决定） */
+.note-body .media video,
+.note-body .media audio {
+  display: block;
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.note-body .media--center video,
+.note-body .media--center audio {
+  margin: 0 auto;
+}
+
+.note-body .media--left video,
+.note-body .media--left audio {
+  margin-right: auto;
+}
+
+.note-body .media--right video,
+.note-body .media--right audio {
+  margin-left: auto;
+}
+
+/* 正文里按名字引用的视频/音频（`![](片子.mp4)` 会被换成播放器）：与 `::video` 同一副样子 */
+.note-body .note-media {
+  display: block;
+  max-width: 100%;
+  margin: 1.2em auto;
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+/* `::image` 图片：尺寸是上限，位置由 align 决定 */
+.note-body .image {
+  margin: 1.2em 0;
+}
+
+.note-body .image img {
+  display: block;
+  border-radius: 6px;
+}
+
+.note-body .image figcaption {
+  margin-top: 6px;
+  color: var(--text-dim);
+  font-size: 0.92em;
+}
+
+.note-body .image--center {
+  text-align: center;
+}
+
+.note-body .image--center img {
+  margin-inline: auto;
+}
+
+.note-body .image--left {
+  text-align: left;
+}
+
+.note-body .image--left img {
+  margin-right: auto;
+}
+
+.note-body .image--right {
+  text-align: right;
+}
+
+.note-body .image--right img {
+  margin-left: auto;
+}
+
+/*
+ * 图片取不到时换成的一句说明。
+ *
+ * 不用破图标占位：读者要知道的是"这张图不在了"，而不是对着一个加载失败的方框猜。
+ */
+.note-body .image-missing {
+  display: inline-block;
+  padding: 6px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 0.9em;
+}
+
+/*
+ * 正文里的图片点一下就看得更大（见 note-html.ts），所以给个手型：
+ * 不然没人知道它点得动。
+ */
+.note-body img {
+  cursor: zoom-in;
+}
+
+/* 加载不出来的图片换成了这句说明 */
+.note-body .image-missing {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 0.92em;
+}
+
+/*
+ * 加密文件的解锁框：它**站在图片的位置上**。
+ * 不是错误状态，所以不用危险色 —— 只是"这一张要先解锁"。
+ */
+.note-body .file-locked {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  align-items: center;
+  max-width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-dim);
+  font-size: 12.5px;
+}
+
+.note-body .file-locked__label {
+  color: var(--text);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.note-body .file-locked__hint {
+  color: var(--text-dim);
+}
+
+.note-body .file-locked__input {
+  width: 10em;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--field-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.note-body .file-locked__input:focus {
+  outline: none;
+  border-color: var(--accent-soft);
+}
+
+.note-body .file-locked__go {
+  padding: 3px 10px;
+  border: 1px solid var(--accent-soft);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent-soft);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.note-body .file-locked__go:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.note-body .file-locked__go:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.note-body .file-locked__problem {
+  color: var(--danger);
+}
