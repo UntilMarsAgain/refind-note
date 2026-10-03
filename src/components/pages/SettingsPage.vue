@@ -19,6 +19,7 @@
 <script setup lang="ts">
 import { nextTick, watch } from "vue";
 import AppearanceSection from "../settings/AppearanceSection.vue";
+import ShortcutSection from "../settings/ShortcutSection.vue";
 import WorkspaceSection from "../settings/WorkspaceSection.vue";
 import StorageSection from "../settings/StorageSection.vue";
 import SyncSection from "../settings/SyncSection.vue";
@@ -67,10 +68,12 @@ watch(
       <dd><code>{{ databaseRoot || "…" }}</code></dd>
     </dl>
     <p class="settings__where">
-      改动即时生效，落在工作目录下的 <code>settings/preferences.json</code>。
+      改动即时生效，落在工作目录下的 <code>settings/preferences.json</code>
+      （快捷键一节另存 <code>settings/keymap.json</code>）。
     </p>
 
     <AppearanceSection :focus="focus"/>
+    <ShortcutSection :focus="focus"/>
     <WorkspaceSection :focus="focus"/>
     <StorageSection :focus="focus"/>
     <SyncSection :focus="focus"/>
