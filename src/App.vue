@@ -49,8 +49,8 @@ import {
 import { restartStartup, startupPhase } from "./core/startup.ts";
 import { formatBytes, type MaintenanceReport } from "./ipc/maintenance.ts";
 import { useTabs } from "./core/tabs.ts";
-import { useNavigation } from "./core/use-navigation.ts";
-import { useShortcuts } from "./core/use-shortcuts.ts";
+import { useNavigation } from "./composables/use-navigation.ts";
+import { useShortcuts } from "./composables/use-shortcuts.ts";
 import { installWheelZoom } from "./dom/zoom-wheel.ts";
 
 /**
@@ -65,7 +65,7 @@ import { installWheelZoom } from "./dom/zoom-wheel.ts";
  * 监听器的装与摘，以及把三块接到标签页上。
  *
  * 「导航胶水层」（页面之间怎么走）与「快捷键」各自搬去了
- * `core/use-navigation.ts` / `core/use-shortcuts.ts` —— 它们变更的原因与装配不同，
+ * `composables/use-navigation.ts` / `composables/use-shortcuts.ts` —— 它们变更的原因与装配不同，
  * 而标签页状态仍然只有 `useTabs()` 这一份，能力是**递进去**的，不是复制一份。
  */
 const {
@@ -174,7 +174,7 @@ function openTabWith(input: string) {
  * 导航胶水层：把上面这些入口接到标签页上。
  *
  * 标签页状态还是 `useTabs()` 那**一份**，这里只是把它要用的几项能力递进去
- * （不复制状态，见 `core/use-navigation.ts` 的模块头）。
+ * （不复制状态，见 `composables/use-navigation.ts` 的模块头）。
  */
 const {
   openHome,

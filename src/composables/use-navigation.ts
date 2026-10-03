@@ -35,9 +35,9 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type { ComputedRef } from "vue";
-import { withSection } from "./address.ts";
-import { flash } from "./notice.ts";
-import type { Movement, TabState } from "./tabs.ts";
+import { withSection } from "../core/address.ts";
+import { flash } from "../core/notice.ts";
+import type { Movement, TabState } from "../core/tabs.ts";
 
 /**
  * 本层需要的那几项标签页能力。

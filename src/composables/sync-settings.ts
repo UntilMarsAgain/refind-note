@@ -39,9 +39,9 @@ import {
     type SyncSettingsPatch,
 } from "../ipc/sync.ts";
 import type { Cipher } from "../ipc/note.ts";
-import { flash } from "./notice.ts";
-import { isMobile } from "./platform.ts";
-import { refreshSyncAvailability, syncNow as requestSync } from "./sync.ts";
+import { flash } from "../core/notice.ts";
+import { isMobile } from "../core/platform.ts";
+import { refreshSyncAvailability, syncNow as requestSync } from "../core/sync.ts";
 
 /** 这一节的状态与动作。`loadSync` 由 `onMounted` 自己叫，不用调用方记得 */
 export function useSyncSettings() {
