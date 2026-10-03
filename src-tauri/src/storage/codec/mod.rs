@@ -65,7 +65,16 @@ mod tests;
 // 各有一半路径对不上。
 #[cfg(test)]
 pub use gpg::set_gpg_home;
-pub use gpg::{gpg_available, gpg_version, key_uid, uid_text, without_prompting};
+pub use gpg::{gpg_available, gpg_version, key_uid, without_prompting};
+// `uid_text` 只有桌面版有：它要把 `gpgme::UserId` 这个**桌面才有的类型**
+// 拆成"名字 <邮箱>"，而 `gpgme` 整个 crate 在移动端就不参与编译（见 Cargo.toml）。
+// 移动端的调用点只有 `features::keys::list` 里那一处 `filter_map`，而那个函数
+// 本身是 `#[cfg(desktop)]` 的 —— 所以移动端既用不到、也没有 `gpgme::UserId`
+// 可以拿来造桩。给它写个空桩反而会让"这里到底该不该走"变得看不出来。
+//
+// （Android 构建时报的就是这个：`no uid_text in storage::codec::gpg`。）
+#[cfg(desktop)]
+pub use gpg::uid_text;
 pub use gpg::VerifyOutcome;
 pub use types::*;
 

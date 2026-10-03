@@ -10,7 +10,11 @@
 #[cfg(any(desktop, test))]
 use std::process::Command;
 
+// 只在桌面分支里用（签名那一步要 base64），移动端不编进来 ——
+// 否则移动端每次构建都带两条 `unused_imports` 警告。
+#[cfg(any(desktop, test))]
 use base64::engine::general_purpose::STANDARD as BASE64;
+#[cfg(any(desktop, test))]
 use base64::Engine as _;
 
 use super::{CodecError, Result};
