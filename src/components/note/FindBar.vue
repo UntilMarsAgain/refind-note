@@ -42,6 +42,10 @@ const props = defineProps<{
   total: number;
   /** 当前是第几个（1 起；没命中时是 0） */
   index: number;
+  /** 区分大小写勾上了没有 */
+  caseSensitive: boolean;
+  /** 只匹配整词勾上了没有 */
+  wholeWord: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -50,10 +54,32 @@ const emit = defineEmits<{
   (e: "next"): void;
   (e: "previous"): void;
   (e: "close"): void;
+  /** 勾了"大小写" */
+  (e: "case-sensitive", on: boolean): void;
+  /** 勾了"整词" */
+  (e: "whole-word", on: boolean): void;
+  /** 改了选项：重查（回到第一个） */
+  (e: "refresh"): void;
 }>();
 
 /** 输入框里那串字 */
 const typed = ref("");
+
+/**
+ * 两个选项勾上了没有（父组件持有 —— 状态与查询词住在一起，见 `useFindInPage`）。
+ *
+ * 用 `props` 而不是就地改：这一层只负责显示与派发，
+ * 状态换到别处重查时不会有两个来源打架。
+ */
+function onCaseSensitive(event: Event) {
+  emit("case-sensitive", (event.target as HTMLInputElement).checked);
+  emit("refresh");
+}
+
+function onWholeWord(event: Event) {
+  emit("whole-word", (event.target as HTMLInputElement).checked);
+  emit("refresh");
+}
 
 // 一打开就把光标放进输入框、全选好（重开时旧的查询还在框里，直接改）
 watch(
@@ -110,6 +136,29 @@ function onKeydown(event: KeyboardEvent) {
     <span class="findbar__count" :class="{ 'findbar__count--none': total === 0 }">
       {{ total === 0 ? (typed.trim() ? "无" : "") : `${index}/${total}` }}
     </span>
+
+    <!-- 两个选项：与浏览器查找同名同义（默认都不开）。
+         勾一下立刻重查 —— 先找到、再挑，比"设完再找"省事。
+
+         文字用"大小写""整词"而不是 `Aa` / `[词]` 那一类符号：这个程序通篇中文，
+         而图标式的写法旁边又没有解释，看不出是干什么的。 -->
+    <label class="findbar__opt" title="只找大小写完全一样的">
+      <input
+        type="checkbox"
+        :checked="props.caseSensitive"
+        @change="onCaseSensitive"
+      />
+      <span>大小写</span>
+    </label>
+
+    <label class="findbar__opt" title="只匹配整个词，不匹配词的一部分">
+      <input
+        type="checkbox"
+        :checked="props.wholeWord"
+        @change="onWholeWord"
+      />
+      <span>整词</span>
+    </label>
 
     <button
       class="findbar__btn tip--left"

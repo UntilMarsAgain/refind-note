@@ -72,6 +72,29 @@
   color: var(--danger);
 }
 
+/* 两个选项：勾选框与文字并排。文字不缩写 —— 这个程序通篇中文 */
+.findbar__opt {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+  /* 文字短，别让勾选框把整条撑宽 */
+  user-select: none;
+  white-space: nowrap;
+}
+
+.findbar__opt:hover {
+  color: var(--text);
+}
+
+.findbar__opt input {
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 .findbar__btn {
   display: inline-flex;
   align-items: center;

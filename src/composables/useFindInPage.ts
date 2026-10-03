@@ -39,6 +39,10 @@ export interface FindInPage {
     total: Ref<number>;
     /** 现在是第几个（1 起；没命中时 0） */
     index: Ref<number>;
+    /** 区分大小写（默认否） */
+    caseSensitive: Ref<boolean>;
+    /** 只匹配整词（默认否） */
+    wholeWord: Ref<boolean>;
     /**
      * 正文容器：查找往里包 `<mark>`。
      *
@@ -56,12 +60,16 @@ export interface FindInPage {
     next: () => void;
     /** 上一个（到开头绕回最后一个） */
     previous: () => void;
+    /** 改了选项：重查（回到第一个） */
+    refresh: () => void;
 }
 
 export function useFindInPage(): FindInPage {
     const open = ref(false);
     const total = ref(0);
     const index = ref(0);
+    const caseSensitive = ref(false);
+    const wholeWord = ref(false);
     const root = ref<HTMLElement | null>(null);
 
     /** 重新查一遍并滚到第 `want` 个（0 起） */
@@ -72,7 +80,10 @@ export function useFindInPage(): FindInPage {
             index.value = 0;
             return;
         }
-        const found = findIn(element, query);
+        const found = findIn(element, query, {
+            caseSensitive: caseSensitive.value,
+            wholeWord: wholeWord.value,
+        });
         total.value = found.total;
         if (found.total === 0) {
             index.value = 0;
@@ -91,6 +102,8 @@ export function useFindInPage(): FindInPage {
         open,
         total,
         index,
+        caseSensitive,
+        wholeWord,
         root,
 
         show() {
@@ -110,6 +123,14 @@ export function useFindInPage(): FindInPage {
 
         search(value) {
             query = value;
+            run(0);
+        },
+
+        refresh() {
+            // 没在找什么的时候切选项没有意义（`query` 是空的，跑了也是 0 处）
+            if (!query) {
+                return;
+            }
             run(0);
         },
 

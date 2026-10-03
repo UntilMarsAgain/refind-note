@@ -136,24 +136,31 @@ export const appTheme = EditorView.theme(
  *   一眼要能认出"现在看的是哪一个"，否则"下一个"按了等于没按。
  */
 const editorSearch = [
-    // 面板上的字全是英文（"Find" / "Replace"）—— CM6 有官方的翻译机制
-    // （`EditorState.phrases`，见下面 `phrase()` 的用法），用它，别去改 DOM。
+    // 面板上的字全是英文 —— CM6 有官方的翻译机制（`EditorState.phrases`），用它，
+    // 别去改 DOM。
+    //
+    // **键名必须与 `@codemirror/search` 里 `phrase(view, "…")` 的字面量一字不差。**
+    // 我上一版照着自己看到的补，漏了两个（实测出来的）：三个勾选项的标签是
+    // `"match case"` / `"by word"` / `"regexp"`（**带空格、全小写**），
+    // 而按钮是 `"next"` / `"previous"` / `"replace all"` / `"Replace"`。
+    // 猜错了不报错，只是那一条悄悄保持英文 —— 所以下面这段是照着源码核过的。
     EditorState.phrases.of({
+        // —— 输入框的占位与名字
         Find: "查找",
         Replace: "替换",
-        replace: "替换",
+        // —— 三个勾选项：键名带空格、全小写
+        "match case": "区分大小写",
+        regexp: "正则",
+        "by word": "整词匹配",
+        // —— 按钮：`select` 那颗的键是 `"all"`（选中全部命中），`replace` 是
+        //    `"replace"`（替换这一个），别与 `"replace all"` 混了 ——
+        //    三个键都在，但它们是三颗不同的按钮。
         next: "下一个",
         previous: "上一个",
-        all: "全部替换",
-        // 按钮上那个词是 `"replace all"`（小写、带空格），与 `"Replace"` 不是同一个 key
+        all: "全选匹配",
+        replace: "替换",
         "replace all": "全部替换",
-        matchCase: "区分大小写",
-        regexp: "正则",
-        byLine: "逐行",
-        "Find next occurrence of query relative to cursor": "从光标处找下一个",
-        "Find previous occurrence of query": "找上一个",
-        "Replace current match": "替换这一个",
-        "Replace all occurrences": "替换全部",
+        close: "关闭",
     }),
     search({ top: true }),
     // `Mod-f` 让给键位表（见上面那段说明）。
@@ -190,21 +197,117 @@ const editorSearch = [
         "& .cm-panel input, & .cm-panel button": {
             fontFamily: "var(--mono-font)",
         },
-        // 面板按钮在深色底下默认是浅灰，点了几乎看不出来
-        "& .cm-button": {
-            backgroundImage: "none",
+        /*
+         * 下面这组是把 CM6 默认那套面板**收拾成这个程序的样子**。
+         *
+         * 默认布局是"一行挤到底"：两个输入框 + 五个按钮 + 三个勾选项全在同一行，
+         * 输入框只有 60px 宽，右上那个 `×` 离关闭键十万八千里。中文更挤 ——
+         * "区分大小写"四个字比 `match case` 还宽，于是整条面板挤作一团。
+         *
+         * 所以这里改的是**排版**，不改功能：面板仍由 CM6 生成（功能、快捷键、
+         * 状态都是它的），我们只给它穿衣服。
+         */
+        // 面板本身：`padding-right` 留出关闭键那条，不与它抢位置
+        "& .cm-panels": {
+            padding: "8px 34px 8px 10px",
+            backgroundColor: "var(--surface)",
+            color: "var(--text)",
+            borderBottom: "1px solid var(--border)",
+            fontFamily: "var(--sans-font)",
+            fontSize: "12.5px",
+        },
+        "& .cm-panels.cm-panels-top": {
+            // 面板在顶上时别跟编辑器内容贴死，留一道缝
+            borderBottom: "1px solid var(--border)",
+        },
+        "& .cm-search": {
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "8px 10px",
+            alignItems: "center",
+            // `max-width` 是必要的：不封顶的话输入框在宽窗口里会拉成一条长带
+            maxWidth: "720px",
+        },
+        /*
+         * 输入框：第一行那个"查找"是主体，给足宽度；
+         * 第二个"替换"是次要的，窄一档就够（CM6 用 `name` 区分）。
+         */
+        "& .cm-search input[name=search], & .cm-textfield[name=search]": {
+            flex: "1 1 220px",
+            minWidth: "180px",
+            height: "28px",
+            padding: "0 8px",
             border: "1px solid var(--border)",
-            borderRadius: "4px",
+            borderRadius: "5px",
+            backgroundColor: "var(--field-bg)",
+            color: "var(--text)",
+        },
+        "& .cm-search input[name=replace], & .cm-textfield[name=replace]": {
+            flex: "1 1 160px",
+            minWidth: "130px",
+            height: "28px",
+            padding: "0 8px",
+            border: "1px solid var(--border)",
+            borderRadius: "5px",
+            backgroundColor: "var(--field-bg)",
+            color: "var(--text)",
+        },
+        "& .cm-search input:focus": {
+            outline: "none",
+            borderColor: "var(--accent-soft)",
+        },
+        // 按钮：CM6 默认是"灰底 + 渐变图片"，深色底下看着像块脏斑
+        "& .cm-button": {
+            display: "inline-flex",
+            alignItems: "center",
+            height: "28px",
+            padding: "0 10px",
+            border: "1px solid var(--border)",
+            borderRadius: "5px",
+            backgroundColor: "transparent",
+            backgroundImage: "none",
             color: "var(--text-dim)",
+            fontFamily: "var(--sans-font)",
+            fontSize: "12.5px",
             cursor: "pointer",
         },
         "& .cm-button:hover": {
             backgroundColor: "var(--hover)",
             color: "var(--text)",
         },
-        "& .cm-button[disabled]": {
-            opacity: "0.5",
-            cursor: "default",
+        // 按钮之间的缝：CM6 把它们当行内元素排，之间没有间距
+        "& .cm-search br + .cm-button": {
+            marginLeft: "2px",
+        },
+        // 关闭键：钉在面板右上角，别让它跟在按钮后面跑到天边
+        "& .cm-button[name=close]": {
+            position: "absolute",
+            top: "6px",
+            right: "8px",
+            width: "24px",
+            height: "24px",
+            padding: "0",
+            border: "none",
+            borderRadius: "5px",
+            fontSize: "16px",
+            lineHeight: "1",
+        },
+        // 勾选项：默认的勾选框是系统色，跟着主题走不了
+        "& .cm-search label": {
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "4px",
+            color: "var(--text-dim)",
+            cursor: "pointer",
+            userSelect: "none",
+        },
+        "& .cm-search label input[type=checkbox]": {
+            accentColor: "var(--accent)",
+            cursor: "pointer",
+        },
+        // 面板是"浮在编辑器上面"的，所以给它自己的定位上下文（`×` 要 absolute）
+        "&.cm-focused .cm-panels": {
+            position: "relative",
         },
     }),
 ];

@@ -65,6 +65,46 @@ export interface FindResult {
 }
 
 /**
+ * 查找的选项（与浏览器查找的那两个开关同名同义）。
+ *
+ * 默认**都不开** —— 那是绝大多数人找东西时的期待：先找到，看见了再挑。
+ */
+export interface FindOptions {
+    /** 区分大小写（默认否） */
+    caseSensitive?: boolean;
+    /** 只匹配整个词（默认否） */
+    wholeWord?: boolean;
+}
+
+/**
+ * 命中位置 `at` 那一段（长 `length`）是不是一个**整词**。
+ *
+ * 两边都得是词的边：左边那个字是词的延续（`Cat` 里的 `at` 不算），
+ * 右边那个字是开头（`Cat` 里的 `Ca` 不算）。
+ *
+ * ## "词字"只认 `[A-Za-z0-9_]`，汉字不算 —— 这是**故意**跟浏览器一致
+ *
+ * 我第一版用 `\p{L}`（所有字母，含汉字）来判，结果**"整词"对中文几乎永远不命中**：
+ * `中文的文` 里搜 `文`，前后都是汉字、都被当成"词的延续"，于是 0 处。
+ *
+ * 而浏览器（以及 `RegExp` 的 `\b`）用的 `词字` 是 `\w`，也就是
+ * `[A-Za-z0-9_]` —— **汉字不在里面**，所以汉字之间处处是词的边，
+ * 搜 `文` 就是 2 处。
+ *
+ * 两者对拉丁字母的行为完全一样，差别只在非拉丁文字上。既然这个开关是
+ * 照着浏览器查找做的，就该跟它一样 —— 否则同一个正文，在浏览器里按"整词"
+ * 找得到、在本程序里找不到。
+ */
+function isWordBoundary(text: string, at: number, length: number): boolean {
+    const isWordChar = (ch: string | undefined): boolean =>
+        ch !== undefined && /[A-Za-z0-9_]/.test(ch);
+    const before = at > 0 ? text[at - 1] : undefined;
+    const after = text[at + length];
+    // 开头/结尾天然是词的边
+    return !isWordChar(before) && !isWordChar(after);
+}
+
+/**
  * 拆掉上一次查找留下的高亮。
  *
  * 只拆 `find-hit`：**作者自己的 `<mark>` 原样留着**（见文件抬头那段）。
@@ -100,7 +140,7 @@ export function clearFind(root: HTMLElement): void {
  * @param root 正文容器（`NoteContent` 里那个 `.note-body`）
  * @param query 要找的字；空串等于取消查找
  */
-export function findIn(root: HTMLElement, query: string): FindResult {
+export function findIn(root: HTMLElement, query: string, options: FindOptions = {}): FindResult {
     clearFind(root);
 
     const needle = query.trim();
@@ -108,8 +148,31 @@ export function findIn(root: HTMLElement, query: string): FindResult {
         return { total: 0 };
     }
 
-    // 大小写不敏感地找，与浏览器的查找一致
-    const wanted = needle.toLowerCase();
+    const { caseSensitive = false, wholeWord = false } = options;
+    // 一次性把该用哪种比较定下来：下面三处（筛文本节点、扫一遍、取长度）
+    // 用的必须是**同一套**，否则会出现"扫到了却切不出那么长"的错位
+    const wanted = caseSensitive ? needle : needle.toLowerCase();
+    const text_ = (text: string): string => (caseSensitive ? text : text.toLowerCase());
+
+    /** 这一处算不算命中 */
+    const isHit = (text: string, at: number): boolean => {
+        /*
+         * 逐字比较，**不要用 `.match()`**。
+         *
+         * `.match(string)` 里的参数被当成**正则**，于是查询词 `cat` 变成
+         * "含 c…a…t"，`hello` 变成"含任意 5 个字符" —— 命中数乱七八糟
+         * （实测查 `cat` 只中 2 处而不是 4 处）。更糟的是像 `文` 这种
+         * 查询，`/文/` 至少还能匹配，可 `*`、`.` 这类符号一旦被当正则，
+         * 就会变成"匹配空串"，于是**每一处都成命中**。
+         *
+         * 查找框里什么字符都可能有人敲，所以必须当**字面量**处理。
+         */
+        const slice = text.slice(at, at + needle.length);
+        if (text_(slice) !== wanted) {
+            return false;
+        }
+        return wholeWord ? isWordBoundary(text, at, needle.length) : true;
+    };
 
     // 收集文本节点时**先收集再改**：包 `mark` 会动 DOM，边走边包会漏掉或重复
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
@@ -119,7 +182,7 @@ export function findIn(root: HTMLElement, query: string): FindResult {
                 return NodeFilter.FILTER_REJECT;
             }
             const text = node.nodeValue ?? "";
-            return text.toLowerCase().includes(wanted)
+            return text_(text).includes(wanted)
                 ? NodeFilter.FILTER_ACCEPT
                 : NodeFilter.FILTER_REJECT;
         },
@@ -130,9 +193,14 @@ export function findIn(root: HTMLElement, query: string): FindResult {
         const text = node.nodeValue ?? "";
         let from = 0;
         for (;;) {
-            const at = text.toLowerCase().indexOf(wanted, from);
+            const at = text_(text).indexOf(wanted, from);
             if (at < 0) {
                 break;
+            }
+            // `indexOf` 找到的**不一定**合格（整词时尤其）：跳到下一处继续看
+            if (!isHit(text, at)) {
+                from = at + 1;
+                continue;
             }
             hits.push({ node: node as Text, index: at });
             // 往后挪一个字符：同一个节点里可能有连着的两处命中
