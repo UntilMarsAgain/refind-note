@@ -835,8 +835,8 @@ impl Database {
     ///
     /// 两条规矩：
     ///
-    /// 1. **只在正文里写了 `src=` 时才去取** —— 每次渲染都把模板页读一遍太亏，
-    ///    而 `src=` 必须原样写在正文里，漏不掉（认错的代价只是白读几页）；
+    /// 1. **只在正文里出现 `src=` 或 `::` 时才去取** —— 每次渲染都把模板页读一遍太亏，
+    ///    而这两种记号必须原样写在正文里，漏不掉（认错的代价只是白读几页）；
     /// 2. **绝不弹口令**（见 [`codec::without_prompting`]）—— 渲染是"顺手看一眼"，
     ///    不该因为某一页没解锁就把界面挂在一个口令框上。取不到就白纸黑字写清楚，
     ///    让作者自己决定去不去解锁（打开那一页一次，口令就进了这一趟的缓存）。
@@ -844,7 +844,9 @@ impl Database {
         use crate::markdown::TemplatePage;
 
         let mut pages = std::collections::HashMap::new();
-        if !markdown.contains("src=") {
+        // 两种用法都要把表备好：`src=`（把一页当片段嵌进来）与 `::名字`（用户模板）。
+        // 两个记号都必须原样出现在正文里，漏不掉；认错的代价只是白读几页。
+        if !markdown.contains("src=") && !markdown.contains("::") {
             return pages;
         }
 
@@ -897,13 +899,17 @@ impl Database {
             format!("《{title}》是加密的：打开它一次（解锁）之后，模板就能嵌进来了")
         };
 
-        match crate::storage::codec::without_prompting(|| self.read_note(title, None)) {
-            Ok(Reading::Ready { note }) => {
-                session::cache_page(title, rev, note.markdown.clone());
-                Ok(note.markdown)
+        // **只读字节，不渲染** —— 这一条最要紧：`read_note` 会顺手把 HTML 也渲染出来，
+        // 而渲染又要读模板页（就是这里）→ 自己套自己，栈直接爆掉（"打开就卡死"）。
+        // 嵌入要的是"那一页写了什么"，不是"它渲染成什么样"。
+        let read = crate::storage::codec::without_prompting(|| self.read_bytes(title, None));
+        match read {
+            Ok((bytes, _mime)) => {
+                let text = String::from_utf8(bytes)
+                    .map_err(|_| format!("《{title}》不是文本，嵌不进来"))?;
+                session::cache_page(title, rev, text.clone());
+                Ok(text)
             }
-            // 上了锁：说清是"没解锁"，而不是含糊的"取不到"
-            Ok(Reading::Locked { .. }) => Err(locked()),
             // 加密的页面读失败，多半就是没解锁（gpg 那边拿不到口令）
             Err(_) if encrypted => Err(locked()),
             Err(error) => Err(format!("《{title}》读不出来：{error}")),
@@ -1215,6 +1221,59 @@ mod tests {
             !locked_out.contains("不存在"),
             "它明明在，别说成不存在：{locked_out}"
         );
+
+        cleanup(&database);
+    }
+
+    /// **用户模板按名字用**：`::卡片` 找的就是 `Template:卡片`（不是"未知模板"）。
+    ///
+    /// 这正是用户报的那条："模板嵌入无法搜索到模板命名空间的用户定义的模板" ——
+    /// 名字只在内置表里找，于是自定义的模板一律被报成"未知模板"。
+    #[test]
+    fn a_user_template_is_invoked_by_its_name() {
+        let database = scratch("template-by-name");
+
+        database.create("Template:名片").unwrap();
+        database
+            .commit(
+                "Template:名片",
+                "**{{谁}}** 的名片\n\n{{body}}",
+                None,
+            )
+            .unwrap();
+
+        database.create("某页").unwrap();
+        let source = "::名片 谁=\"甲\"\n  这一行是正文\n";
+        let html = database.render_html(source, "某页").unwrap();
+        assert!(!html.contains("template--unknown"), "不该报未知模板：{html}");
+        assert!(html.contains("<strong>甲</strong>"), "参数要填进去：{html}");
+        assert!(html.contains("这一行是正文"), "块内容要填进 {{{{body}}}}：{html}");
+
+        // 内置的优先：名字撞上时按内置的算
+        database.create("Template:quote").unwrap();
+        database.commit("Template:quote", "用户写的 quote", None).unwrap();
+        let quote = database.render_html("::quote\n  一句引文\n", "某页").unwrap();
+        assert!(quote.contains("quote__origin") || quote.contains("class=\"quote\""), "{quote}");
+        assert!(!quote.contains("用户写的 quote"), "内置的该赢：{quote}");
+
+        // 真没有这一页：还是报未知模板（那才是"未知"）
+        let unknown = database.render_html("::没有这张\n", "某页").unwrap();
+        assert!(unknown.contains("template--unknown"), "{unknown}");
+
+        cleanup(&database);
+    }
+
+    /// 模板自己嵌自己：**不能转圈**（展开到上限就停下来说一句）
+    #[test]
+    fn a_template_that_embeds_itself_stops() {
+        let database = scratch("template-loop");
+
+        database.create("Template:圈").unwrap();
+        database.commit("Template:圈", "::圈\n", None).unwrap();
+        database.create("某页").unwrap();
+
+        let html = database.render_html("::圈\n", "某页").unwrap();
+        assert!(html.contains("嵌套"), "要说清是套得太深：{html}");
 
         cleanup(&database);
     }

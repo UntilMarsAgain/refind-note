@@ -62,6 +62,9 @@ thread_local! {
     /// 参数，所以用线程局部变量承载：解析本身是同步的，规则必然跑在同一个线程上。
     static CURRENT_RESOLVER: RefCell<Option<Resolver>> = const { RefCell::new(None) };
 
+    /// 现在展开到第几层（用户模板可以互相嵌入，得防着转圈）
+    static TEMPLATE_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+
     /// 当前渲染拿得到的**模板页正文**（`Template:` 命名空间里那几页）：名字 → 正文。
     ///
     /// 与解析器同一个理由：`Template::render` 只拿得到节点，够不着仓库 ——
@@ -94,6 +97,22 @@ pub fn template_page(name: &str) -> Option<TemplatePage> {
             .as_ref()
             .and_then(|pages| pages.get(&key).cloned())
     })
+}
+
+/// 现在展开到第几层（见 [`deeper`]）
+pub fn template_depth() -> usize {
+    TEMPLATE_DEPTH.with(|depth| depth.get())
+}
+
+/// 深一层地做一件事（用完还原）。
+///
+/// 用户模板可以嵌用户模板 —— 一个转圈的模板（甲嵌乙、乙嵌甲）会一直展开下去，
+/// 所以每展开一层记一笔，超过上限就不展开了（见 `template::expand_user_template`）。
+pub fn deeper<T>(run: impl FnOnce() -> T) -> T {
+    let previous = TEMPLATE_DEPTH.with(|depth| depth.replace(template_depth() + 1));
+    let out = run();
+    TEMPLATE_DEPTH.with(|depth| depth.set(previous));
+    out
 }
 
 /// 页名的归一写法（`Template:甲` 与 `甲` 是同一个键；统一小写）

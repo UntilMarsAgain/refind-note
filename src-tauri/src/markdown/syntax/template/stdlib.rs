@@ -53,6 +53,11 @@ pub static TEMPLATES: &[(&str, TemplateRenderer)] = &[
 /// 哪些模板分节 —— 这张表因此和 `TEMPLATES` 放在一起：两张表加起来才是"有哪些模板"。
 pub static SECTIONED: &[&str] = &["tabs", "theme"];
 
+/// 这个名字是内置模板吗（不是的话，扫描器会去 `Template:` 命名空间找同名的页）
+pub fn is_builtin(name: &str) -> bool {
+    TEMPLATES.iter().any(|(builtin, _)| *builtin == name)
+}
+
 /// 这个模板是不是分节的（扫描器用）
 pub fn takes_sections(name: &str) -> bool {
     SECTIONED.contains(&name)
