@@ -18,7 +18,7 @@
 
 <script setup lang="ts">
 import { CIPHER_NOTES } from "../../ipc/note.ts";
-import { useSyncSettings } from "../../composables/sync-settings.ts";
+import { useSyncSettings } from "../../composables/useSyncSettings.ts";
 import { syncBusy } from "../../core/sync.ts";
 
 /**
@@ -29,7 +29,7 @@ import { syncBusy } from "../../core/sync.ts";
  * 它连自己的一整块说明文字都自带（密钥为什么不显示、为什么要导出、锁是怎么排队的），
  * 放在一起时那些话会被别的设置挤得很远。
  *
- * 状态与动作都在 `composables/sync-settings.ts`（那边答的是"配些什么"，`core/sync.ts`
+ * 状态与动作都在 `composables/useSyncSettings.ts`（那边答的是"配些什么"，`core/sync.ts`
  * 答的是"什么时候同步"）；这里只管摆那一大块表单与它的说明。
  *
  * 没有 props 以外的依赖，也不往上抛事件：这一节改的是设置，不是页面。
