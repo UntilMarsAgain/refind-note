@@ -53,15 +53,18 @@ markup5ever_rcdom = "0.39.0"
 # 封装格式的 gpg 层：OpenPGP 自己实现是灾难，交给系统配置（走 gpgme）。
 # 它要系统里有 libgpgme —— **桌面才有这个库**；手机上装不了，所以移动端根本不把
 # 它编进来（代码那边有同名的桩，见 `storage/codec.rs` 里"系统 gpg"那一段）。
+#
+# 文件选择框也写在这一段里，因为它同样**分平台**：见下面那条的注释。
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 gpgme = "0.11"
+# 桌面上要 `gtk3` 后端（走 rfd 的 GTK 实现）。
+tauri-plugin-dialog = { version = "2.8.1", features = ["gtk3"] }
 
 # ---- 渲染 ----
 
 # 笔记正文的 markdown → HTML。默认 features 里含 syntect：它把代码高亮配色以内联
 # style 写死，跟随不了主题，所以关掉；代码分词交给前端。
 markdown-it = { version = "0.6", default-features = false, features = ["linkify"] }
-tauri-plugin-dialog = "2.8.1"
 include_dir = "0.7.4"
 tauri-plugin-single-instance = "2.5.2"
 tauri-plugin-deep-link = "2.6.1"
@@ -70,6 +73,26 @@ aes-gcm = "0.11.1"
 sm4 = "0.6.0"
 ureq = "3.4.2"
 hmac = "0.13.0"
+
+# ---- 文件选择框：分平台声明 ----
+#
+# 不能只用一条普通依赖，也不能简单地全局关掉默认 feature：
+#
+# 这个插件的默认 feature 是 `gtk3`（走 rfd 的 GTK 后端），而 `rfd` 只在它自己的
+# `[target.'cfg(...linux...)]'` 那一条依赖里 —— **Android 上 rfd 压根不存在**。
+# 于是构建脚本按编译目标生成权限清单时，gtk3 那套命令一个都生成不出来，
+# `capabilities/default.json` 里的 `dialog:default` 报
+# `Permission dialog:default not found`，构建在 build.rs 阶段就断掉。
+#
+# 而全局 `default-features = false` 也不行：那样 `rfd` 在桌面上失去后端，
+# 它自己的 build.rs 会 panic（`You need to choose at least one backend`）。
+# 两条路都试过，所以最后是**按平台分开声明**：
+# 桌面要 gtk3（见上面那段），移动端不带任何 feature —— 走插件自带的
+# `#[cfg(mobile)] mod mobile` 分支（见它的 `src/lib.rs`），
+# 内部用系统选择器，根本不需要 rfd。
+
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-dialog = { version = "2.8.1", default-features = false }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
