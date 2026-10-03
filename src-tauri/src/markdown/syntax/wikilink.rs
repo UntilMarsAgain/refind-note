@@ -71,6 +71,24 @@ pub fn add(md: &mut MarkdownIt) {
     md.inline.add_rule::<WikiLinkScanner>();
 }
 
+/// 造一个 wikilink 节点。
+///
+/// 扫描器与**直接写链接**的地方（模板读不出来时那个提示框，见
+/// [`crate::markdown::syntax::template::expand`]）共用这一份：红链 / 蓝链的判定、
+/// `data-*` 的写法都在这里定死，散开写两份迟早会对不上。
+pub fn link_node(doc: &str, text: &str) -> Node {
+    // 与扫描器同口径：有当次渲染注入的解析器才判得出目标在不在
+    let resolved = current_resolver().and_then(|resolver| resolver.resolve(doc));
+    let mut node = Node::new(WikiLink {
+        doc: doc.to_owned(),
+        resolved,
+    });
+    node.children.push(Node::new(Text {
+        content: text.to_owned(),
+    }));
+    node
+}
+
 #[doc(hidden)]
 pub struct WikiLinkScanner;
 
@@ -93,20 +111,9 @@ impl InlineRule for WikiLinkScanner {
             return None;
         }
 
-        // 红链 / 蓝链在这里定：目标是否存在于仓库
-        let resolved = current_resolver().and_then(|resolver| resolver.resolve(doc));
-
         // 不要自己推进 state.pos：tokenize 会用这里返回的长度去推进
         let consumed = 2 + end + 2;
-        let mut node = Node::new(WikiLink {
-            doc: doc.to_owned(),
-            resolved,
-        });
-        node.children.push(Node::new(Text {
-            content: text.to_owned(),
-        }));
-
-        Some((node, consumed))
+        Some((link_node(doc, text), consumed))
     }
 }
 

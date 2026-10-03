@@ -358,6 +358,12 @@
   color: var(--text);
 }
 
+/* 去哪儿改：提示框最后那行链接。上面已经说过为什么了，所以这里只管别喧宾夺主 */
+.note-body .template__where {
+  margin: 0;
+  font-size: 0.94em;
+}
+
 
 /* ---- 数学公式 ----
    后端只认出公式并把 TeX 原文放在 data-tex 上，排版由 KaTeX 在前端做

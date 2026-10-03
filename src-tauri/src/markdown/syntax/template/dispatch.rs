@@ -45,9 +45,12 @@ pub fn render(template: &Template, node: &Node, fmt: &mut dyn Renderer) {
 /// 这正是最难查的一类。
 ///
 /// 与 [`render_problem`] 分开是因为**原因不同**：一个是"名字认识、用法不对"，
-/// 一个是"名字没问题，但它指的那一页读不出来"。所以这里**不回显模板名与参数** ——
+/// 一个是"名字没问题，但它指的那一页读不出来"。所以这里**不回显这次的参数** ——
 /// 出问题的不是这次用法，回显出来只会把作者引到错的地方。
-pub(super) fn render_problem_page(template: &Template, _node: &Node, fmt: &mut dyn Renderer) {
+///
+/// 但**模板页本身的链接要给**（`expand::problem_node` 挂在 children 上的那个）：
+/// 原因就是出在那一页，链接正是唯一下一步。
+pub(super) fn render_problem_page(template: &Template, node: &Node, fmt: &mut dyn Renderer) {
     fmt.cr();
     fmt.open(
         "div",
@@ -60,9 +63,14 @@ pub(super) fn render_problem_page(template: &Template, _node: &Node, fmt: &mut d
     fmt.close("span");
     fmt.close("p");
     fmt.cr();
-    // `expand::text_node` 把那句话整个放进 body 了，这里原样写出来
+    // `expand::problem_node` 把原因放在 body 里，这里原样写出来
     fmt.open("p", &[("class", "template__why".to_string())]);
     fmt.text(&template.body);
+    fmt.close("p");
+    fmt.cr();
+    // **下一步**：指向那个模板页的链接（见 `expand::problem_node` 为什么必须有它）
+    fmt.open("p", &[("class", "template__where".to_string())]);
+    fmt.contents(&node.children);
     fmt.close("p");
     fmt.cr();
     fmt.close("div");

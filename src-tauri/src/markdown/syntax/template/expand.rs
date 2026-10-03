@@ -11,6 +11,8 @@
 
 use super::fill;
 use super::parse::Template;
+use crate::markdown::syntax::wikilink;
+use crate::vault::namespace::TEMPLATE_NAME;
 use markdown_it::parser::block::BlockState;
 use markdown_it::{Node, NodeValue, Renderer};
 
@@ -31,16 +33,17 @@ pub(super) fn expand_user_template(
         Some(crate::markdown::TemplatePage::Ready(text)) => text,
         // 有这一页但读不出来（没解锁、坏了）：**说清原因**，别报成"未知模板"
         Some(crate::markdown::TemplatePage::Unreadable(why)) => {
-            return Some(text_node(&format!(":: {name} —— {why}")));
+            return Some(problem_node(name, &why));
         }
         None => return None,
     };
 
     // 转圈的保护：甲嵌乙、乙嵌甲会一直展开下去
     if crate::markdown::template_depth() >= MAX_TEMPLATE_DEPTH {
-        return Some(text_node(&format!(
-            ":: {name} —— 模板嵌套超过 {MAX_TEMPLATE_DEPTH} 层（是不是自己嵌自己？）"
-        )));
+        return Some(problem_node(
+            name,
+            &format!("模板嵌套超过 {MAX_TEMPLATE_DEPTH} 层（是不是自己嵌自己？）"),
+        ));
     }
 
     let template = Template {
@@ -72,16 +75,51 @@ impl NodeValue for ExpandedTemplate {
     }
 }
 
-/// 一段纯文字（用来把"读不出来""套得太深"这类话写在页面上）
-fn text_node(text: &str) -> Node {
+/// `problem` 节点：说清**出了什么事**，并且**给得出下一步**。
+///
+/// 只写一句"这一页需要口令"是把人堵在原地 —— 能做的下一步只有一个：去把那个模板页
+/// 打开。而**打开的地方正是那个模板页本身**，所以这里必须挂一个指向它的链接：
+/// 看到提示就能点过去改，而不是自己回想"刚才那个 `::卡片` 是哪一页"。
+fn problem_node(name: &str, why: &str) -> Node {
+    let page = format!("{TEMPLATE_NAME}:{name}");
     let mut node = Node::new(Template {
         name: "problem".to_string(),
         params: Vec::new(),
-        body: text.to_string(),
+        body: why.to_string(),
     });
-    node.children
-        .push(Node::new(markdown_it::parser::inline::Text {
-            content: text.to_string(),
-        }));
+    node.children.push(wikilink::link_node(&page, &page));
     node
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::markdown::{TemplatePage, TemplatePages, render_with_pages};
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    /// 模板页表里只有一页，且是**读不出来**的那种
+    fn unreadable(name: &str) -> TemplatePages {
+        let mut pages = HashMap::new();
+        pages.insert(name.to_string(), TemplatePage::Unreadable("需要口令".into()));
+        Arc::new(pages)
+    }
+
+    #[test]
+    fn an_unreadable_template_page_points_at_itself() {
+        let html = render_with_pages("::卡片\n", None, Some(unreadable("卡片")));
+        // 原因照旧要说清
+        assert!(html.contains("需要口令"), "{html}");
+        // **而且必须给得出下一步**：能做的下一步就是去把那一页打开
+        assert!(html.contains(r#"class="wikilink""#), "{html}");
+        assert!(html.contains(r#"data-doc="template:卡片""#), "{html}");
+        // 不能是外链：内部链接不带 href，靠前端接住点击
+        assert!(!html.contains(r#"href="#), "{html}");
+    }
+
+    #[test]
+    fn nesting_over_the_limit_points_at_the_page_too() {
+        // 套得太深也是同一个"改那一页就能解决"的问题，所以给一样的出口
+        let html = render_with_pages("::甲\n", None, Some(unreadable("甲")));
+        assert!(html.contains(r#"data-doc="template:甲""#), "{html}");
+    }
 }
