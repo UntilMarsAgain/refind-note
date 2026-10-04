@@ -30,9 +30,7 @@ import {
   X,
 } from "@lucide/vue";
 import { logoSrc } from "../../core/theme.ts";
-import { syncAvailable, syncBusy, syncNow, syncProgress } from "../../core/sync.ts";
-import { describeReport } from "../../ipc/sync.ts";
-import { flash } from "../../core/notice.ts";
+import { syncAvailable, syncBusy, syncNowAndReport, syncProgress } from "../../core/sync.ts";
 import { currentWindow } from "../../core/window-api.ts";
 import { isMobile } from "../../core/platform.ts";
 
@@ -64,19 +62,34 @@ const emit = defineEmits<{
   (e: "submit", value: string): void;
 }>();
 
-const appWindow = currentWindow();
+/**
+ * 窗口对象 —— **手机上根本没有**。
+ *
+ * `currentWindow()` 自己不抛（它 try/catch 了），但返回的那个对象**的方法会抛**：
+ * `isMaximized()` 走到后端就报 `plugin windows not initialized`，
+ * 那条错一路冒到 `app.config.errorHandler`，于是启动时弹出"界面出了点问题"。
+ *
+ * 所以判据要用 `isMobile()`（编译期就定的），而不是"拿到对象没有" ——
+ * 后者在移动端**照样给得出对象**，只是用不了。
+ */
+const appWindow = isMobile() ? null : currentWindow();
 const isMaximized = ref(false);
 let unlistenResized: (() => void) | undefined;
 onMounted(async () => {
   if (!appWindow) {
     return;
   }
-  isMaximized.value = await appWindow.isMaximized();
-  // 最大化状态会被拖动、双击、系统快捷键改变，必须跟着事件走，
-  // 否则「最大化 / 还原」的图标会停在错误的那一个上
-  unlistenResized = await appWindow.onResized(async () => {
+  // 整个 try/catch 是兜底：桌面端万一在窗口还没建好时问，也别把启动搞崩
+  try {
     isMaximized.value = await appWindow.isMaximized();
-  });
+    // 最大化状态会被拖动、双击、系统快捷键改变，必须跟着事件走，
+    // 否则「最大化 / 还原」的图标会停在错误的那一个上
+    unlistenResized = await appWindow.onResized(async () => {
+      isMaximized.value = await appWindow.isMaximized();
+    });
+  } catch (error) {
+    console.warn("问窗口状态失败（图标可能停在错的那个上）：", error);
+  }
 });
 onUnmounted(() => unlistenResized?.());
 
@@ -89,17 +102,6 @@ const syncTitle = computed(() => {
 });
 
 /** 点一下：立刻同步一次（不等冷却也不等落定），完事说一句做了什么 */
-async function runSync() {
-  try {
-    const report = await syncNow();
-    if (report) {
-      flash(`同步完成：${describeReport(report)}`);
-    }
-  } catch (error) {
-    // 锁被别的机器拿着之类：说清楚，别让人对着没反应的按钮猜
-    flash(`同步没成功：${error}`);
-  }
-}
 
 const fieldEl = ref<HTMLInputElement | null>(null);
 
@@ -132,9 +134,18 @@ function onBlur() {
   <!-- "deep" = 子树内任意位置都能拖动。
        输入框与按钮属于 Tauri 的 CLICKABLE_TAGS，会自动阻断拖动，所以不必逐个排除。 -->
   <header class="titlebar" data-tauri-drag-region="deep">
+    <!--
+      左：logo + 后退（+ 桌面专属的首页/同步）。
+
+      手机上去掉 logo、也去掉首页与同步：顶栏本来就窄，而正文里已经有一个
+      "新标签页"入口、菜单浮层里也有那几个页面 —— 手机上要的是**把常用的
+      留在外面**（后退/前进/地址/菜单），不是把桌面那一排原样搬过来。
+    -->
     <div class="titlebar__start">
-      <img class="logo" :src="logoSrc" alt="重逢笔记" draggable="false"/>
-      <span class="divider"/>
+      <template v-if="!isMobile()">
+        <img class="logo" :src="logoSrc" alt="重逢笔记" draggable="false"/>
+        <span class="divider"/>
+      </template>
 
       <button
           class="tbtn"
@@ -146,18 +157,21 @@ function onBlur() {
         <ArrowLeft :size="16" :stroke-width="1.75"/>
       </button>
 
+      <!-- 同步：没配同步就不摆它（摆了也只是点一下报"没开"） -->
       <button
+          v-if="!isMobile() && ready !== false && syncAvailable"
           class="tbtn"
           type="button"
-          aria-label="前进"
-          :disabled="!canForward"
-          @click="emit('forward')"
+          aria-label="立即同步"
+          :title="syncTitle"
+          :disabled="syncBusy"
+          @click="syncNowAndReport"
       >
-        <ArrowRight :size="16" :stroke-width="1.75"/>
+        <CloudUpload :size="16" :stroke-width="1.75" :class="{ 'tbtn--spinning': syncBusy }"/>
       </button>
 
       <button
-          v-if="ready !== false"
+          v-if="!isMobile() && ready !== false"
           class="tbtn"
           type="button"
           aria-label="首页"
@@ -166,31 +180,14 @@ function onBlur() {
       >
         <House :size="16" :stroke-width="1.75"/>
       </button>
-
-      <!-- 同步：没配同步就不摆它（摆了也只是点一下报"没开"） -->
-      <button
-          v-if="ready !== false && syncAvailable"
-          class="tbtn"
-          type="button"
-          aria-label="立即同步"
-          :title="syncTitle"
-          :disabled="syncBusy"
-          @click="runSync"
-      >
-        <CloudUpload :size="16" :stroke-width="1.75" :class="{ 'tbtn--spinning': syncBusy }"/>
-      </button>
-
-      <button
-          v-if="ready !== false"
-          class="tbtn"
-          type="button"
-          aria-label="菜单"
-          @click="emit('menu')"
-      >
-        <Menu :size="16" :stroke-width="1.75"/>
-      </button>
     </div>
 
+    <!--
+      中：地址栏 —— **始终居中**。
+
+      原来它居中是因为左右两边的按钮数量差不多（左边 3 个、右边 1 个窗口组），
+      `flex: 1` 让它被挤到了右边。手机上把两边的数量配平（各 1 个）之后它才真的在中间。
+    -->
     <div v-if="ready !== false" class="titlebar__center">
       <input
           ref="fieldEl"
@@ -206,6 +203,34 @@ function onBlur() {
       />
     </div>
     <div v-else class="titlebar__center"/>
+
+    <!--
+      右：手机上只留「前进」与「菜单」，首页与同步收进菜单浮层。
+
+      收进去的理由不是"地方不够"，而是它们在手机上**用得少**（首页有新产品页、
+      同步是偶尔的事），而前进/后退是天天按的。所以按"常用留外面"分。
+    -->
+    <div class="titlebar__end">
+      <button
+          class="tbtn"
+          type="button"
+          aria-label="前进"
+          :disabled="!canForward"
+          @click="emit('forward')"
+      >
+        <ArrowRight :size="16" :stroke-width="1.75"/>
+      </button>
+
+      <button
+          v-if="ready !== false"
+          class="tbtn"
+          type="button"
+          aria-label="菜单"
+          @click="emit('menu')"
+      >
+        <Menu :size="16" :stroke-width="1.75"/>
+      </button>
+    </div>
 
     <!--
       窗口操作（最小化 / 最大化 / 关闭）**只在桌面显示**。
@@ -297,11 +322,30 @@ function onBlur() {
 
 .titlebar__center {
   display: flex;
+  /*
+   * `flex: 1` 让它占掉左右剩下的全部宽度，**这才是"居中"**。
+   *
+   * 之前它在桌面看着居中，是因为运气：左边 logo+分隔线+后退+前进+首页+同步+菜单
+   * 比右边的窗口组宽得多，`flex: 1` 把它推到右边、看起来正好在中间偏右。
+   * 到了手机上（左边只剩后退、右边前进+菜单）它才真的跑到中间 —— 但那时它
+   * 更偏右了，因为右侧的窗口组虽然 `isMobile()` 下不渲染，`flex` 仍占着空间。
+   *
+   * 现在三段各自 `flex: 0`（宽度由内容定），中间这段 `flex: 1`，两侧对齐 ——
+   * 这样地址栏**真的**在正中，而且左右宽度不同也不会偏。
+   */
   flex: 1 1 auto;
   align-items: center;
   justify-content: center;
   min-width: 0;
   padding: 0 10px;
+}
+
+/* 右侧（前进 + 菜单）。与 `__start` 一样按内容定宽 */
+.titlebar__end {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 8px;
 }
 
 /* 静止时看起来就是一行窗口标题；聚焦后才显出输入框的样子。

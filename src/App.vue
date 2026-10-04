@@ -37,6 +37,8 @@ import { dismissNotice, flash, notice } from "./core/notice.ts";
 import { syncBeforeClose, syncClosing, syncProgress } from "./core/sync.ts";
 import { currentWindow } from "./core/window-api.ts";
 import { setOpenInNewTab } from "./dom/note-html.ts";
+import { syncNowAndReport } from "./core/sync.ts";
+import { isMobile } from "./core/platform.ts";
 import { openEditorSearch } from "./dom/editor-setup.ts";
 import {
   cycleTheme,
@@ -423,6 +425,11 @@ onBeforeUnmount(() => {
  * 遮罩上那颗"不等了"是**直接销毁窗口**（正在跑的那一趟只能由它被中断）。
  */
 async function interceptClose() {
+  // 手机上没窗口可拦：`onCloseRequested` 会抛 `plugin windows not initialized`。
+  // 判据是 `isMobile()` 而不是"拿到对象没有" —— 后者在移动端照样给得出对象。
+  if (isMobile()) {
+    return;
+  }
   const appWindow = currentWindow();
   if (!appWindow) {
     return;
@@ -436,7 +443,8 @@ async function interceptClose() {
 </script>
 
 <template>
-  <WindowResizeHandles/>
+  <!-- 拖边框调窗口大小：手机上整个概念不存在（窗口由系统管），连热区都不该画出来 -->
+    <WindowResizeHandles v-if="!isMobile()"/>
 
   <div class="app">
     <WindowTitleBar
@@ -536,6 +544,8 @@ async function interceptClose() {
       @open="openFromMenu"
       @open-new-tab="openTabWith"
       @close="menuOpen = false"
+      @home="openHome"
+      @sync="syncNowAndReport"
   />
 
   <!-- 解析失败：整页覆盖（点空白处或点按钮关掉） -->
@@ -652,12 +662,12 @@ async function interceptClose() {
   position: fixed;
   right: 16px;
   /*
-   * 底部要让开手势条（`env(safe-area-inset-bottom)`）。
+   * 底部让开系统栏（`env(safe-area-inset-bottom)`）。
    *
-   * 28px 那个固定值在桌面上刚好避开状态栏底边，但在手机上**不够** —— 手机底部
-   * 有手势条 / 三键导航，那一块是系统画的，这一列圆按钮正好压在它上面，点不到。
-   * 所以取 `max(28px, 安全区)`：桌面行为不变，手机上自动让开。
-   * 桌面浏览器上 `env()` 是 0，于是 `max()` 就是原来的 28px。
+   * 桌面浏览器上 `env()` 是 0，于是 `max()` 落到 28px —— 那是原来那个值，桌面不变。
+   * 手机上系统栏已被 `MainActivity` 藏进沉浸式（见那里的说明），`env()` 通常也是 0，
+   * 但**不保证**（某些 ROM / 某些时机仍会报真实值），所以两条路都要留着：
+   * 藏起来时按 28px 走，没藏住时按安全区让开。
    */
   bottom: max(28px, calc(var(--safe-bottom) + 8px));
   right: max(16px, calc(var(--safe-right) + 8px));

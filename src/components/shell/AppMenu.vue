@@ -18,7 +18,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { BookOpen } from "@lucide/vue";
+import { BookOpen, CloudUpload, House } from "@lucide/vue";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openMenu } from "../../dom/context-menu.ts";
 import type { HelpPage } from "../../ipc/help.ts";
@@ -28,7 +28,9 @@ import {
   shortcutKeysOf,
   SPECIAL_GROUPS,
 } from "../../core/special.ts";
-import { logoSrc } from "../../core/theme.ts";
+import { isMobile } from "../../core/platform.ts";
+  import { syncBusy } from "../../core/sync.ts";
+  import { logoSrc } from "../../core/theme.ts";
 
 /**
  * 顶栏菜单：列出所有特殊页面。
@@ -61,6 +63,9 @@ const emit = defineEmits<{
   /** Ctrl/Cmd 点击，或者右键菜单里选「在新标签页打开」 */
   (e: "open-new-tab", address: string): void;
   (e: "close"): void;
+  /** 手机上顶栏放不下的那两项（首页、立即同步）从这里出去 */
+  (e: "home"): void;
+  (e: "sync"): void;
 }>();
 
 /** 点条目：Ctrl/Cmd 点击＝在新标签页打开（与正文里的链接一个规矩） */
@@ -163,6 +168,33 @@ const groups = computed(() =>
         </header>
 
         <div class="menu__columns">
+          <!--
+            手机上顶栏只留地址栏与前后退，**首页**与**立即同步**收在这里
+            （桌面端它们仍在顶栏，这一组只在 `isMobile()` 时出现）。
+
+            放在帮助之前：它是"现在就能做的动作"，而帮助是"关于这个程序的说明"。
+          -->
+          <nav v-if="isMobile()" class="menu__group">
+            <h2 class="menu__group-title">前往</h2>
+            <button
+              class="menu__item"
+              type="button"
+              @click="emit('close'); emit('home')"
+            >
+              <House class="menu__icon" :size="18" :stroke-width="1.6" />
+              <span class="menu__label">首页（新标签页）</span>
+            </button>
+            <button
+              class="menu__item"
+              type="button"
+              :disabled="syncBusy"
+              @click="emit('close'); emit('sync')"
+            >
+              <CloudUpload class="menu__icon" :size="18" :stroke-width="1.6" />
+              <span class="menu__label">{{ syncBusy ? "正在同步…" : "立即同步" }}</span>
+            </button>
+          </nav>
+
           <!-- 帮助摆在第一组：它是"怎么用这个程序"，比任何一个系统页面都靠前 -->
           <nav v-if="help.length > 0" class="menu__group">
             <h2 class="menu__group-title">帮助</h2>

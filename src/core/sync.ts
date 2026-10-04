@@ -37,7 +37,7 @@
 import { readonly, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { SyncProgress, SyncReport } from "../ipc/sync.ts";
+import { describeReport, type SyncProgress, type SyncReport } from "../ipc/sync.ts";
 import { flash } from "./notice.ts";
 import { setStartupNote } from "./startup.ts";
 
@@ -266,5 +266,26 @@ export async function syncBeforeClose(): Promise<void> {
         console.warn("关窗前同步没成功：", error);
     } finally {
         closing.value = false;
+    }
+}
+
+/**
+ * 手动同步一趟，并把结果**说给人听**。
+ *
+ * 抽出来是因为有两处会触发它：顶栏那颗「立即同步」按钮（桌面）与
+ * 菜单浮层里的同一项（手机，顶栏放不下时收在那里）—— 同一件事写两遍，
+ * 改一处漏一处是很典型的"手机上点了没反应"。
+ *
+ * 所以这里只认 `syncNow`，成不成都给出提示：成功说清同步了什么，
+ * 失败说清为什么（锁被别的机器拿着之类），**不给"点了没反应"留位置**。
+ */
+export async function syncNowAndReport(): Promise<void> {
+    try {
+        const report = await syncNow();
+        if (report) {
+            flash(`同步完成：${describeReport(report)}`);
+        }
+    } catch (error) {
+        flash(`同步没成功：${error}`);
     }
 }

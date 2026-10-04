@@ -3,7 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      `viewport-fit=cover` 是**必须的**：少了它，WebView 不把系统栏占掉的那块
+      当成"安全区"，CSS 里的 `env(safe-area-inset-*)` 于是恒为 0 ——
+      标题栏会被状态栏压住、悬浮工具会被导航栏压住。
+
+      实测（Samsung S25 Ultra / Android 15 / WebView 150）：
+      带上它之后 `env()` 给 top=32px、bottom=48px；不带就是 0。
+
+      桌面浏览器不认这个参数，会直接忽略，所以桌面行为不变。
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>重逢笔记</title>
   </head>
 
