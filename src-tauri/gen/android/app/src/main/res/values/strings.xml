@@ -1,4 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  应用名 —— **中文下显示「重逢笔记」，英文下显示「Refind」**。
+
+  写法是 Android 的标准做法：`<string>` 本身是**默认**（也就是没有更好匹配时的兜底），
+  带 `values-en/strings.xml` 的是英文。系统按当前语言挑，挑不到就用默认那份。
+
+  为什么默认给中文而不是英文：这个程序是给中文读者写的，
+  `tauri.conf.json` 的 `productName` 也是中文优先的语境；而英文读者那边
+  会拿到 `Refind`（不是 `refind-note` —— 那个是仓库/包名，不是给人看的名字）。
+
+  ⚠️ `main_activity_title` 要与 `app_name` 一致：任务管理器里显示的是后者，
+     启动器里是前者；两个不一样的话会出现"桌面上叫 A、最近任务里叫 B"。
+-->
 <resources>
-    <string name="app_name">"refind-note"</string>
-    <string name="main_activity_title">"refind-note"</string>
+    <string name="app_name">重逢笔记</string>
+    <string name="main_activity_title">重逢笔记</string>
 </resources>

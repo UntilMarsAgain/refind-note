@@ -14,6 +14,16 @@
 # makepkg 从它构建。要发到 AUR 的话，把 `source` 换成发布用的 tarball 地址、
 # `sha256sums` 钉上真实哈希即可。
 
+# ⚠️ `pkgname` 与下面那些安装路径里的 `refind-note` 必须与
+#    `tauri.conf.json` 的 `productName` 一致，**不要**为了"好看"改成"重逢笔记"。
+#
+#    `productName` 派生的是**安装标识**：Linux 的 `.desktop` 文件名、安装包文件名、
+#    桌面图标名都由它决定。改成人读的名字会让 `tauri build` 生成
+#    `重逢笔记.desktop`，而这个文件里装的是 `refind-note.desktop` —— 对不上，
+#    结果是**装完之后桌面找不到图标、也没有启动器入口**。
+#
+#    给用户看的名字（中文「重逢笔记」/ 英文「Refind」）在别处：
+#    Android 的 `res/values*/strings.xml`、应用内标题栏与菜单的 `APP_NAME`。
 pkgname=refind-note
 pkgver=0.1.0
 pkgrel=1

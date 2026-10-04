@@ -7,4 +7,16 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!--
+      启动器图标（自适应图标）的**背景色**，`mipmap-anydpi-v26/ic_launcher.xml` 引用它。
+
+      值与图标底色一致（`app-icon.svg` 里那个深色 #201c1c）：自适应图标的前景会被
+      按系统形状裁切（圆形、方形…），底色露出来，所以它得与图标本身的底**同一个颜色**，
+      否则边缘会出现一圈对不上的边。
+
+      ⚠️ 别删这一行：`ic_launcher.xml` 引用了它，缺了会在打包时报
+      `resource color/ic_launcher_background not found`。
+    -->
+    <color name="ic_launcher_background">#201c1c</color>
 </resources>
