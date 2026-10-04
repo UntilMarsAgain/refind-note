@@ -67,8 +67,9 @@ impl Kind {
 }
 
 /// 一份东西现在的锁状态
+/// 字段名保持 snake_case —— 与 `ipc/files.ts` 的 `FileInfo` 同一套约定
+/// （Rust 那侧没有全局的 serde rename，所以两边都得照着写）
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct LockState {
     pub kind: Kind,
     /// 页内解锁框拿它去重新问（`unlock` 与 `read` 都按标题走）
@@ -211,23 +212,39 @@ mod tests {
         assert_eq!(Kind::parse(""), None);
     }
 
-    /// 序列化后的字段名要跟前端 `ipc/lock.ts` 里的一致 —— 改一边就要改另一边
+    /// 序列化后的字段名要跟前端 `ipc/lock.ts` 里的一致 —— 改一边就要改另一边。
+    ///
+    /// 这一条钉的是 **snake_case**：仓库里别的地方（`FileInfo`）都是 snake_case，
+    /// Rust 那侧又没有全局 serde rename，所以谁在这边改成 camelCase，
+    /// 前端就会静默收到 `undefined` —— 而 `undefined` 是假值，于是
+    /// "不需要口令"会被当成真，框上不会出现输入框。这个 bug 静默且难查。
     #[test]
     fn the_state_serializes_to_the_names_the_frontend_expects() {
-        let state = LockState::missing(Kind::File, "File:桥.png");
-        let json = serde_json::to_string(&state).unwrap();
+        let json = serde_json::to_string(&LockState::missing(Kind::File, "File:桥.png")).unwrap();
         for field in [
             "kind",
             "title",
             "exists",
-            "needsUnlock",
-            "needsPassphrase",
-            "needsSecretKey",
-            "passphraseReady",
+            "needs_unlock",
+            "needs_passphrase",
+            "needs_secret_key",
+            "passphrase_ready",
             "readable",
             "reason",
         ] {
             assert!(json.contains(field), "少了 {field}：{json}");
+            // 顺带钉住"别偷偷变成 camelCase"
+            let camel: String = field
+                .split('_')
+                .map(|part| {
+                    let mut chars = part.chars();
+                    match chars.next() {
+                        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                        None => String::new(),
+                    }
+                })
+                .collect();
+            assert!(!json.contains(&camel), "{field} 变成了 {camel}：{json}");
         }
         assert!(json.contains("\"kind\":\"file\""), "{json}");
     }

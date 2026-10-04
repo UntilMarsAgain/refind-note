@@ -23,9 +23,9 @@
  *   `.media video|audio` / `.media--*` / `.note-media`  `::video` / `::audio`，以及
  *     正文里按名字引用的音视频（`![](片子.mp4)` 被 dom/note-html.ts 换成播放器）；
  *   `iframe`         正文里的外部嵌入（视频播放器、地图…），没写尺寸的给 16:9；
- *   `.image-missing`  图片取不到时的说明（前后两条都在，**顺序有意义**，见下）；
+ *   `.image-missing`  图片**真的**取不到时的说明 —— 与解锁框是两回事，见 dom/note-html.ts；
  *   `img { cursor: zoom-in }`  正文图片可点开（见 dom/note-html.ts）；
- *   `.file-locked*`  加密文件的解锁框，它**站在图片的位置上**。
+ *   `.unlock-box*`  页内解锁框（模板页与加密附件共用，见 dom/decrypt.ts）。
  *
  * `.image-missing` 之所以有两条：第二条是后来调的尺寸，**靠写在后面赢过第一条**
  * （padding 6px→2px、字号 0.9em→0.92em）。谁要"整理"掉前一条，先确认这一点。
@@ -140,10 +140,18 @@
 }
 
 /*
- * 加密文件的解锁框：它**站在图片的位置上**。
- * 不是错误状态，所以不用危险色 —— 只是"这一张要先解锁"。
+ * 页内解锁框。
+ *
+ * 它**不再只给文件用** —— 被 `::` 引用的模板页上锁时摆的是同一个框
+ * （`dom/decrypt.ts` 的 `decryptBox`，后端只出标记）。所以类名从 `file-locked`
+ * 改成 `unlock-box`：名字得说清它站在什么东西的位置上。
+ *
+ * 模板页那边它是块级的（框里要摆得下输入框与按钮），附件这边它 inline ——
+ * 站在图片的位置上，不能把整行撑开。`display` 由上下文决定。
+ *
+ * 不是错误状态，所以不用危险色 —— 只是"这一份要先解锁"。
  */
-.note-body .file-locked {
+.note-body .unlock-box {
   display: inline-flex;
   flex-wrap: wrap;
   gap: 6px 8px;
@@ -157,17 +165,17 @@
   font-size: 12.5px;
 }
 
-.note-body .file-locked__label {
+.note-body .unlock-box__label {
   color: var(--text);
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 
-.note-body .file-locked__hint {
+.note-body .unlock-box__hint {
   color: var(--text-dim);
 }
 
-.note-body .file-locked__input {
+.note-body .unlock-box__input {
   width: 10em;
   padding: 3px 8px;
   border: 1px solid var(--border);
@@ -178,12 +186,12 @@
   font-size: 12.5px;
 }
 
-.note-body .file-locked__input:focus {
+.note-body .unlock-box__input:focus {
   outline: none;
   border-color: var(--accent-soft);
 }
 
-.note-body .file-locked__go {
+.note-body .unlock-box__go {
   padding: 3px 10px;
   border: 1px solid var(--accent-soft);
   border-radius: 6px;
@@ -194,16 +202,16 @@
   cursor: pointer;
 }
 
-.note-body .file-locked__go:hover:not(:disabled) {
+.note-body .unlock-box__go:hover:not(:disabled) {
   background: var(--accent);
   color: var(--bg);
 }
 
-.note-body .file-locked__go:disabled {
+.note-body .unlock-box__go:disabled {
   opacity: 0.5;
   cursor: default;
 }
 
-.note-body .file-locked__problem {
+.note-body .unlock-box__problem {
   color: var(--danger);
 }

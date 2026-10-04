@@ -36,23 +36,37 @@ export async function fileInfo(name: string): Promise<FileInfo | null> {
     }
 }
 
-/**
- * 解锁一个文件（把口令交给本次会话）。
- *
- * 解的是**显示标题**（`File:桥.png`）——口令按"页面 + 版本"存，与笔记同一套。
- */
-export async function unlockFile(title: string, passphrase: string): Promise<void> {
-    await invoke("unlock", { title, reference: null, passphrase });
-}
+// 原来这里有个 `unlockFile(title, passphrase)`：只把口令交给后端就算完。
+//
+// 它被 `ipc/lock.ts` 的 `lockState` **取代**了，因为"交完口令"不等于"读得动" ——
+// gpg 那一层根本没有口令，交完什么也证明不了，于是失败只体现在后面那次 404 上，
+// 表现成"图片不存在"且无法重试（见 `dom/decrypt.ts` 抬头那段）。
+// `lockState` 交完口令会**真的去读一次**，所以那一步能说话。
+// 现在它没有调用方，留着只会让人以为"交口令"就够。
 
-/** 这一份现在读得动吗：不需要解锁，或者口令已经在手 */
+/**
+ * 这一份**已经**读得动吗（不是"大概读得动"）。
+ *
+ * ## gpg 那一层不能乐观
+ *
+ * 原来这里写着「gpg 由系统代理管：直接去读就是了」→ 返回 true。于是
+ * `attachVaultFile` **连框都不摆**，`<img>` 去撞 404，而 `platform::protocol`
+ * 把"解密失败"与"没有这一份"一起答成 404，前端于是说"图片不存在" ——
+ * 没有框，也就没有重试的机会。这是那个 bug 的**触发点**。
+ *
+ * 本机有没有那把私钥、代理答不答应，**只有真读才知道** —— 所以这里必须说"不知道"，
+ * 由 `lockState` 去真的读一次（见 `dom/decrypt.ts`）。
+ *
+ * @see the_same_readable_verdict_for_every_layer_including_gpg
+ */
 export function readable(info: FileInfo): boolean {
     if (!info.needs_unlock) {
         return true;
     }
-    // gpg 那一层由系统代理管：直接去读就是了，读的时候它自己会问
-    if (info.needs_secret_key && !info.needs_passphrase) {
-        return true;
+    // gpg 在场就是"不知道" —— 哪怕口令已经在手也一样：口令解开的是外面那层，
+    // 里面还有一层要问钥匙串，而那把私钥在不在没人提前知道。
+    if (info.needs_secret_key) {
+        return false;
     }
     return info.passphrase_ready;
 }

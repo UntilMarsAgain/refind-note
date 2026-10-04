@@ -28,9 +28,10 @@
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { type MenuItem, openMenu } from "./context-menu.ts";
 import { scheduleDiagrams } from "./diagrams.ts";
+import { decryptBox, wireDecrypt } from "./decrypt.ts";
 import { fileTargetOf, fileUrl, vaultKeyOf } from "./file-links.ts";
 import { saveNameOf, saveVaultFile, savableTitle } from "./file-save.ts";
-import { fileInfo, freshUrl, readable, unlockFile } from "./file-unlock.ts";
+import { fileInfo, freshUrl, readable } from "./file-unlock.ts";
 import { viewImage } from "./image-viewer.ts";
 import { renderMath } from "./math.ts";
 import { wireTabs } from "./tabs.ts";
@@ -248,6 +249,8 @@ export function decorateNoteHtml(root: HTMLElement): void {
         }
     }
     wireTabs(root);
+    // 后端摆下的 `::decrypt` 标记（模板页上锁）—— 与附件那个框同一个构造器
+    wireDecrypt(root);
     // 公式与图：都是"拿到元素再加工"，与上面几步同一类事
     renderMath(root);
     scheduleDiagrams(root);
@@ -260,10 +263,11 @@ export function decorateNoteHtml(root: HTMLElement): void {
  *
  * 文件进了 blob 仓就可能带口令层或 gpg 加密层 —— 那两种情况下"直接显示"是不成立的：
  * 后端取不到字节，图片只会加载失败。所以这里先问一句"这一版怎么存的、现在读不读得动"
- * （后端只看明文头，不需要口令），读不动就把图片换成一个解锁框：
- * 口令层的当场输口令（原位，不跳页），gpg 层的点一下就去读（由系统代理去问口令）。
+ * （后端只看明文头，不需要口令），读不动就摆解锁框：口令层的当场输口令（原位，不跳页），
+ * gpg 层的点一下就去读（由系统代理去问口令）。
  *
- * 解锁之后再把它换回真正的 `<img>`，并带一个"这次是新读的"后缀绕开缓存。
+ * 框本身是 [`decryptBox`] 造的 —— 与正文里 `::decrypt` 那个框**同一个**。这里只负责
+ * "探明之后把它摆出来"和"解锁之后把真正的图片换回去"。
  */
 async function attachVaultFile(image: HTMLImageElement, name: string) {
     const info = await fileInfo(name);
@@ -296,72 +300,24 @@ async function attachVaultFile(image: HTMLImageElement, name: string) {
         return;
     }
 
-    const box = document.createElement("span");
-    box.className = "file-locked";
-    box.dataset.file = name;
-
-    const label = document.createElement("span");
-    label.className = "file-locked__label";
-    label.textContent = info.name;
-    box.append(label);
-
-    const hint = document.createElement("span");
-    hint.className = "file-locked__hint";
-    hint.textContent = info.needs_passphrase
-        ? "这一份是加密存的，输入口令后显示"
-        : "这一份是加密存的，解锁后显示";
-    box.append(hint);
-
-    const input = document.createElement("input");
-    input.type = "password";
-    input.className = "file-locked__input";
-    input.placeholder = "口令";
-    if (info.needs_passphrase) {
-        box.append(input);
-    }
-
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "file-locked__go";
-    button.textContent = "显示";
-
-    const problem = document.createElement("span");
-    problem.className = "file-locked__problem";
-
-    /** 解锁（需要口令时先交口令），然后把图片换回来 */
-    const reveal = async () => {
-        button.disabled = true;
-        problem.textContent = "";
-        try {
-            if (info.needs_passphrase && info.passphrase_ready === false) {
-                if (!input.value) {
-                    problem.textContent = "请先输入口令";
-                    return;
-                }
-                await unlockFile(info.title, input.value);
-            }
-            // 读得动了：换成真正的图片。带个后缀，免得 webview 吃上一次的失败缓存
+    const box = decryptBox({
+        kind: "file",
+        title: info.title,
+        label: info.name,
+        needsPassphrase: info.needs_passphrase,
+        // 解锁之后：把真正的图片换回来。
+        //
+        // 注意这里换的是**框自己**，不是页面上的某个占位 —— 框是我们刚插进去的，
+        // 按住它就不会与别人抢位置（正文明明已经有另一张图也是这个文件）。
+        onRevealed: () => {
             const live = image.cloneNode() as HTMLImageElement;
+            // 带个后缀，免得 webview 吃上一次的失败缓存（**上一次真的失败过**）
             live.src = freshUrl(image.getAttribute("src") ?? info.url);
             live.dataset.imageReady = "yes";
             attachImage(live);
             box.replaceWith(live);
-        } catch (error) {
-            problem.textContent = String(error);
-        } finally {
-            button.disabled = false;
-        }
-    };
-
-    button.addEventListener("click", () => void reveal());
-    input.addEventListener("keydown", (event) => {
-        if (event.key === "Enter") {
-            event.preventDefault();
-            void reveal();
-        }
+        },
     });
-
-    box.append(button, problem);
     image.replaceWith(box);
 }
 

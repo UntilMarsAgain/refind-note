@@ -87,7 +87,7 @@ function countPage(): void {
   const brokenDiagrams = count("pre.mermaid[data-problem]");
   const images = count("img");
   const missingImages = count(".image-missing");
-  const locked = count(".file-locked");
+  const locked = count(".unlock-box");
 
   pageStats.value = [
     `公式 ${drawnFormulas}/${formulas}`,
