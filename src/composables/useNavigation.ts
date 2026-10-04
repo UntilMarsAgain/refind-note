@@ -89,6 +89,29 @@ export function useNavigation(tabs: NavigationTabs) {
     void navigate(input, "replace");
   }
 
+  /**
+   * 重读当前这一页（标题栏那颗刷新按钮与 `reload` 动作都走这里）。
+   *
+   * ## 为什么两件事分开做
+   *
+   * 重新解析地址（`navigate(committed, "replace")`）只解决一半：它清掉 `tab.error`、
+   * 重新解析当前地址，但**正文不会重读** —— 各视图盯的是 `[title, reference]`，
+   * 刷新时两者都没变，那个 watcher 不触发。所以还需要有人去叫视图重读，
+   * 那是 `RenderPane.reload()` 的事（本层不碰渲染区）。
+   *
+   * ## 为什么不是整个窗口重载
+   *
+   * 原来 `Ctrl+R` 是 `window.location.reload()`：连后端状态一起重来，代价是
+   * **所有标签页、滚动位置、打开着的编辑器全没**。点错一下的损失太大，而"刷新"
+   * 这两个字给人的预期是"把这一页重新拉一遍"。
+   *
+   * 用 `replace` 而不是 `push`：刷新**不算一次跳转** —— 按了刷新之后按后退，
+   * 不该退回到"刷新之前的那一次一模一样的页面"。
+   */
+  function refresh() {
+    void navigate(committed.value, "replace");
+  }
+
   /** 正文里的内部链接被 Ctrl/Cmd 点击：在新标签页打开 */
   function openNoteInNewTab(title: string) {
     void newTabWith(title);
@@ -230,6 +253,7 @@ export function useNavigation(tabs: NavigationTabs) {
   }
 
   return {
+      refresh,
     openHome,
     openSpecial,
     openNote,

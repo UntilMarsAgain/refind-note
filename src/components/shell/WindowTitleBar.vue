@@ -26,6 +26,7 @@ import {
   House,
   Menu,
   Minus,
+  RefreshCw,
   Square,
   X,
 } from "@lucide/vue";
@@ -55,6 +56,8 @@ const address = defineModel<string>({ required: true });
 const emit = defineEmits<{
   (e: "back"): void;
   (e: "forward"): void;
+  /** 重读当前这一页（与 `reload` 动作同一个实现） */
+  (e: "refresh"): void;
   /** 回新标签页：从哪儿都回得去的那一个地方 */
   (e: "home"): void;
   (e: "menu"): void;
@@ -173,6 +176,26 @@ function onBlur() {
         <ArrowRight :size="16" :stroke-width="1.75"/>
       </button>
 
+      <!--
+        刷新：摆在**前进与首页之间**。
+
+        这个位置是"浏览"这一组的末尾 —— 前后/刷新是一件事（在这一页里进出），
+        首页往后是"去别处"。所以刷新跟着前进，不跟首页。
+
+        与 `reload` 动作（`Ctrl+R`）**同一个实现**：重读当前页，不动其它标签页。
+        以前 `Ctrl+R` 是整个窗口重载，点错一下所有标签页都没了。
+      -->
+      <button
+          v-if="ready !== false"
+          class="tbtn"
+          type="button"
+          aria-label="刷新"
+          title="刷新这一页（Ctrl+R）"
+          @click="emit('refresh')"
+      >
+        <RefreshCw :size="16" :stroke-width="1.75"/>
+      </button>
+
       <button
           v-if="ready !== false"
           class="tbtn"
@@ -214,6 +237,27 @@ function onBlur() {
       顶栏窄，而后退是天天按的那一颗，所以它留在外面（首页与同步收进菜单浮层）。
     -->
     <div v-if="isMobile()" class="titlebar__start titlebar__start--mobile">
+      <!--
+        手机上的**最左一颗**：刷新。
+
+        它与最右那颗「菜单」对称 —— 两头各一颗"跳出正文"的动作（刷新这一页 /
+        打开菜单），中间的导航（后退/前进）夹在地址栏两侧。这是手机浏览器
+        顶栏的排法，人不用学就知道哪颗是哪颗。
+
+        摆在**后退之前**而不是之后：刷新是"这一页重新来"，后退是"去上一页"，
+        前者更靠近边缘，与菜单那头对齐。
+      -->
+      <button
+          v-if="ready !== false"
+          class="tbtn"
+          type="button"
+          aria-label="刷新"
+          title="刷新这一页"
+          @click="emit('refresh')"
+      >
+        <RefreshCw :size="16" :stroke-width="1.75"/>
+      </button>
+
       <button
           class="tbtn"
           type="button"
@@ -397,17 +441,23 @@ function onBlur() {
   display: flex;
   align-items: center;
   gap: 2px;
-  padding-right: 8px;
+  /* 与左边那侧同一个道理：`--safe-right` 是 0 时等于原来的 8px */
+  padding-right: max(8px, var(--safe-right));
 }
 
 /*
- * 手机上的左侧：只有「后退」。
+ * 手机上的左侧：**刷新 + 后退**。
  *
- * 复用 `__start` 的排版（同一套 flex/gap），只是**没有 logo、没有分隔线**，
- * 所以左右两侧的宽度相当 —— 地址栏于是自然落在中间，不必改它的 `flex`。
+ * 复用 `__start` 的排版（同一套 flex/gap），只是**没有 logo、没有分隔线**；
+ * 右边是**前进 + 菜单**，也是两颗 —— 所以左右宽度相当，地址栏自然落在中间，
+ * 不必改它的 `flex`。刷新摆最左、菜单摆最右，两头对称（见模板里那段注释）。
+ *
+ * 左边距取 `max(4px, var(--safe-left))`：横过来时刘海/圆角在那侧，
+ * 不让位的话最外那颗按钮会贴着屏幕边。桌面上 `--safe-left` 是 0，
+ * `max()` 把它吃掉，所以这一行在桌面上等于什么都没改。
  */
 .titlebar__start--mobile {
-  padding-left: 4px;
+  padding-left: max(4px, var(--safe-left));
 }
 
 /* 静止时看起来就是一行窗口标题；聚焦后才显出输入框的样子。

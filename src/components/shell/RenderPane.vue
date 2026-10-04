@@ -162,8 +162,26 @@ const residentLimit = computed(() => {
  * 在同一篇笔记里"看 → 历史 → 退回来"，看的那一份**原样还在**。
  */
 function viewKey(view: string): string {
-  return `${props.tab?.id ?? ""}@${view}`;
+  return `${props.tab?.id ?? ""}@${view}#${reloadRequest.value}`;
 }
+
+/**
+ * 递增的信号：重读当前这一页（标题栏那颗刷新按钮与 `Ctrl+R` 都走这里）。
+ *
+ * ## 为什么改 key 就行，而不用给每个页面加一个 prop
+ *
+ * 各视图都是 `watch(() => [props.title, props.reference], () => void load())` ——
+ * 刷新时这两个值**不变**（还是同一篇、同一版），所以那个 watcher 不会触发，
+ * 按了刷新等于按了没反应。
+ *
+ * 而 key 一变，`KeepAlive` 就把这个实例换成新的，于是**所有**视图（笔记、帮助、
+ * 全部页面、回收站……）统一重挂载重读，一处改动覆盖全部。用 prop 的话得给七八个
+ * 组件各加一个，并且每加一个页面就漏一个。
+ *
+ * 与 `findRequest` 用计数而不是布尔的理由是同一条：布尔只能表达"要刷新"，
+ * 连按两次第二次就没有变化了，而人就是会连按两下试试。
+ */
+const reloadRequest = ref(0);
 
 /** 滚动容器。滚动位置也属于"这个标签页的浏览状态"，所以存进标签页自己 */
 const scroller = ref<HTMLElement | null>(null);
@@ -245,6 +263,17 @@ const findRequest = ref(0);
 const findStep = ref({ step: 0, dir: "next" as "next" | "previous" });
 
 defineExpose({
+    /**
+     * 重读当前这一页。
+     *
+     * 走 key 而不是"重新导航一次"：重新导航（`navigate(address, "replace")`）会重新
+     * 解析地址、该做的那部分都做了，但**正文不会重读** —— 各视图盯的是标题与版本，
+     * 两者都没变（见上面 `reloadRequest` 那段）。所以两件事分开做：
+     * 这里负责重读正文，调用方负责重新解析地址。
+     */
+    reload() {
+        reloadRequest.value += 1;
+    },
     scrollToTop() {
         scroller.value?.scrollTo({ top: 0, behavior: "smooth" });
     },

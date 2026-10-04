@@ -192,6 +192,7 @@ const {
   rollbackVersion,
   afterDelete,
   createNote,
+  refresh,
   afterUnlock,
   leavePage,
   leaveUnlock,
@@ -208,6 +209,8 @@ const debugOpen = ref(false);
 
 /** 滚动容器在渲染区里，所以滚动要它自己做 */
 const renderPane = useTemplateRef<{
+  /** 重读当前这一页（刷新按钮与 `Ctrl+R`） */
+  reload: () => void;
   scrollToTop: () => void;
   scrollToBottom: () => void;
   /** 打开页内查找；当前页没有正文可查时返回 false（好给一句提示） */
@@ -217,6 +220,16 @@ const renderPane = useTemplateRef<{
   /** 上一个命中 */
   findPrevious: () => boolean;
 }>("renderPane");
+
+/**
+ * 刷新：重新解析当前地址，并让当前视图重读正文。
+ *
+ * 两件事都要做，缺一不可 —— 理由见 `useNavigation.refresh` 那段。
+ */
+function doRefresh() {
+    refresh();
+    renderPane.value?.reload();
+}
 
 function toggleDebug() {
   debugOpen.value = !debugOpen.value;
@@ -281,12 +294,14 @@ function onShortcut(action: string) {
       void onMenu();
       break;
     case "reload":
-      // 整个窗口重载（连后端状态一起重新读一遍）。
+      // 重读当前这一页 —— 与标题栏那颗刷新按钮**同一个实现**。
       //
-      // 而不是 `restartStartup()`：那只是把启动那一轮重跑，界面不重画，
-      // 标签页、滚动位置、打开着的编辑器全都还在 —— 与"重载"这两个字给人的预期
-      // 不是一回事。真出问题时（界面冻住了、某处状态不对）人要的是彻底重来一次。
-      window.location.reload();
+      // 原来是 `window.location.reload()`：整个窗口重载，标签页、滚动位置、打开着的
+      // 编辑器全没。点错一下代价太大，而"重载"给人的预期是"把这一页重新拉一遍"。
+      //
+      // 真正"整个窗口重来"的场合（启动失败后修好了再试）走 `retryStartup`
+      // → `restartStartup`，它只重跑启动那一轮、界面不重画 —— 与"重载"不是一回事。
+      doRefresh();
       break;
     default:
       console.warn("这个快捷键动作还没接上：", action);
@@ -461,6 +476,7 @@ async function interceptClose() {
         :can-forward="canGoForward"
         @back="goBack"
         @forward="goForward"
+        @refresh="doRefresh"
         @home="openHome"
         @menu="onMenu"
         @submit="onSubmit"

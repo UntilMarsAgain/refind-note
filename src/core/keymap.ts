@@ -66,7 +66,10 @@ export const ACTIONS: ShortcutAction[] = [
     { id: "forward", label: "前进", keys: ["Alt", "ArrowRight"], group: "页面" },
     { id: "home", label: "首页", keys: ["Alt", "H"], group: "页面" },
     { id: "menu", label: "菜单", keys: ["Alt", "M"], group: "页面" },
-    { id: "reload", label: "重载", keys: ["Ctrl", "R"], group: "页面" },
+    // 标签跟着**行为**走，不跟着旧名字走：以前这个动作是整个窗口重载，所以叫"重载"；
+    // 现在它与标题栏那颗按钮是同一件事（重读当前这一页），按钮上写"刷新"，
+    // 这里就该写"刷新" —— 两处不同名，人会以为是两件事。设置页显示的是这一处的名字。
+    { id: "reload", label: "刷新", keys: ["Ctrl", "R"], group: "页面" },
 ];
 
 /**
