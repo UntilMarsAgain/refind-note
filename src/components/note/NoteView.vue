@@ -24,8 +24,9 @@ import type { Via } from "../../ipc/address.ts";
 import type { Note, Reading } from "../../ipc/note.ts";
 import { parentOf } from "../../core/title.ts";
 import { flash } from "../../core/notice.ts";
-import { saveNoteMarkdown } from "../../dom/file-save.ts";
+import { saveNoteAs } from "../../dom/file-save.ts";
 import { useFindInPage } from "../../composables/useFindInPage.ts";
+import ExportPicker from "./ExportPicker.vue";
 import FindBar from "./FindBar.vue";
 import NoteContent from "./NoteContent.vue";
 import PageHeader, { type PageAction } from "./PageHeader.vue";
@@ -98,6 +99,9 @@ const emit = defineEmits<{
     (e: "find", available: boolean): void;
 }>();
 
+/** 导出格式那个浮层：用 `ref` 拿它的 `ask()`（见 `ExportPicker.vue`） */
+const pickerRef = ref<InstanceType<typeof ExportPicker> | null>(null);
+
 const note = ref<Note | null>(null);
 const error = ref("");
 const loading = ref(false);
@@ -148,20 +152,28 @@ function onAction(name: string) {
             emit("navigate", `${found.title}@rollback-${props.reference}`);
             break;
         case "export":
-            void exportMarkdown();
+            void exportNote();
             break;
     }
 }
 
 /**
- * 导出这一版的 markdown 原文。
+ * 导出这一版：先问格式，再导。
  *
  * 内容由后端从仓库里读（前端不转手），路径由系统保存对话框给出 ——
  * 与"另存为一份文件"是同一条路。
+ *
+ * **PDF 不走这条路**：它返回 `null`（路径由浏览器的保存对话框决定），
+ * 所以这里不能拿它的返回值说"已导出：…" —— 那会指向一个并不存在的文件。
+ * 那一路的提示由 `dom/print.ts` 自己给（说清要在打印面板里选什么）。
  */
-async function exportMarkdown() {
+async function exportNote() {
+    const format = await pickerRef.value?.ask();
+    if (!format) {
+        return;
+    }
     try {
-        const target = await saveNoteMarkdown(props.title, props.reference);
+        const target = await saveNoteAs(props.title, format, props.reference);
         if (target) {
             flash(`已导出：${target}`);
         }
@@ -332,6 +344,8 @@ watch(
       />
 
       <!-- 页内查找：贴在渲染区右上角（`find-bar.css` 里写了层叠关系） -->
+      <ExportPicker ref="pickerRef"/>
+
       <FindBar
           :open="find.open.value"
           :total="find.total.value"
