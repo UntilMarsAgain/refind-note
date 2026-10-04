@@ -24,11 +24,16 @@ import type { Via } from "../../ipc/address.ts";
 import type { Note, Reading } from "../../ipc/note.ts";
 import { parentOf } from "../../core/title.ts";
 import { flash } from "../../core/notice.ts";
+import { outlineOf, shouldShowOutline } from "../../core/outline.ts";
+import { headingsIn } from "../../dom/outline.ts";
+// 导出走 `saveNoteAs`（支持 markdown / html / pdf 三档），
+// 不是分支那边的 `saveNoteMarkdown` —— 那个只出 markdown，是本项目更早的做法。
 import { saveNoteAs } from "../../dom/file-save.ts";
 import { useFindInPage } from "../../composables/useFindInPage.ts";
 import ExportPicker from "./ExportPicker.vue";
 import FindBar from "./FindBar.vue";
 import NoteContent from "./NoteContent.vue";
+import OutlinePanel from "./OutlinePanel.vue";
 import PageHeader, { type PageAction } from "./PageHeader.vue";
 import StorageBadge from "./StorageBadge.vue";
 
@@ -52,6 +57,13 @@ const props = defineProps<{
     collapsed: boolean;
     /** 被指令带过来时的"从哪儿来" */
     via?: Via | null;
+    /**
+     * 地址里带的章节（`#某节`）。
+     *
+     * 目录上那一项要跟着它亮：直接打开 `某页#某节`（深链、书签、后退回来）时，
+     * 用户看到的是"我落在这一节"，而目录什么都不指，那是两回事。
+     */
+    section?: string;
     /** 这一页星标过没有 */
     starred?: boolean;
     /**
@@ -188,6 +200,58 @@ const find = useFindInPage();
 
 /** `NoteContent` 用 `defineExpose` 交出来的正文容器（查找要往里包 `<mark>`） */
 const contentRef = ref<InstanceType<typeof NoteContent> | null>(null);
+
+// ------------------------------------------------------------ 本页目录
+
+/**
+ * 这一篇的目录。
+ *
+ * 标题的 `id` 是**渲染时**才有的，所以它得等正文进 DOM 之后才算得出来 ——
+ * 与页内查找同一个时机、同一个容器（`contentRef`，所以它必须先声明）。
+ * 层级怎么算在 `core/outline.ts`。
+ */
+const outline = ref<ReturnType<typeof outlineOf>>([]);
+/** 点过（或地址里带来的）那一节：目录上标出来 */
+const outlineActive = ref("");
+
+/** 重新数一遍标题。容器换了一篇、或正文重渲染过，都要重数 */
+function refreshOutline() {
+    const entries = outlineOf(headingsIn(contentRef.value?.rootEl ?? null));
+    outline.value = shouldShowOutline(entries) ? entries : [];
+}
+
+// `NoteContent` 换了组件（`v-else-if` 分支）时容器会变，跟着重数
+watch(contentRef, () => refreshOutline(), { immediate: true });
+
+// **正文重渲染**也要重数：`v-html` 换一次内容，组件还是那一个、容器还是那一个，
+// 标题却已经是新的一批了。`ready` 是 `NoteContent` 收拾完之后才递增的计数
+// —— 等它再数，才不会数到一半的 DOM（那时复制按钮还没插进去、高亮也还没上）。
+watch(
+    () => contentRef.value?.ready ?? 0,
+    () => refreshOutline(),
+);
+
+// 点了目录里的一条：滚过去，并把章节报给上层（与正文里点锚点是同一条路）
+function onPickSection(id: string) {
+    contentRef.value?.rootEl?.querySelector(`#${CSS.escape(id)}`)?.scrollIntoView({ block: "start" });
+    outlineActive.value = id;
+    emit("section", id);
+}
+
+// 正文里点锚点也会换章节：目录上那一项要跟着亮
+function onSection(id: string) {
+    outlineActive.value = id;
+    emit("section", id);
+}
+
+// 地址里带来的章节（深链 / 后退回来）：目录上那一项也要亮
+watch(
+    () => props.section ?? "",
+    (section) => {
+        outlineActive.value = section;
+    },
+    { immediate: true },
+);
 
 // 把容器交给查找层；换了一篇就重建 —— 高亮属于旧正文，留着会罩在不相干的内容上
 watch(
@@ -335,12 +399,18 @@ watch(
         <p v-if="note.summary" class="note__summary">{{ note.summary }}</p>
       </header>
 
+      <!--
+        本页目录：放在正文**上面**（标题与元信息之下、正文之上），收起时不占地方。
+        条目不足四节就不画，见 `core/outline.ts` 的 `MIN_HEADINGS`。
+      -->
+      <OutlinePanel :entries="outline" :active="outlineActive" @pick="onPickSection"/>
+
       <NoteContent
           ref="contentRef"
           :html="note.html"
           @wikilink="emit('navigate', $event.title)"
           @wikilink-new="emit('navigate-new-tab', $event)"
-          @section="emit('section', $event)"
+          @section="onSection"
       />
 
       <!-- 页内查找：贴在渲染区右上角（`find-bar.css` 里写了层叠关系） -->

@@ -416,6 +416,7 @@ defineExpose({
             :reference="mode.ref"
             :collapsed="collapsed"
             :via="route?.via ?? null"
+            :section="route?.address.section ?? ''"
             :starred="starredHere"
             :find-request="findRequest"
             :find-step="findStep"
