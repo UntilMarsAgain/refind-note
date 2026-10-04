@@ -97,6 +97,8 @@ pub fn run() {
             commands::notes::resolve_address,
             commands::notes::read_note,
             commands::notes::export_note,
+            commands::notes::note_print_html,
+            commands::backup::export_repository,
             commands::notes::create_note,
             commands::notes::commit_note,
             commands::notes::load_draft,

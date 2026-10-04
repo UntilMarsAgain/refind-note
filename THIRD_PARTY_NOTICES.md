@@ -444,6 +444,7 @@
 - [tray-icon@0.25.1](https://github.com/tauri-apps/tray-icon): (c) tray-icon contributors
 - [tree_magic_mini@3.2.2](https://github.com/mbrubeck/tree_magic/): Matt Brubeck <mbrubeck@limpet.net>|Allison Hancock <aahancoc@umich.edu>
 - [try-lock@0.2.5](https://github.com/seanmonstar/try-lock): Sean McArthur <sean@seanmonstar.com>
+- [typed-path@0.12.3](https://github.com/chipsenkbeil/typed-path): Chip Senkbeil <chip@senkbeil.org>
 - [typeid@1.0.3](https://github.com/dtolnay/typeid): David Tolnay <dtolnay@gmail.com>
 - [typenum@1.20.1](https://github.com/paholg/typenum): (c) typenum contributors
 - [uds_windows@1.2.1](https://github.com/haraldh/rust_uds_windows): Azure IoT Edge Devs|Harald Hoyer <harald@redhat.com>
@@ -546,8 +547,10 @@
 - [zerotrie@0.2.5](https://github.com/unicode-org/icu4x): The ICU4X Project Developers
 - [zerovec@0.11.8](https://github.com/unicode-org/icu4x): The ICU4X Project Developers
 - [zerovec-derive@0.11.6](https://github.com/unicode-org/icu4x): Manish Goregaokar <manishsmail@gmail.com>
+- [zip@8.6.0](https://github.com/zip-rs/zip2): Mathijs van de Nes <git@mathijs.vd-nes.nl>|Marli Frost <marli@frost.red>|Ryan Levick <ryan.levick@gmail.com>|Chris Hennick <hennickc@amazon.com>
 - [zlib-rs@0.6.8](https://github.com/trifectatechfoundation/zlib-rs): (c) zlib-rs contributors
 - [zmij@1.0.23](https://github.com/dtolnay/zmij): David Tolnay <dtolnay@gmail.com>
+- [zopfli@0.8.3](https://github.com/zopfli-rs/zopfli): (c) zopfli contributors
 - [zune-core@0.5.3](https://github.com/etemesi254/zune-image): (c) zune-core contributors
 - [zune-jpeg@0.5.15](https://github.com/etemesi254/zune-image/tree/dev/crates/zune-jpeg): caleb <etemesicaleb@gmail.com>
 - [zvariant@5.15.0](https://github.com/z-galaxy/zbus/): Zeeshan Ali Khan <zeeshanak@gnome.org>

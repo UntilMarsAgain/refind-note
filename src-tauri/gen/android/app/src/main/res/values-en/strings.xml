@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  英文下的应用名。系统当前语言是英文时用这一份，否则用 `values/strings.xml` 那个
+  （中文）。
+
+  写 `Refind` 而不是 `refind-note`：后者是仓库名与包名（`applicationId`），
+  给人看的是这个 —— 两个混在一起会显得像没做完。
+-->
+<resources>
+    <string name="app_name">Refind</string>
+    <string name="main_activity_title">Refind</string>
+</resources>

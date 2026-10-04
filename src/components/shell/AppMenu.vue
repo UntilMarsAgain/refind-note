@@ -112,6 +112,19 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 const panelLeft = ref(8);
 
 function measureLeft() {
+  /*
+   * 菜单从**左边栏的右边缘**向右展开 —— 那是桌面的布局。
+   *
+   * 但窄屏下（手机）标签栏变成**底部横条**（`rail.css` 里 `width: 100%`、
+   * `border-top` 那一条），它的 `right` 约等于整个视口宽度，于是
+   * `left = 视口宽 + 8` —— 菜单被推到屏幕外，点"菜单"**看着毫无反应**。
+   *
+   * 所以手机上不走这条：横向一律从屏幕左边开始，靠 `width` 收窄。
+   */
+  if (isMobile()) {
+    panelLeft.value = 0;
+    return;
+  }
   const rail = document.querySelector(".rail");
   const right = rail?.getBoundingClientRect().right ?? 0;
   panelLeft.value = Math.round(right) + 8;
@@ -123,7 +136,11 @@ const panelStyle = computed(() => ({
   // 宽一点：分组是**并排的几列**，挤在一起就退化成一张两行的表（不好看也不好扫）。
   // 820 是"四列各自放得下、且不至于把整页盖住"的宽度；窗口窄了就按比例缩，
   // 缩到放不下时列数自然减少（grid 那条 auto-fit 管这个）。
-  width: `min(820px, calc(100vw - ${panelLeft.value + 16}px))`,
+  //
+  // 手机上左右各留 8px：贴着屏幕边缘会让那圈描边与圆角看起来是"被切掉一半"。
+  width: isMobile()
+    ? "calc(100vw - 16px)"
+    : `min(820px, calc(100vw - ${panelLeft.value + 16}px))`,
 }));
 
 // 每次展开都重新量一次：展开与收起两档宽度不同，上次的数字不能留用
@@ -292,8 +309,14 @@ const groups = computed(() =>
 
 .menu {
   position: absolute;
-  top: var(--titlebar-height);
-  max-height: calc(100vh - var(--titlebar-height) - 12px);
+  /*
+   * 顶边跟标题栏的下沿对齐 —— 用**同一个表达式**，别写死 `var(--titlebar-height)`：
+   * 标题栏的真实高度是 `calc(标题栏高 + 安全区)`，安全区不为 0 时（即系统栏还露着）
+   * 两者会差一截，菜单就与标题栏重叠了一条。
+   */
+  top: calc(var(--titlebar-height) + var(--safe-top));
+  /* 底部标签栏（手机上那条 44px）之上收住，别被它压住 */
+  max-height: calc(100vh - var(--titlebar-height) - var(--safe-top) - 12px);
   overflow-y: auto;
   padding: 20px 22px 24px;
   border: 1px solid var(--border);

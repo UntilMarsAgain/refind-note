@@ -18,6 +18,9 @@
 
 <script setup lang="ts">
 import { invoke } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
+import { ref } from "vue";
+import { isMobile } from "../../core/platform.ts";
 import { flash } from "../../core/notice.ts";
 import NamespaceManager from "../pages/NamespaceManager.vue";
 import {
@@ -99,6 +102,36 @@ async function lockEverything() {
 
 function isFocused(id: string): boolean {
   return props.focus === id;
+}
+
+/**
+ * 打包整仓库。
+ *
+ * 手机上没有保存对话框（后端直接放下载目录），桌面问一次位置。
+ *
+ * 仓库大时一次要几十秒，所以按钮**禁用并改文案** —— 让人看得出"在动"，
+ * 而不是以为点了没反应。
+ */
+const busy = ref(false);
+
+async function backup() {
+  busy.value = true;
+  try {
+    const target = await invoke<string>("export_repository", { target: await askTarget() });
+    flash(`已备份：${target}`);
+  } catch (error) {
+    flash(`备份失败：${error}`);
+  } finally {
+    busy.value = false;
+  }
+}
+
+/** 桌面上先问位置；手机上给 `null`，后端会放进下载目录 */
+async function askTarget(): Promise<string | null> {
+  if (isMobile()) {
+    return null;
+  }
+  return await save({ title: "备份仓库" });
 }
 </script>
 
@@ -195,6 +228,30 @@ function isFocused(id: string): boolean {
     />
     <span class="row__unit">天</span>
     <span class="row__hint">上次整理：{{ formatTime(maintenance.last_gc) }}</span>
+  </div>
+
+  <h2 class="settings__section">备份</h2>
+
+  <p class="settings__note">
+    把<strong>整个仓库</strong>打包成一个 zip（笔记、附件、历史、设置都在里面）。
+    换机器时把它拷过去解开就行——不需要先在新机器上配好同步，同步坏了时也留得下一份底。
+    与同步不同：压缩包没有增量也没有历史，是给人搬东西用的。
+  </p>
+
+  <div
+    id="backup"
+    class="row"
+    :class="{ 'row--target': isFocused('backup') }"
+  >
+    <span class="row__label">备份仓库</span>
+    <code class="row__id">#backup</code>
+    <button class="ebtn" type="button" :disabled="busy" @click="backup">
+      {{ busy ? "正在打包…" : "打包成 zip" }}
+    </button>
+    <span class="row__hint">
+      仓库可能几百 MB 到几 GB，打包要等一会儿。压缩包是<b>原封不动</b>的字节——
+      加密的层仍然加密着（口令不会因为打包而失效）。
+    </span>
   </div>
 </template>
 

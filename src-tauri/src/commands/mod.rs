@@ -31,6 +31,7 @@
 //! - [`diagnostics`]：诊断页要的那些事实（只有后端知道的那一半）。
 
 pub mod activity;
+pub mod backup;
 pub mod diagnostics;
 pub mod files;
 pub mod help;

@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="重逢 refind">
+  <!--
+    **Android 启动图标**的源文件。
+
+    与 `app-icon.svg`（桌面/通用）**分开**是有原因的，不是重复：
+    Android 的自适应图标（adaptive icon）有自己的留白规矩，
+    按桌面的尺寸画会被系统裁得显���被放大。
+
+    ## 为什么要缩到 72/108 ≈ 0.667
+
+    `tauri icon` 生成的 `ic_launcher_foreground.png` 是 **108dp 的方形画布**，
+    而系统只保证**中间 72dp** 不被各种遮罩（圆形、方形、水滴…）裁掉。
+    也就是说：
+
+    - 108dp：画布
+    - 72dp：安全区 ← **图形应该待在这里面**
+    - 66dp：最保守（圆形遮罩的内切）
+
+    桌面那个图标是满幅的（图形直接顶到画布边缘），搬到 108dp 画布上就等于
+    内容占了 108dp 里的 128/128 —— 于是系统一裁，图形显得又大又贴边。
+
+    实测：缩之前桌面上那个图标**明显被放大**、几乎没有留白，就是这个原因。
+
+    ## 那为什么不反过来把桌面图标也缩
+
+    桌面（Windows 任务栏、macOS Dock、Linux 启动器）没有这一层裁切，
+    满幅是合适的。所以两个源文件各画各的：`app-icon.svg` 满幅给桌面，
+    这个缩一档给 Android。
+
+    重新生成（**顺序不能反**）：
+
+        npx tauri icon app-icon.svg         # 桌面/通用
+        npx tauri icon app-icon-android.svg # Android 专用
+
+    ⚠️ 两条**共用同一个输出目录**，所以**后跑的那条会覆盖前一条的 android/ 部分**。
+    于是顺序必须是"Android 版**最后**跑"，否则启动器拿到的是桌面那版（满幅、
+    被放大）。这不是我猜的：先跑 Android 版再跑桌面版，实测图标立刻变大回弹。
+
+    跑完还要把 `src-tauri/icons/android/` 同步到
+    `src-tauri/gen/android/app/src/main/res/` —— 后者是 `tauri android init`
+    生成的，带着**当时**那份，图标改了不会自动跟着变（这个坑也踩过）。
+  -->
+  <g transform="translate(64 64) scale(0.667) translate(-64 -64)">
+    <g transform="translate(64 64) scale(1.18) translate(-64 -64)">
+      <path
+        d="M76 93H52A17 17 0 0 1 35 76V52A17 17 0 0 1 52 35h24A17 17 0 0 1 93 52v24"
+        fill="none"
+        stroke="#e8e8e8"
+        stroke-width="9"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M56.5 47h15a4.5 4.5 0 0 1 4.5 4.5v29L64 72.8 52 80.5v-29A4.5 4.5 0 0 1 56.5 47Z"
+        fill="#e8e8e8"
+        stroke="#e8e8e8"
+        stroke-width="2.5"
+        stroke-linejoin="round"
+      />
+    </g>
+  </g>
+</svg>

@@ -140,12 +140,18 @@ function onBlur() {
       手机上去掉 logo、也去掉首页与同步：顶栏本来就窄，而正文里已经有一个
       "新标签页"入口、菜单浮层里也有那几个页面 —— 手机上要的是**把常用的
       留在外面**（后退/前进/地址/菜单），不是把桌面那一排原样搬过来。
+
+      ⚠️ 这一整段**只在桌面上渲染**（`v-if` 在下面），手机走的是右侧那一段。
+      桌面端的按钮顺序、位置一个都没动 —— 要求是"桌面保持不变，
+      手机用新的排布"，不是两边都换。
+
+      （我第一版给两边共用一套结构、把桌面按钮顺序也改了 —— 那是回归。
+      第二版只给右边加了门、忘了给这一段加，于是手机上两套同时出现 ——
+      一次改两处却只改了一处，比不改更难看出来。）
     -->
-    <div class="titlebar__start">
-      <template v-if="!isMobile()">
-        <img class="logo" :src="logoSrc" alt="重逢笔记" draggable="false"/>
-        <span class="divider"/>
-      </template>
+    <div v-if="!isMobile()" class="titlebar__start">
+      <img class="logo" :src="logoSrc" alt="重逢笔记" draggable="false"/>
+      <span class="divider"/>
 
       <button
           class="tbtn"
@@ -157,9 +163,30 @@ function onBlur() {
         <ArrowLeft :size="16" :stroke-width="1.75"/>
       </button>
 
+      <button
+          class="tbtn"
+          type="button"
+          aria-label="前进"
+          :disabled="!canForward"
+          @click="emit('forward')"
+      >
+        <ArrowRight :size="16" :stroke-width="1.75"/>
+      </button>
+
+      <button
+          v-if="ready !== false"
+          class="tbtn"
+          type="button"
+          aria-label="首页"
+          title="首页（新标签页）"
+          @click="emit('home')"
+      >
+        <House :size="16" :stroke-width="1.75"/>
+      </button>
+
       <!-- 同步：没配同步就不摆它（摆了也只是点一下报"没开"） -->
       <button
-          v-if="!isMobile() && ready !== false && syncAvailable"
+          v-if="ready !== false && syncAvailable"
           class="tbtn"
           type="button"
           aria-label="立即同步"
@@ -171,22 +198,39 @@ function onBlur() {
       </button>
 
       <button
-          v-if="!isMobile() && ready !== false"
+          v-if="ready !== false"
           class="tbtn"
           type="button"
-          aria-label="首页"
-          title="首页（新标签页）"
-          @click="emit('home')"
+          aria-label="菜单"
+          @click="emit('menu')"
       >
-        <House :size="16" :stroke-width="1.75"/>
+        <Menu :size="16" :stroke-width="1.75"/>
+      </button>
+    </div>
+    <!--
+      手机上的**左侧**：只留「后退」。
+
+      桌面那一整段是 `v-if="!isMobile()"`，所以手机上的后退必须在这里自己带一个 ——
+      顶栏窄，而后退是天天按的那一颗，所以它留在外面（首页与同步收进菜单浮层）。
+    -->
+    <div v-if="isMobile()" class="titlebar__start titlebar__start--mobile">
+      <button
+          class="tbtn"
+          type="button"
+          aria-label="后退"
+          :disabled="!canBack"
+          @click="emit('back')"
+      >
+        <ArrowLeft :size="16" :stroke-width="1.75"/>
       </button>
     </div>
 
     <!--
-      中：地址栏 —— **始终居中**。
+      中：地址栏。
 
-      原来它居中是因为左右两边的按钮数量差不多（左边 3 个、右边 1 个窗口组），
-      `flex: 1` 让它被挤到了右边。手机上把两边的数量配平（各 1 个）之后它才真的在中间。
+      桌面端这一段的**宽度行为与原来一样**（`flex: 1`，见 `.titlebar__center`），
+      所以桌面上的观感不变 —— 那一版"地址栏不在正中"是桌面本来的样子，不动它。
+      手机上左右配平之后它正好落在中间。
     -->
     <div v-if="ready !== false" class="titlebar__center">
       <input
@@ -205,12 +249,21 @@ function onBlur() {
     <div v-else class="titlebar__center"/>
 
     <!--
-      右：手机上只留「前进」与「菜单」，首页与同步收进菜单浮层。
+      右边那一段**只在手机上渲染**：放「前进」与「菜单」。
 
-      收进去的理由不是"地方不够"，而是它们在手机上**用得少**（首页有新产品页、
-      同步是偶尔的事），而前进/后退是天天按的。所以按"常用留外面"分。
+      收进菜单的理由不是"地方不够"，而是它们在手机上**用得少**
+      （首页有新产品页、同步是偶尔的事），而前进/后退是天天按的。
+      所以按"常用的留在外面"分。
     -->
-    <div class="titlebar__end">
+
+    <!--
+      手机上的**右侧**：前进 + 菜单。
+
+      收进菜单的理由不是"地方不够"，而是它们在手机上**用得少**
+      （首页有新产品页、同步是偶尔的事），而前进/后退是天天按的。
+      所以按"常用的留在外面"分。
+    -->
+    <div v-if="isMobile()" class="titlebar__end">
       <button
           class="tbtn"
           type="button"
@@ -323,15 +376,14 @@ function onBlur() {
 .titlebar__center {
   display: flex;
   /*
-   * `flex: 1` 让它占掉左右剩下的全部宽度，**这才是"居中"**。
+   * `flex: 1 1 auto` —— **桌面端这一条没动过**，维持它原本的观感。
    *
-   * 之前它在桌面看着居中，是因为运气：左边 logo+分隔线+后退+前进+首页+同步+菜单
-   * 比右边的窗口组宽得多，`flex: 1` 把它推到右边、看起来正好在中间偏右。
-   * 到了手机上（左边只剩后退、右边前进+菜单）它才真的跑到中间 —— 但那时它
-   * 更偏右了，因为右侧的窗口组虽然 `isMobile()` 下不渲染，`flex` 仍占着空间。
+   * 我曾经把它改成"三段各按内容定宽、这段独占剩余"以求地址栏真居中，
+   * 结果桌面上的按钮顺序与位置也跟着变了。那是回归：要求是"桌面保持不变，
+   * 手机用新排布"，不是"两边都换成新的"。
    *
-   * 现在三段各自 `flex: 0`（宽度由内容定），中间这段 `flex: 1`，两侧对齐 ——
-   * 这样地址栏**真的**在正中，而且左右宽度不同也不会偏。
+   * 手机上靠的是另一件事 —— 左右各只留一颗按钮、宽度相当，于是这段
+   * 自然落在中间（见模板里 `isMobile()` 那一段）。
    */
   flex: 1 1 auto;
   align-items: center;
@@ -340,12 +392,22 @@ function onBlur() {
   padding: 0 10px;
 }
 
-/* 右侧（前进 + 菜单）。与 `__start` 一样按内容定宽 */
+/* 右侧（手机上才渲染）：前进 + 菜单，按内容定宽 */
 .titlebar__end {
   display: flex;
   align-items: center;
   gap: 2px;
   padding-right: 8px;
+}
+
+/*
+ * 手机上的左侧：只有「后退」。
+ *
+ * 复用 `__start` 的排版（同一套 flex/gap），只是**没有 logo、没有分隔线**，
+ * 所以左右两侧的宽度相当 —— 地址栏于是自然落在中间，不必改它的 `flex`。
+ */
+.titlebar__start--mobile {
+  padding-left: 4px;
 }
 
 /* 静止时看起来就是一行窗口标题；聚焦后才显出输入框的样子。

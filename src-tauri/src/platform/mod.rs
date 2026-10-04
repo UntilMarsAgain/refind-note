@@ -27,6 +27,7 @@
 
 pub mod deep_link;
 pub mod protocol;
+pub mod print;
 pub mod saving;
 pub mod staging;
 

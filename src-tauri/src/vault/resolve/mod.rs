@@ -33,8 +33,11 @@
 //! 也就是说：解析出来的地址 + 当前仓库的内容 = 一个 [`Outcome`]。界面只认这个结论，
 //! 不自己再猜一遍"这一页该不该能改"。
 
+mod export_format;
 mod pages;
 mod revisions;
+
+pub use export_format::ExportFormat;
 
 #[cfg(test)]
 mod tests;

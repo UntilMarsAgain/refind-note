@@ -30,6 +30,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { isMobile } from "../core/platform.ts";
 import { fileNameOfUrl, vaultKeyOf } from "./file-links.ts";
+import { printNoteAsPdf } from "./print.ts";
 
 /** 把一个**文件页面**（`File:桥.png`）另存为；取消返回 null，存好了返回目标路径 */
 export async function saveVaultFile(title: string, name?: string): Promise<string | null> {
@@ -56,30 +57,84 @@ export function saveNameOf(src: string): string {
 }
 
 /**
- * 导出笔记的 markdown 原文；取消返回 null，存好了返回目标路径。
+ * 导出成哪种格式。
+ *
+ * 与后端 `ExportFormat` 一一对应（那边是权威：认不认得这个词由它说了算）。
+ */
+export type ExportFormat = "markdown" | "html" | "pdf";
+
+/** 各格式在对话框标题与提示里显示的名字 */
+export const EXPORT_FORMAT_LABELS: Record<ExportFormat, string> = {
+    markdown: "Markdown",
+    html: "HTML",
+    pdf: "PDF",
+};
+
+/** 各格式的扩展名（拼默认文件名用） */
+export const EXPORT_FORMAT_EXTENSIONS: Record<ExportFormat, string> = {
+    markdown: ".md",
+    html: ".html",
+    pdf: ".pdf",
+};
+
+/**
+ * 导出某一版笔记；用户取消返回 `null`，PDF 返回 `null`（路径由浏览器决定）。
  *
  * `reference` 给版本 token 就导出那一版（地址里的 `@view-3` 那个 3）。
+ *
+ * **PDF 在这里返回 `null` 而不是路径**：那条路没有"文件落盘"这一步 ——
+ * 它打开浏览器的打印面板，由用户在那里选「另存为 PDF」（理由见 `dom/print.ts`）。
+ * 所以调用方不该拿它的返回值当"已保存的位置"去显示。
+ */
+export async function saveNoteAs(
+    title: string,
+    format: ExportFormat = "markdown",
+    reference: string | null = null,
+): Promise<string | null> {
+    // PDF 走浏览器打印，没有"写到某个路径"这一步，先走它自己那条
+    if (format === "pdf") {
+        await printNoteAsPdf(title, reference);
+        return null;
+    }
+
+    const extension = EXPORT_FORMAT_EXTENSIONS[format];
+    const label = EXPORT_FORMAT_LABELS[format];
+
+    if (isMobile()) {
+        // 手机上没有保存对话框：后端统一放进下载目录，回来告诉我们落在哪
+        return await invoke<string>("export_note", { title, reference, target: null, format });
+    }
+    const target = await save({
+        defaultPath: `${noteFileName(title, extension)}`,
+        title: `导出 ${label}`,
+    });
+    if (!target) {
+        return null;
+    }
+    return await invoke<string>("export_note", { title, reference, target, format });
+}
+
+/**
+ * 导出笔记的 markdown 原文；取消返回 null，存好了返回目标路径。
+ *
+ * 保留这个函数名是有理由的：调用处（页头那个"导出"）本来就说的是"导出"，
+ * 而 markdown 是**默认**那一档 —— 改成别的格式是加了一个选择，不是替换了行为。
  */
 export async function saveNoteMarkdown(
     title: string,
     reference: string | null = null,
 ): Promise<string | null> {
-    if (isMobile()) {
-        // 同上：手机上进下载目录
-        return await invoke<string>("export_note", { title, reference, target: null });
-    }
-    const target = await save({ defaultPath: noteFileName(title), title: "导出 Markdown" });
-    if (!target) {
-        return null;
-    }
-    return await invoke<string>("export_note", { title, reference, target });
+    return await saveNoteAs(title, "markdown", reference);
 }
 
 /**
- * 导出时的默认文件名：标题里的斜杠（子页面）与文件系统不认的字符都换成 `-`，
- * 后缀是 `.md` —— 换台机器、换个编辑器，这个文件照样打得开。
+ * 导出时的默认文件名：标题里的斜杠（子页面）与文件系统不认的字符都换成 `-`。
+ *
+ * `extension` 由格式定（`.md` / `.html` / `.pdf`）—— 与后端
+ * `ExportFormat::extension` 同一份理由：拿 markdown 的名字去存 html，
+ * 用户双击打开时浏览器会拿不准怎么渲染。
  */
-export function noteFileName(title: string): string {
+export function noteFileName(title: string, extension = ".md"): string {
     const safe = title.replace(/[\\/:*?"<>|]/g, "-").trim();
-    return `${safe || "笔记"}.md`;
+    return `${safe || "笔记"}${extension}`;
 }

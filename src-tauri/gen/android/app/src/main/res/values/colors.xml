@@ -1,4 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  ⚠️ `ic_launcher_background` **不在这个文件里**。
+
+  它由 `tauri icon` 生成在 `values/ic_launcher_background.xml`（单独一个文件），
+  而 `mipmap-anydpi-v26/ic_launcher.xml` 引用的是那个。我曾在这里也定义一份，
+  于是同一个颜色被定义两次，Gradle 直接报
+  `[color/ic_launcher_background] … duplicate resource`——
+  而且它平时被构建缓存挡着，只有真的重打包时才暴露。
+
+  要改那个颜色，改 `values/ic_launcher_background.xml`。
+-->
 <resources>
     <color name="purple_200">#FFBB86FC</color>
     <color name="purple_500">#FF6200EE</color>
