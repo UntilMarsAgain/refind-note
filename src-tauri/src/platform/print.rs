@@ -157,7 +157,10 @@ mod tests {
         // 标题落在页尾、代码块被劈成两半，是 PDF 最难看的两种
         assert!(html.contains("break-after: avoid"), "标题不该落在页尾");
         assert!(html.contains("page-break-after: avoid"), "旧引擎也要认");
-        assert!(html.contains("break-inside: avoid"), "代码块/表格不该被劈开");
+        assert!(
+            html.contains("break-inside: avoid"),
+            "代码块/表格不该被劈开"
+        );
     }
 
     #[test]

@@ -26,8 +26,8 @@
 //! - [`staging`]：交给系统应用打开时，先落到临时目录的那一步。
 
 pub mod deep_link;
-pub mod protocol;
 pub mod print;
+pub mod protocol;
 pub mod saving;
 pub mod staging;
 

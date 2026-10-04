@@ -8,11 +8,13 @@
 
 - **Rust**：`cargo fmt` / `cargo clippy` / `cargo test`；
 - **TypeScript**：`vue-tsc --noEmit`（`pnpm build` 的第一步）；
-- **自己写的检查**：`check_target_deps.py`（通用依赖被误划进 `[target.*]` 那类坑）。
+- **仓库结构**：通用依赖有没有被误划进 `[target.*]`（下面 `check_target_deps()`）。
 
 没有 CI，也没有 Makefile，于是"改完到底该跑哪几条"这件事全靠记性。
 本项目已经因为这个丢过东西：`clippy` 攒了 6 条告警没人清，
-`Cargo.toml` 的表头把通用依赖划进桌面段（提交 `61b1f7c` 才补上检查脚本）。
+`Cargo.toml` 的表头把通用依赖划进桌面段（提交 `61b1f7c` 才发现）。
+原来那份检查是个单独脚本 `check_target_deps.py`，后来删掉了 ——
+所以并进本文件，它跟着这些步骤一起跑，不至于有人先删脚本再忘了这回事。
 
 所以这里把该跑的收在一处：**跑一遍就知道这个提交是不是干净的**，
 而且每一步都用机器判，不靠人眼数。
@@ -61,6 +63,8 @@ class Step:
     argv: list[str]
     #: 慢的那几条（`--fast` 跳过）
     slow: bool = False
+    #: 不跑外部命令、直接在 Python 里算的检查（`argv` 为空时用它）
+    built_in: "Callable[[], tuple[bool, str]] | None" = None
 
 
 def has(program: str) -> bool:
@@ -77,12 +81,13 @@ STEPS: list[Step] = [
     Step(
         "deps",
         "通用依赖有没有被误划进 [target.*]（那样它只对桌面生效，Android 编不过）",
-        [sys.executable, str(ROOT / "check_target_deps.py")],
+        [],
+        built_in=lambda: check_target_deps(),
     ),
     Step(
         "fmt",
         "Rust 排版（rustfmt 的默认风格）",
-        ["cargo", "fmt", "--manifest-path", str(ROOT / "src-tauri" / "Cargo.toml"), "--", "--check"],
+        ["cargo", "fmt",  "--", "--check"],
     ),
     Step(
         "clippy",
@@ -102,7 +107,7 @@ STEPS: list[Step] = [
     Step(
         "rust-test",
         "Rust 单元测试（地址、封装、模板块、同步判定、键位……）",
-        ["cargo", "test", "--manifest-path", str(ROOT / "src-tauri" / "Cargo.toml")],
+        ["cargo", "test"],
         slow=True,
     ),
     optional(
@@ -120,6 +125,13 @@ STEPS: list[Step] = [
 
 def run(step: Step) -> tuple[bool, str]:
     """跑一步。返回（过不过、过的话输出是什么）。"""
+    if step.built_in is not None:
+        started = time.monotonic()
+        ok, detail = step.built_in()
+        if ok:
+            return True, f"{time.monotonic() - started:.1f} 秒　{detail}"
+        return False, detail
+
     if not has(step.argv[0]):
         return True, f"跳过：没装 {step.argv[0]}"
 
@@ -189,6 +201,46 @@ def tail_of(text: str, limit: int = 24) -> str:
     picked = lines[-limit:]
     prefix = "（只显示最后 24 行）\n" if len(lines) > limit else ""
     return prefix + "\n".join(picked)
+
+
+def check_target_deps() -> tuple[bool, str]:
+    """通用依赖有没有被误划进 `[target.*]`。
+
+    ## 为什么要查
+
+    TOML 里**一旦出现新的表头，它后面的行就都归那一张表**。所以把
+    `[target.*.dependencies]` 写在 `[dependencies]` 中间，会让后面的通用依赖
+    静默地只对桌面生效 —— `Cargo.toml` 看上去完全正常，桌面构建也完全正常，
+    只有编 Android 时才炸（`cannot find module or crate`）。
+
+    本项目栽过两次（一次吞进移动端段、一次留在桌面段），所以机器查一遍。
+    """
+    import re
+
+    manifest = ROOT / "src-tauri" / "Cargo.toml"
+    # 这些确实该在某个 target 段里（平台专有），不算错
+    allowed = {"gpgme", "tauri-plugin-dialog"}
+
+    table = "[dependencies]"
+    offenders: list[str] = []
+    for number, line in enumerate(manifest.read_text().splitlines(), 1):
+        header = re.match(r"^\[([^\]]+)\]", line)
+        if header:
+            table = header.group(1)
+            continue
+        # **只管 `[target.*]`**：其余的表（package / lib / build-dependencies /
+        # profile.release …）里出现 `名字 = 值` 是天经地义的，不是错。
+        # 我第一版漏了这个条件，于是把 [package] 里的 name、version 全报成"落在平台段"。
+        if not table.startswith("target."):
+            continue
+        entry = re.match(r"^([A-Za-z0-9_-]+)\s*=", line)
+        if not entry or entry.group(1) in allowed:
+            continue
+        offenders.append(f"第 {number} 行：{entry.group(1)}（落在 [{table}] 里）")
+
+    if offenders:
+        return False, "通用依赖落在了平台段里：\n    " + "\n    ".join(offenders)
+    return True, "通用依赖都在 [dependencies] 里"
 
 
 def main() -> int:

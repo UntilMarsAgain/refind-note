@@ -28,9 +28,7 @@ use crate::storage::zip;
 /// 顶多跨在午夜那几个小时的日期差一天 —— 对"这是哪一天的备份"没有实际影响。
 fn default_name() -> String {
     let today = time::OffsetDateTime::now_utc()
-        .format(&time::macros::format_description!(
-            "[year]-[month]-[day]"
-        ))
+        .format(&time::macros::format_description!("[year]-[month]-[day]"))
         .unwrap_or_else(|_| String::from("备份"));
     format!("refind-note-{today}.zip")
 }
@@ -60,7 +58,10 @@ pub fn export_repository(app: AppHandle, target: Option<String>) -> Result<Strin
 
     let (files, bytes) = zip::write_zip(workspace.root(), &target)?;
 
-    eprintln!("[备份] 已打包 {files} 个文件、{} 字节 → {}", bytes, target.display());
+    eprintln!(
+        "[备份] 已打包 {files} 个文件、{} 字节 → {}",
+        bytes,
+        target.display()
+    );
     Ok(target.to_string_lossy().to_string())
 }
-

@@ -72,7 +72,10 @@ pub fn write_zip(root: &Path, target: &Path) -> Result<(usize, u64), String> {
 
     for entry in walk(root, root, target)? {
         let (absolute, relative) = entry;
-        let name = format!("{TOP_DIR}/{}", relative.to_string_lossy().replace('\\', "/"));
+        let name = format!(
+            "{TOP_DIR}/{}",
+            relative.to_string_lossy().replace('\\', "/")
+        );
         // 文件名里可能有不认识的字节（Linux 上完全可能），写不成 UTF-8 就退回
         // "原始字节"那个约定，而不是整个打包失败
         let options = zip::write::SimpleFileOptions::default()
@@ -101,8 +104,8 @@ pub fn write_zip(root: &Path, target: &Path) -> Result<(usize, u64), String> {
 /// **半个压缩包**，而那个文件看起来还是成功的 —— 宁可失败得干脆一点。
 fn walk(root: &Path, dir: &Path, target: &Path) -> Result<Vec<(PathBuf, PathBuf)>, String> {
     let mut out = Vec::new();
-    let entries = fs::read_dir(dir)
-        .map_err(|error| format!("读不了目录 {}：{error}", dir.display()))?;
+    let entries =
+        fs::read_dir(dir).map_err(|error| format!("读不了目录 {}：{error}", dir.display()))?;
 
     for entry in entries {
         let entry = entry.map_err(|error| format!("读不了目录项：{error}"))?;
@@ -151,7 +154,7 @@ fn should_skip(path: &Path, name: &str, target: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{SKIP_NAMES, should_skip, walk, write_zip};
+    use super::{should_skip, walk, write_zip, SKIP_NAMES};
     use std::fs;
     use std::io::Read;
     use std::path::{Path, PathBuf};

@@ -129,7 +129,10 @@ mod tests {
     fn case_and_surrounding_space_do_not_matter() {
         // 前端传的值经过 JSON 与 trim，大小写不该成为一次失败的导出
         assert_eq!(ExportFormat::parse("  PDF ").unwrap(), ExportFormat::Pdf);
-        assert_eq!(ExportFormat::parse("Markdown").unwrap(), ExportFormat::Markdown);
+        assert_eq!(
+            ExportFormat::parse("Markdown").unwrap(),
+            ExportFormat::Markdown
+        );
         // 常见的别名（对话框里人自己敲的）
         assert_eq!(ExportFormat::parse("md").unwrap(), ExportFormat::Markdown);
         assert_eq!(ExportFormat::parse("htm").unwrap(), ExportFormat::Html);

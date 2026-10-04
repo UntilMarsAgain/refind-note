@@ -137,8 +137,14 @@ mod tests {
     fn the_document_is_complete_enough_to_open_on_its_own() {
         let html = wrap_document("测试笔记", "<p>正文</p>");
         // 这四样缺一个，"双击打开"就不成立
-        assert!(html.contains("<!DOCTYPE html>"), "缺 doctype：浏览器会进兼容模式");
-        assert!(html.contains(r#"<meta charset="utf-8">"#), "缺 charset：中文会乱码");
+        assert!(
+            html.contains("<!DOCTYPE html>"),
+            "缺 doctype：浏览器会进兼容模式"
+        );
+        assert!(
+            html.contains(r#"<meta charset="utf-8">"#),
+            "缺 charset：中文会乱码"
+        );
         assert!(html.contains("<title>测试笔记</title>"), "缺 title");
         assert!(html.contains("<style>"), "缺样式：裸标签很难读");
         assert!(html.contains("<h1>测试笔记</h1>"), "正文前应有标题");
@@ -167,11 +173,17 @@ mod tests {
         // 一行长代码把整页撑宽是导出 HTML 最难看的问题
         let style = wrap_document("t", "<p>x</p>");
         assert!(style.contains("overflow-x: auto"), "pre 必须能横向滚");
-        assert!(style.contains("pre-wrap") || style.contains("overflow-wrap"), "长单词要能断行");
+        assert!(
+            style.contains("pre-wrap") || style.contains("overflow-wrap"),
+            "长单词要能断行"
+        );
     }
 
     #[test]
     fn printing_drops_the_screen_padding() {
-        assert!(wrap_document("t", "").contains("@media print"), "应带打印样式");
+        assert!(
+            wrap_document("t", "").contains("@media print"),
+            "应带打印样式"
+        );
     }
 }

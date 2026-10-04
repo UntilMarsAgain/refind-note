@@ -99,10 +99,7 @@ pub fn export_note(
 /// （路径由浏览器的保存对话框决定），所以它的返回值与"导出了某个文件"不是一回事。
 /// 让界面分两次调用，才不会把一段 HTML 当成"已保存的路径"显示出来。
 #[tauri::command]
-pub fn note_print_html(
-    title: String,
-    reference: Option<String>,
-) -> Result<String, String> {
+pub fn note_print_html(title: String, reference: Option<String>) -> Result<String, String> {
     let (_, database) = open_database()?;
     print_note_html(&database, &title, reference.as_deref())
 }
@@ -117,11 +114,13 @@ fn print_note_html(
     title: &str,
     reference: Option<&str>,
 ) -> Result<String, String> {
-    let crate::vault::notes::Reading::Ready { note } = database.read_note(title, reference)?
-    else {
+    let crate::vault::notes::Reading::Ready { note } = database.read_note(title, reference)? else {
         return Err("这一版是加密的：先解锁，再导出".to_string());
     };
-    Ok(crate::platform::print::wrap_for_print(&note.title, &note.html))
+    Ok(crate::platform::print::wrap_for_print(
+        &note.title,
+        &note.html,
+    ))
 }
 
 /// 导出时的默认文件名（**不含扩展名**）：标题里的斜杠（子页面）与文件系统不认的
@@ -138,7 +137,11 @@ fn note_file_stem(title: &str) -> String {
         })
         .collect();
     let safe = safe.trim();
-    if safe.is_empty() { "笔记".to_string() } else { safe.to_string() }
+    if safe.is_empty() {
+        "笔记".to_string()
+    } else {
+        safe.to_string()
+    }
 }
 
 #[tauri::command]
