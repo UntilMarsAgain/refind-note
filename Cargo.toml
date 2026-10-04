@@ -1,0 +1,59 @@
+# Cargo workspace —— 让 `target/` 落在**项目根目录**而不是 `src-tauri/target/`。
+#
+# ## 为什么要有这一层
+#
+# Tauri 项目默认把 Cargo 工程整个放在 `src-tauri/` 里，于是构建产物落在
+# `src-tauri/target/`。那目录会长到**十几二十 GB**（四个 Android ABI × debug+release
+# × 依赖），而它夹在源码中间：
+#
+# - `git status` 之外，它把 `src-tauri/` 撑得很大，编辑器索引、备份、rsync 都跟着累；
+# - 删它的时候要确认自己站在哪一层（`rm -rf src-tauri/target` 还是 `rm -rf target`）；
+# - 顶层还有一个 `dist/`（前端产物），两边各一个"产物目录"，看着别扭。
+#
+# 有了 workspace，**所有** member 共用一个根 `target/`：
+#
+#     target/debug/            桌面
+#     target/aarch64-linux-android/release/   Android
+#     target/armv7-linux-androideabi/release/ …
+#
+# 一处看得见、删得掉、也能在 .gitignore 里一句话说清。
+#
+# ## 为什么必须是 workspace，而不是 `build.target-dir` 配置
+#
+# 那条配置有两个坑，我都实测过：
+#
+# 1. **cargo 的配置只从「当前工作目录」向上找，不从 manifest 所在目录找。**
+#    于是同一个 `target-dir` 要写两份：一份在 `.cargo/`（根目录跑 cargo 时读），
+#    一份在 `src-tauri/.cargo/`（Android 那条路的 CWD 是 `gen/android`，向上正好到它）。
+#    漏一份就有一半构建悄悄回到旧位置 —— 而"悄悄"正是最难查的。
+# 2. 环境变量 `CARGO_TARGET_DIR` 能解决，但它在**这台机器**上，得写进
+#    `~/.zshenv`；换台机器、或者 CI 里跑，就又回到 `src-tauri/target`。
+#
+# workspace 没有这两个问题：**target 的位置由 workspace 根决定，与谁跑的、从哪跑的无关。**
+#
+# ## 别的 Cargo 工具会怎么反应
+#
+# - `cargo build` / `cargo test` / `cargo clippy`：照旧可用（在 workspace 任一 member 下都能跑）。
+# - `cargo fmt`：多了一层 `-p refind-note` 才不会报"多个 package"，但 `cargo fmt --all` 更省心。
+# - 编辑器的 rust-analyzer：认 workspace，索引更快（只开一次）。
+#
+# ## 与 Tauri 的关系
+#
+# `tauri.conf.json` 仍在 `src-tauri/` 下，CLI 仍按 `--manifest-path src-tauri/Cargo.toml`
+# 调 cargo —— **不需要改任何配置**。变的只是产物落在哪儿。
+
+[workspace]
+# `src-tauri` 是唯一的 member。resolver = "2" 是 2021 edition 的要求，
+# 写明它是为了让 cargo 不再警告（edition 2021 起默认就是 2，但显式写出来更清楚）。
+members = ["src-tauri"]
+resolver = "2"
+
+# 与 `src-tauri/Cargo.toml` 里那份相同 —— workspace 根的 profile 会作用到所有
+# member，而放在 member 里那份会被 workspace 根覆盖，两边留一份相同的配置
+# 只会让人以为改哪份都有效。
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

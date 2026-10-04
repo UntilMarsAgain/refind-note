@@ -30,7 +30,6 @@ echo "版本：$version"
 tar -czf "$tarball" \
     --transform "s,^,${name}/," \
     --exclude='./target' \
-    --exclude='./src-tauri/target' \
     --exclude='./node_modules' \
     --exclude='./dist' \
     --exclude='./.git' \

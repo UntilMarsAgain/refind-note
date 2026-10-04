@@ -57,14 +57,16 @@ build() {
   pnpm build
 
   # 后端（Tauri 已经把前端打进二进制里，所以只装这一个可执行文件）
-  cd src-tauri
+  #
+  # 产物在**根目录**的 `target/`：仓库根有 `Cargo.toml`（workspace），
+  # target 的位置由 workspace 根决定 —— 从 `src-tauri/` 里跑 cargo 也一样。
   cargo build --release --locked
 }
 
 package() {
   cd "$pkgname-$pkgver"
 
-  install -Dm755 src-tauri/target/release/refind-note "$pkgdir/usr/bin/refind-note"
+  install -Dm755 target/release/refind-note "$pkgdir/usr/bin/refind-note"
 
   # 桌面项里那条 MimeType 就是 `refind://` 的注册：装完系统就认得这个协议
   install -Dm644 packaging/refind-note.desktop \

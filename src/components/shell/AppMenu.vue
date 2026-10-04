@@ -316,7 +316,14 @@ const groups = computed(() =>
    */
   top: calc(var(--titlebar-height) + var(--safe-top));
   /* 底部标签栏（手机上那条 44px）之上收住，别被它压住 */
-  max-height: calc(100vh - var(--titlebar-height) - var(--safe-top) - 12px);
+  /*
+   * 上边减去标题栏，下边**再减去底部标签栏**（`--rail-bottom-height`）——
+   * 窄窗口下标签栏横到了正文下方，不减的话菜单最后一组会被它压住，
+   * 那一组里的项就点不到了。
+   */
+  max-height: calc(
+    100vh - var(--titlebar-height) - var(--safe-top) - var(--rail-bottom-height) - 12px
+  );
   overflow-y: auto;
   padding: 20px 22px 24px;
   border: 1px solid var(--border);

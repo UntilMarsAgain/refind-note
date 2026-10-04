@@ -1,4 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  启动器**自适应图标**的背景色（`mipmap-anydpi-v26/ic_launcher.xml` 引用它）。
+
+  ## 为什么这个文件要手写、而不是交给 `tauri icon`
+
+  `npx tauri icon` 会生成这个文件，但生成的是一份**空模板**
+  （只有 `<resources></resources>`），颜色留给 Android Studio 去填。
+  没有颜色时自适应图标的底是透明的 —— 在某些启动器上就变成"图形浮在壁纸色上"，
+  浅色壁纸上那道白图形直接看不见。
+
+  所以这里手写：底色必须**跟着图标一起**走，否则用户看到的与设计是两回事。
+
+  ## 值为什么是 #0d0b0b
+
+  图标底色。`public/logo-light.svg` 里那个深色是 `#201c1c`，这里**再压暗一档**：
+  图形是 `#e8e8e8` 的白，两者之间那 27 级的明暗差就是图标上那道"黑边框"。
+  用 `#201c1c` 当底时那个差别太小，在 16–48px 的实际尺寸下**看不出来**，
+  图标就成了"白图形浮在深色方块上"，没有边界感。
+
+  ⚠️ 每跑一次 `npx tauri icon` 都要确认这个文件还在（它会被覆盖成空模板）。
+     顺序：先 `tauri icon app-icon.svg`，再 `tauri icon app-icon-android.svg`，
+     然后**重新写这个文件**，最后把 `src-tauri/icons/android/` 同步到
+     `gen/android/app/src/main/res/`。
+-->
 <resources>
-  <color name="ic_launcher_background">#FFFFFF</color>
+    <color name="ic_launcher_background">#0d0b0b</color>
 </resources>

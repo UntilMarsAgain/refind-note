@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Rust 构建产物 —— 在**仓库根**（`Cargo.toml` 是 workspace 根，target 位置由它决定，
+# 与从哪个目录跑 cargo 无关）
+/target/
+
 # Arch 打包（packaging/arch）：源码包与 makepkg 的产物都是本机生出来的
 packaging/arch/*.tar.gz
 packaging/arch/src/
@@ -24,6 +28,13 @@ packaging/arch/*.pkg.tar.*
 # 工程源要留着是因为里面可能有我们自己的改动（比如 `app/build.gradle.kts` 里的
 # debug 签名配置），重新 init 会覆盖掉那些，所以得能进版本库。
 # 而构建产物动辄两百多 MB，且换个平台/工具链就作废，入库纯属负担。
+# ---- Android 工程（`tauri android init` 生成）----
+#
+# 整个不入库，重新 `pnpm tauri android init` 就能再生成（约 290MB，
+# 绝大部分是各密度的图标 png）。自己的改动由 `android-overlay/` 负责贴回去，
+# 见那份目录里的说明 —— 所以这里忽略掉不会丢东西。
+src-tauri/gen/
+
 src-tauri/gen/android/.gradle/
 src-tauri/gen/android/build/
 src-tauri/gen/android/app/build/

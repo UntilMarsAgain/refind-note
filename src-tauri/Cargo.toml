@@ -97,10 +97,7 @@ tauri-plugin-dialog = { version = "2.8.1", features = ["gtk3"] }
 tauri-plugin-dialog = { version = "2.8.1", default-features = false }
 
 
-# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
-[profile.release]
-codegen-units = 1
-lto = true
-opt-level = 3
-panic = "abort"
-strip = true
+# `[profile.release]` **不在这里** —— 它在仓库根的 `Cargo.toml`（workspace 根）。
+#
+# cargo 只会用 workspace 根那份：留在 member 里的会被忽略，而且 cargo 会为此报一次
+# 警告 —— 看着像"配置生效了"，其实改它没有任何作用。

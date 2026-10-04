@@ -662,14 +662,19 @@ async function interceptClose() {
   position: fixed;
   right: 16px;
   /*
-   * 底部让开系统栏（`env(safe-area-inset-bottom)`）。
+   * 底部要避开两样东西：**系统栏**与**底部标签栏**。
    *
-   * 桌面浏览器上 `env()` 是 0，于是 `max()` 落到 28px —— 那是原来那个值，桌面不变。
-   * 手机上系统栏已被 `MainActivity` 藏进沉浸式（见那里的说明），`env()` 通常也是 0，
-   * 但**不保证**（某些 ROM / 某些时机仍会报真实值），所以两条路都要留着：
-   * 藏起来时按 28px 走，没藏住时按安全区让开。
+   * 桌面浏览器与宽窗口下两者都是 0（标签栏在左边、不占底部），于是 `max()` 落到
+   * 28px —— 那是这个位置原来的值，桌面观感不变。
+   *
+   * 手机（窄窗口）下标签栏横到了正文下方占 44px（`rail.css` 里那条 media 赋值），
+   * 不避开它的话这一列就压在标签栏上：截图里最后那颗「↓` 正好落在标签栏那一行。
+   * 而系统栏那边，沉浸式下 `env()` 通常是 0，但不保证（某些 ROM 仍会报真实值），
+   * 所以两条路都留着。
+   *
+   * 取三者里**最大的那个**：谁占地方就躲开谁。
    */
-  bottom: max(28px, calc(var(--safe-bottom) + 8px));
+  bottom: max(28px, var(--rail-bottom-height), calc(var(--safe-bottom) + 8px));
   right: max(16px, calc(var(--safe-right) + 8px));
   z-index: 30;
   display: flex;
