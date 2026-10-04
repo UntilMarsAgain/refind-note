@@ -39,6 +39,27 @@ body {
     overflow: hidden; /* 自绘标题栏的桌面应用通常不需要页面滚动条 */
 }
 
+/*
+ * ---- 安全区：状态栏、刘海、手势条 ----
+ *
+ * `env(safe-area-inset-*)` 在桌面浏览器里**一律是 0**，所以桌面上这条什么也不改。
+ * 手机上 WebView 默认铺到整块屏幕，于是自绘的标题栏（`top: 0`）会被状态栏压住 ——
+ * 标题栏本身还在，只是它的下半截藏在状态栏底下看不见。
+ *
+ * 所以由**标题栏自己**把顶部让出来，而不是给整个页面加 padding：
+ * 页面内容仍然从屏幕最顶开始（那是 WebView 的实际布局框），只有需要躲开系统 UI
+ * 的那一层才让位。`env()` 的第二个参数是**没有安全区时的兜底**——
+ * 桌面浏览器不支持 `env()` 时整个声明作废，正好。
+ *
+ * 变量定义在 `:root` 上（`theme.css` 里那两个主题块都会覆盖颜色，但这里只加高度）。
+ */
+:root {
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left: env(safe-area-inset-left, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
+}
+
 body {
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;

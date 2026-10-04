@@ -34,6 +34,7 @@ import { syncAvailable, syncBusy, syncNow, syncProgress } from "../../core/sync.
 import { describeReport } from "../../ipc/sync.ts";
 import { flash } from "../../core/notice.ts";
 import { currentWindow } from "../../core/window-api.ts";
+import { isMobile } from "../../core/platform.ts";
 
 /**
  * 自绘标题栏。
@@ -206,7 +207,17 @@ function onBlur() {
     </div>
     <div v-else class="titlebar__center"/>
 
-    <div class="titlebar__controls">
+    <!--
+      窗口操作（最小化 / 最大化 / 关闭）**只在桌面显示**。
+
+      手机上根本没有这些概念：系统管多任务与应用切换，不给应用最小化的接口
+      （`minimize()` 在 Android 上无效），最大化更是无从谈起。摆出来只会让人
+      点一个没反应的按钮 —— 而"点了没反应"比"没有这个按钮"糟得多。
+
+      判据用 `isMobile()`：它问的是**后端**（`platform_kind`），那个值编译期就定了，
+      不像前端嗅 UA 那样把桌面浏览器和手机混起来。
+    -->
+    <div v-if="!isMobile()" class="titlebar__controls">
       <button
           class="wbtn"
           type="button"
@@ -241,7 +252,19 @@ function onBlur() {
   display: flex;
   align-items: center;
   flex: 0 0 auto;
-  height: var(--titlebar-height);
+  /*
+   * 高度要把状态栏**让出来**。
+   *
+   * 手机上 WebView 铺到整块屏幕，这一栏自己画在 `top: 0`，于是上半截（连同 logo 与
+   * 地址框）藏在状态栏底下 —— 表现是"标题栏被遮住一半"。
+   *
+   * 用 `padding-top` 而不是 `margin-top`：让出来的那一块要**仍然是标题栏的背景**，
+   * 否则状态栏那一段会露出底下页面的颜色，看起来像标题栏中间开了个洞。
+   * 桌面浏览器上 `env(safe-area-inset-top)` 是 0，这一行等于什么都不做。
+   */
+  height: calc(var(--titlebar-height) + var(--safe-top));
+  padding-top: var(--safe-top);
+  box-sizing: border-box;
   /* 与正文同一个变量，两者之间不留分界 */
   background: var(--bg);
   transition: background-color 160ms ease;

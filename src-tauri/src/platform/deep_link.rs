@@ -29,6 +29,11 @@ use tauri::{AppHandle, Emitter, Manager};
 use super::decode_percent;
 
 /// 协议名（`refind://` 里的 `refind`）
+///
+/// 只在桌面用：下面用它的三处全是生成 Linux 的 `.desktop` 文件与注册 URL 处理器的，
+/// 那些在手机上都不存在。所以加 `cfg(desktop)` —— 否则移动端每次构建都带一条
+/// `constant SCHEME is never used` 警告（真出现过）。
+#[cfg(desktop)]
 const SCHEME: &str = "refind";
 
 /// 等着被打开的地址（冷启动时窗口还没建好，先寄存在这里）

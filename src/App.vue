@@ -651,7 +651,16 @@ async function interceptClose() {
 .corner {
   position: fixed;
   right: 16px;
-  bottom: 28px;
+  /*
+   * 底部要让开手势条（`env(safe-area-inset-bottom)`）。
+   *
+   * 28px 那个固定值在桌面上刚好避开状态栏底边，但在手机上**不够** —— 手机底部
+   * 有手势条 / 三键导航，那一块是系统画的，这一列圆按钮正好压在它上面，点不到。
+   * 所以取 `max(28px, 安全区)`：桌面行为不变，手机上自动让开。
+   * 桌面浏览器上 `env()` 是 0，于是 `max()` 就是原来的 28px。
+   */
+  bottom: max(28px, calc(var(--safe-bottom) + 8px));
+  right: max(16px, calc(var(--safe-right) + 8px));
   z-index: 30;
   display: flex;
   flex-direction: column;

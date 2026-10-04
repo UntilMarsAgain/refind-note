@@ -21,8 +21,13 @@
  */
 .findbar {
   position: fixed;
-  top: 46px;
-  right: 16px;
+  /*
+   * 顶部要让开状态栏：标题栏已经把安全区让出来了，而查找条是 `position: fixed`，
+   * 不在标题栏那个盒子里，所以要自己再加一次 —— 否则它会正好落在标题栏**上面**
+   * （也就是被状态栏压住的那一块）。
+   */
+  top: calc(var(--titlebar-height) + var(--safe-top) + 6px);
+  right: max(16px, calc(var(--safe-right) + 8px));
   z-index: 40;
   display: flex;
   gap: 4px;

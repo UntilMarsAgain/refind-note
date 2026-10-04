@@ -54,8 +54,52 @@ const app = createApp(App);
  */
 app.config.errorHandler = (error, _instance, info) => {
     console.error("[渲染出错]", info, error);
-    flash(`界面出了点问题：${error instanceof Error ? error.message : String(error)}`);
+    flash(`界面出了点问题：${describeError(error)}`);
 };
+
+/**
+ * 把一个错误说成人话。
+ *
+ * 原来直接 `String(error)`，于是**抛出来的东西不是 `Error` 时就变成
+ * `[object Object]`** —— 恰好是最需要看清的那种情况（组件里抛普通对象、
+ * 或抛出结构化的 `{ code, message }`）把信息全丢了，只剩一句"界面出了点问题"。
+ *
+ * 所以分几层往里挖，每一层都比上一层更像人话：
+ * - `Error`：要 `message`，带上 `name`（`TypeError` 比"xxx is not a function"有用）
+ * - `message` 字段的对象：直接取它（很多库抛的是 `{ message }`）
+ * - 别的对象：挑几个常见字段（`code` / `reason` / `error`）再挖一层，
+ *   都没有才退回 JSON —— JSON 至少比 `[object Object]` 能看出形状
+ * - 都不是：`String(value)`
+ */
+function describeError(value: unknown): string {
+    if (value instanceof Error) {
+        return value.name && value.name !== "Error"
+            ? `${value.name}: ${value.message}`
+            : value.message;
+    }
+    if (value && typeof value === "object") {
+        const record = value as Record<string, unknown>;
+        for (const key of ["message", "reason", "code", "error"]) {
+            const inner = record[key];
+            if (typeof inner === "string" && inner) {
+                return inner;
+            }
+            // `error` 常再包一层（`{ error: { message } }`），递归挖一次就够
+            if (inner && typeof inner === "object") {
+                const nested = describeError(inner);
+                if (nested !== "[object Object]") {
+                    return nested;
+                }
+            }
+        }
+        try {
+            return JSON.stringify(value);
+        } catch {
+            return "（一个无法序列化的对象）";
+        }
+    }
+    return String(value);
+}
 
 // 先把壳挂起来：启动还没跑完时主区域显示的是加载页（见 startup.ts）。
 // 偏好读回来之后主题、主题色、缩放立刻应用（见 openWorkspace）。
