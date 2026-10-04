@@ -30,6 +30,7 @@ import { headingsIn } from "../../dom/outline.ts";
 // 不是分支那边的 `saveNoteMarkdown` —— 那个只出 markdown，是本项目更早的做法。
 import { saveNoteAs } from "../../dom/file-save.ts";
 import { useFindInPage } from "../../composables/useFindInPage.ts";
+import { useOutline } from "../../composables/useOutline.ts";
 import ExportPicker from "./ExportPicker.vue";
 import FindBar from "./FindBar.vue";
 import NoteContent from "./NoteContent.vue";
@@ -204,52 +205,28 @@ const contentRef = ref<InstanceType<typeof NoteContent> | null>(null);
 // ------------------------------------------------------------ 本页目录
 
 /**
- * 这一篇的目录。
+ * 这一篇的目录（接线在 `useOutline.ts`，判定与层级在 `core/outline.ts`）。
  *
- * 标题的 `id` 是**渲染时**才有的，所以它得等正文进 DOM 之后才算得出来 ——
- * 与页内查找同一个时机、同一个容器（`contentRef`，所以它必须先声明）。
- * 层级怎么算在 `core/outline.ts`。
+ * 它与页内查找共用同一个时机、同一个容器 —— 标题的 `id` 是**渲染时**才有的。
  */
-const outline = ref<ReturnType<typeof outlineOf>>([]);
-/** 点过（或地址里带来的）那一节：目录上标出来 */
-const outlineActive = ref("");
+const outline = useOutline(contentRef);
 
-/** 重新数一遍标题。容器换了一篇、或正文重渲染过，都要重数 */
-function refreshOutline() {
-    const entries = outlineOf(headingsIn(contentRef.value?.rootEl ?? null));
-    outline.value = shouldShowOutline(entries) ? entries : [];
-}
-
-// `NoteContent` 换了组件（`v-else-if` 分支）时容器会变，跟着重数
-watch(contentRef, () => refreshOutline(), { immediate: true });
-
-// **正文重渲染**也要重数：`v-html` 换一次内容，组件还是那一个、容器还是那一个，
-// 标题却已经是新的一批了。`ready` 是 `NoteContent` 收拾完之后才递增的计数
-// —— 等它再数，才不会数到一半的 DOM（那时复制按钮还没插进去、高亮也还没上）。
-watch(
-    () => contentRef.value?.ready ?? 0,
-    () => refreshOutline(),
-);
-
-// 点了目录里的一条：滚过去，并把章节报给上层（与正文里点锚点是同一条路）
+// 目录里点一条：滚过去，并把章节报给上层（与正文里点锚点是同一条路）
 function onPickSection(id: string) {
-    contentRef.value?.rootEl?.querySelector(`#${CSS.escape(id)}`)?.scrollIntoView({ block: "start" });
-    outlineActive.value = id;
+    outline.pick(id);
     emit("section", id);
 }
 
 // 正文里点锚点也会换章节：目录上那一项要跟着亮
 function onSection(id: string) {
-    outlineActive.value = id;
+    outline.mark(id);
     emit("section", id);
 }
 
 // 地址里带来的章节（深链 / 后退回来）：目录上那一项也要亮
 watch(
     () => props.section ?? "",
-    (section) => {
-        outlineActive.value = section;
-    },
+    (section) => outline.sync(section),
     { immediate: true },
 );
 
@@ -403,7 +380,7 @@ watch(
         本页目录：放在正文**上面**（标题与元信息之下、正文之上），收起时不占地方。
         条目不足四节就不画，见 `core/outline.ts` 的 `MIN_HEADINGS`。
       -->
-      <OutlinePanel :entries="outline" :active="outlineActive" @pick="onPickSection"/>
+      <OutlinePanel :entries="outline.entries.value" :active="outline.active.value" @pick="onPickSection"/>
 
       <NoteContent
           ref="contentRef"

@@ -20,7 +20,6 @@
 //!
 //! 这一层不知道存储：目标是否存在，由调用方在渲染前通过
 //! [`crate::vault::target::Resolver`] 传进来，再经 [`render_with`] 注入当次渲染。
-#![allow(dead_code)]
 
 pub mod syntax;
 

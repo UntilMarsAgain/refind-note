@@ -22,8 +22,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { BookOpen, Code } from "@lucide/vue";
 import type { HelpPage } from "../../ipc/help.ts";
 import { useFindInPage } from "../../composables/useFindInPage.ts";
+import { useOutline } from "../../composables/useOutline.ts";
 import FindBar from "../note/FindBar.vue";
 import NoteContent from "../note/NoteContent.vue";
+import OutlinePanel from "../note/OutlinePanel.vue";
 import PageHeader, { type PageAction } from "../note/PageHeader.vue";
 import SourceView from "../note/SourceView.vue";
 
@@ -50,6 +52,13 @@ const props = defineProps<{
   editable: boolean;
   /** 这一页星标过没有 */
   starred?: boolean;
+  /**
+   * 地址里带的章节（`#某节`）—— 目录上那一项要跟着它亮。
+   *
+   * 理由与 `NoteView` 里那个同名 prop 一样：直接打开 `Help:语法速览#模板块`
+   * 时，目录什么都不指是另一回事。
+   */
+  section?: string;
   /** 上层让"打开查找条"（递增的信号，理由见 `NoteView` 里同样的字段） */
   findRequest?: number;
   /** 上层让"下一个/上一个" */
@@ -85,6 +94,15 @@ const entry = ref<HelpPage | null>(null);
 const problem = ref("");
 const loading = ref(false);
 
+/**
+ * 本页目录。
+ *
+ * 与阅读笔记走**同一个** composable（`useOutline`）—— 两页是同一件事，
+ * 不该各写一遍"什么时候重数一次"。帮助页比笔记更需要它：《语法展示》那一页
+ * 有二十几 KB、几十个标题，没有目录就只能一路滚。
+ */
+const outline = useOutline(contentRef);
+
 // 下面这几个 watch 里有两个是 `immediate: true` —— 它们**在 setup 还没走完时就跑一遍**。
 // 所以凡是它们用到的状态（`entry`）必须声明在上面。我第一版把这一整块插在
 // 状态声明**之前**，于是首次打开帮助页必然抛
@@ -101,6 +119,13 @@ watch(
     find.root.value = component?.rootEl ?? null;
     find.hide();
   },
+  { immediate: true },
+);
+
+// 地址里带来的章节（深链 / 后退回来）：目录上那一项也要亮
+watch(
+  () => props.section ?? "",
+  (section) => outline.sync(section),
   { immediate: true },
 );
 
@@ -167,6 +192,18 @@ function onAction() {
   const slug = entry.value?.slug ?? props.page;
   emit("navigate", props.source ? `Help:${slug}` : `Help:${slug}@edit`);
 }
+
+/** 目录里点一条：滚过去，并把章节报给上层（与正文里点锚点是同一条路） */
+function onPickSection(id: string) {
+  outline.pick(id);
+  emit("section", id);
+}
+
+/** 正文里点锚点：目录上那一项跟着亮 */
+function onSection(id: string) {
+  outline.mark(id);
+  emit("section", id);
+}
 </script>
 
 <template>
@@ -196,14 +233,25 @@ function onAction() {
       <!-- 源码：只读摊开（编辑器同一套视图）。改它要去改仓库里的帮助文件，再重新编译 -->
       <SourceView v-if="props.source" :markdown="entry.markdown"/>
 
-      <NoteContent
-          v-else
-          ref="contentRef"
-          :html="entry.html"
-          @wikilink="emit('navigate', $event.title)"
-          @wikilink-new="emit('navigate', $event)"
-          @section="emit('section', $event)"
-      />
+      <template v-else>
+        <!--
+          本页目录：只挂在**正文**那一支上 —— 摊开的源码是编辑器，
+          那里有 CodeMirror 自己的查找与折叠，再摆一份目录只是重复。
+        -->
+        <OutlinePanel
+            :entries="outline.entries.value"
+            :active="outline.active.value"
+            @pick="onPickSection"
+        />
+
+        <NoteContent
+            ref="contentRef"
+            :html="entry.html"
+            @wikilink="emit('navigate', $event.title)"
+            @wikilink-new="emit('navigate', $event)"
+            @section="onSection"
+        />
+      </template>
 
       <!-- 页内查找：帮助页也是正文，一样能找（`find-bar.css` 写了层叠关系） -->
       <FindBar

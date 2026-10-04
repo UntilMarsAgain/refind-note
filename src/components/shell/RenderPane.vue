@@ -396,6 +396,7 @@ defineExpose({
             :display="helpPage.title"
             :source="mode?.kind === 'edit'"
             :editable="route?.editable ?? false"
+            :section="route?.address.section ?? ''"
             :starred="starredHere"
             :collapsed="collapsed"
             :find-request="findRequest"
