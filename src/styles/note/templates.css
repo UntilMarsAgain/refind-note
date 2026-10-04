@@ -526,3 +526,32 @@
 .note-body .callout > :last-child {
   margin-bottom: 0;
 }
+
+/*
+ * `::decrypt` 已经解锁时的样子（底部为空 → 摆这一句）。
+ *
+ * 刻意**留在原位**而不是悄悄消失：作者写了 `::decrypt page=卡片` 就是要在这里
+ * 占一个位，正文突然少一块的话，人分不清那是程序吃掉了还是自己写错了。
+ *
+ * 视觉上刻意**很轻** —— 它不再是"要你处理的事"，只是一句"这里已经不用管了"。
+ */
+.note-body .decrypt--done {
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 0.9em;
+  vertical-align: baseline;
+}
+
+.note-body .decrypt__badge {
+  color: var(--text-dim);
+}
+
+.note-body .decrypt__label {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}

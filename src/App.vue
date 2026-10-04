@@ -407,17 +407,16 @@ onMounted(() => {
     // 这里只管一种：**解开的不是当前这一篇**（那一定是正文里嵌着的模板页），
     // 于是要刷新的是当前这一篇。当前这一篇自己的解锁走的是 `NoteView` 里的
     // `load()`，不经过这里。
-    setRevealDecrypted((kind, title) => {
-      if (kind !== "page") {
-        return;
-      }
-      const outcome = active.value?.route?.outcome;
-      if (outcome?.kind === "note" && outcome.title === title) {
-        renderPane.value?.reload();
-        return;
-      }
-      void navigate(title, "replace");
-    });
+// 页内解锁框解开之后：**重渲染当前这一篇**。
+    //
+    // 为什么不是"跳到被解开的那一页去"：`::decrypt page=卡片` 是**正文里的一处**，
+    // 卡片解开之后该换的是**它所在那一篇**里的那一个位置 —— 跳去卡片等于把人
+    // 从他正在读的笔记里拽走。`::decrypt` 的底部内容也只有重渲染才拿得到
+    // （它就在宿主那一篇的原文里）。
+    //
+    // 附件那条路不走这里：它在 `dom/note-html.ts` 里自己换那一个元素。
+    // 笔记自己上锁那条也不走：`NoteView` 里的 `UnlockView` 直接调 `load()`。
+    setRevealDecrypted(() => renderPane.value?.reload());
   void interceptClose();
   // 深链来的时候**开一个新标签页**，不动人正在看的这一页：
   // 对方是从别处点了一个链接过来的，不是要你离开手上这一页 ——

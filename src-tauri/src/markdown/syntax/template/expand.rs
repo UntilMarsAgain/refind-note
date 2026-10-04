@@ -33,11 +33,16 @@ pub(super) fn expand_user_template(
         Some(crate::markdown::TemplatePage::Ready(text)) => text,
         // 有这一页但读不出来（没解锁、坏了）：**说清原因**，别报成"未知模板"
         Some(crate::markdown::TemplatePage::Unreadable { reason, protection }) => {
-            // 上锁 → 摆**解锁框**，不是一句提示。人和那个加密附件用的是同一个框。
+            // 读不出来 → **当作作者写了一个 `::decrypt page=那一页`**（作者定的）。
             //
-            // "要不要给口令输入框"从 `protection.symmetric` 来 —— 后端此刻已经知道，
-            // 不必让前端再猜一次（猜错是静默的，见 `TemplatePage::Unreadable`）。
-            return Some(decrypt_node(name, &reason, protection.symmetric));
+            // 所以这里走**同一个** `dispatch::render_decrypt`，而不是另做一套渲染：
+            // 两条来路（作者亲手写的、解析器自己摆的）框的样子与行为只有一处定义，
+            // 改一边另一边不会安静地变样。
+            //
+            // 此刻已经知道的两样**在这里白拿**：渲染器会自己从同一张表再问一遍，
+            // 答案一致，而少一份"这里算一遍、那里算一遍"就不会算歪。
+            let _ = (reason, protection);
+            return Some(decrypt_node(name));
         }
         None => return None,
     };
@@ -79,47 +84,45 @@ impl NodeValue for ExpandedTemplate {
     }
 }
 
-/// 造一个"出错了"的内部节点：说清出了什么事，并且给得出下一步。
+/// 造一个 `::decrypt` 节点：**当作**作者写了 `::decrypt page=那一页`。
 ///
-/// 两类节点共用它，区别只在 `name` 与参数：
+/// 与作者亲手写的走同一个渲染器（见上面那处调用），所以这里只补两样作者不会写的东西：
 ///
-/// - [`problem_node`]：说法本身有问题（模板套模板超层数）。只给一句说明。
-/// - [`decrypt_node`]：东西没问题，只是它上了锁。给**解锁框**，能在原地解锁。
+/// - `internal`：让 `render_decrypt_box` 在框下面挂"去把那一页改掉"的链接 ——
+///   作者写的那种 `children` 是**底部内容**，锁着的时候不该显示出来；
+/// - children 上那个指向模板页的链接（口令打不开时，人还能去改那一页）。
 ///
-/// 两者都挂一个指向那个模板页的链接：口令打不开时，能做的下一步仍然是去把
-/// 那一页改掉 —— 看到提示就能点过去，而不是自己回想"刚才那个 `::卡片` 是哪一页"。
-fn locked_node(name: &str, why: &str, kind: &str, needs_passphrase: bool) -> Node {
+/// 其余（`reason`、要不要口令）由 `render_decrypt` 自己从
+/// [`crate::markdown::template_page`] 再问一遍 —— 同一张表，答案一样。
+fn decrypt_node(name: &str) -> Node {
     let page = format!("{TEMPLATE_NAME}:{name}");
     let mut node = Node::new(Template {
-        name: kind.to_string(),
-        // `decrypt` 要目标与名字；**不要**在这里猜"要不要口令" ——
-        // 那是 `commands::lock::lock_state` 的活（它真的去问那一版的头），
-        // 这里猜的话模板页与文件就会有两套判断。
+        name: "decrypt".to_string(),
         params: vec![
-            ("target".to_string(), page.clone()),
+            ("page".to_string(), page.clone()),
             ("label".to_string(), name.to_string()),
-            (
-                "passphrase".to_string(),
-                if needs_passphrase { "yes" } else { "no" }.to_string(),
-            ),
+            ("internal".to_string(), "yes".to_string()),
         ],
-        body: why.to_string(),
+        // 底部是空的：解开之后摆一句"已解锁"，不凭空造内容
+        body: String::new(),
     });
     node.children.push(wikilink::link_node(&page, &page));
     node
 }
 
-/// 说法本身有问题 —— 不给解锁框
-fn problem_node(name: &str, why: &str) -> Node {
-    locked_node(name, why, "problem", false)
-}
-
-/// 上了锁 —— 给解锁框，参数见 [`dispatch::render_decrypt`]
+/// 说法本身有问题（模板套模板超层数）：只给一句说明，**不给**解锁框。
 ///
-/// `needs_passphrase` 由**后端**给（它刚读过那一页的封装头）：对称层要问口令，
-/// gpg 层不问 —— 它问的是钥匙串或智能卡。
-fn decrypt_node(name: &str, why: &str, needs_passphrase: bool) -> Node {
-    locked_node(name, why, "decrypt", needs_passphrase)
+/// 那种场合输了口令问题还在，给个输入框是荒唐的。分工由
+/// `a_usage_problem_is_not_given_an_unlock_box` 钉住。
+fn problem_node(name: &str, why: &str) -> Node {
+    let page = format!("{TEMPLATE_NAME}:{name}");
+    let mut node = Node::new(Template {
+        name: "problem".to_string(),
+        params: Vec::new(),
+        body: why.to_string(),
+    });
+    node.children.push(wikilink::link_node(&page, &page));
+    node
 }
 
 #[cfg(test)]
@@ -225,6 +228,156 @@ mod tests {
         );
         // 原因照原样传下去：gpg 的失败有好几种，不该被压成同一句话
         assert!(gpg.contains("没有私钥"), "{gpg}");
+    }
+
+    /// `::decrypt` 自己套自己：**不会**无限递归。
+    ///
+    /// 这里记过一次查探的结果，因为"要不要给它加一道深度限制"是反复被问的一件事，
+    /// 而答案是**不用**（作者定的：用户自己写的嵌套不必再限一层）。理由有两条：
+    ///
+    /// 1. **字面嵌套的深度等于原文长度。** `::decrypt page=甲` 的底部就写着
+    ///    `::decrypt page=甲`，那底下还能再写一层，但写第三层就得在原文里真的
+    ///    写第三遍 —— 所以它是有限的，测出来两层就到"已解锁"了。
+    /// 2. **真能无限的只有借道用户模板**（底部写 `::甲`，于是每一轮都重新展开甲），
+    ///    而那条路每一圈都过一次 `expand_user_template`，`MAX_TEMPLATE_DEPTH`
+    ///    在那里查 —— 全局那道护栏已经管住了。
+    ///
+    /// 所以 `dispatch::render_decrypt` 里**没有**自己的深度限制：加了只会把
+    /// 作者写意的 `::decrypt page=甲` 里面再嵌 `::decrypt page=乙` 拦下来，
+    /// 而那是正当的用法。
+    #[test]
+    fn decrypt_nesting_terminates_because_the_text_itself_is_finite() {
+        // 甲 引用 甲，而 甲 是能读的
+        let mut pages = HashMap::new();
+        pages.insert(
+            "甲".to_string(),
+            TemplatePage::Ready("::decrypt page=甲\n".into()),
+        );
+
+        let html = render_with_pages("::甲\n", None, Some(Arc::new(pages)));
+        // 底部是空的 → 一句"已解锁"，而不是又去解一次
+        assert!(html.contains("已解锁"), "{html}");
+        assert_eq!(
+            html.matches("data-decrypt=\"yes\"").count(),
+            0,
+            "甲 没有锁，不该摆解锁框：{html}"
+        );
+    }
+
+    /// 借道用户模板的那种递归：靠 `MAX_TEMPLATE_DEPTH` 收住，说清是"套太深"
+    #[test]
+    fn decrypt_recursion_through_a_user_template_is_cut_off_by_the_global_limit() {
+        // 甲 = `::decrypt page=甲` + 底部再写 `::甲` —— 每一轮都重新展开甲
+        let mut pages = HashMap::new();
+        pages.insert(
+            "甲".to_string(),
+            TemplatePage::Ready("::decrypt page=甲\n\n::甲\n".into()),
+        );
+
+        let html = render_with_pages("::甲\n", None, Some(Arc::new(pages)));
+        assert!(
+            html.contains("模板嵌套超过"),
+            "该被全局的深度限制收住并说清为什么：{html}"
+        );
+    }
+
+    /// `::decrypt page=X` 是一个**能给人写**的模板：解开之后用底部内容替换它的位置。
+    ///
+    /// 这一条钉的是作者要的那件事本身。底部内容是一个 markdown 子页面 ——
+    /// 与别的模板的块内容同一套做法（`scanner.rs` 第 113 行），所以里面能写字、
+    /// 能列表、能再嵌模板。
+    #[test]
+    fn a_hand_written_decrypt_replaces_itself_with_the_body_once_unlocked() {
+        // 甲 是**能读的**（没锁）→ 直接渲染底部，不摆框
+        let mut pages = HashMap::new();
+        pages.insert(
+            "甲".to_string(),
+            TemplatePage::Ready("::decrypt page=甲\n\n解开了。**这一段**是替代内容。\n".into()),
+        );
+
+        // 块正文要**缩进** —— 与所有模板同一套块边界规则（见 `scanner.rs` 抬头）
+        let html = render_with_pages(
+            "::decrypt page=甲\n  解开了。**这一段**是替代内容。\n",
+            None,
+            Some(Arc::new(pages)),
+        );
+
+        assert!(
+            !html.contains("data-decrypt=\"yes\""),
+            "没锁就不该摆框：{html}"
+        );
+        // 底部内容真的渲染出来了，而且是**解析过的**（`**这一段**` 变成 `<strong>`）
+        assert!(html.contains("<strong>这一段</strong>"), "{html}");
+        // 不该同时摆一句"已解锁"：有底部内容时它就是替代内容本身
+        assert!(!html.contains("data-decrypt-done"), "{html}");
+    }
+
+    /// 底部为空 + 已经解锁 → 摆一句"已解锁"，**留在原位**
+    #[test]
+    fn an_unlocked_decrypt_with_no_body_leaves_a_marker_where_it_stands() {
+        let mut pages = HashMap::new();
+        pages.insert(
+            "甲".to_string(),
+            TemplatePage::Ready("随便什么内容\n".into()),
+        );
+
+        let html = render_with_pages("::decrypt page=甲\n", None, Some(Arc::new(pages)));
+
+        assert!(html.contains(r#"data-decrypt-done="yes""#), "{html}");
+        assert!(html.contains("已解锁"), "{html}");
+        // 悄悄消失的话，正文会突然少一块 —— 人分不清是程序吃掉了还是自己写错了
+        assert!(html.contains("class=\"decrypt decrypt--done\""), "{html}");
+    }
+
+    /// `page` 必填：没写就是用法错误，给一句说明（不是解锁框）
+    #[test]
+    fn decrypt_without_a_page_says_so_instead_of_pretending() {
+        let html = render_with_pages("::decrypt\n", None, None);
+        assert!(html.contains("缺少 page="), "{html}");
+        assert!(!html.contains("data-decrypt=\"yes\""), "不该摆框：{html}");
+    }
+
+    /// `page` 指的那一页压根不存在 → 说清是"不存在"，不是"读不出来"
+    #[test]
+    fn decrypt_pointing_at_a_page_that_is_not_there_says_so() {
+        let html = render_with_pages("::decrypt page=没有这一页\n", None, None);
+        assert!(html.contains("不存在"), "{html}");
+        assert!(!html.contains("data-decrypt=\"yes\""), "不该摆框：{html}");
+    }
+
+    /// **查看页面代码时保持原样** —— 这是作者点名的第二条。
+    ///
+    /// 解析器发现模板页读不出来时会"当作写了一个 `::decrypt`"，但那是**渲染期**的
+    /// 替换：宿主那一篇的原文里仍然是 `::甲`，一个字都没动。
+    ///
+    /// 这条钉的就是这件事：渲染走一遍之后，**原文那个字符串本身**必须一模一样 ——
+    /// 万一将来有人图省事把 `::decrypt page=甲` 写回页子里，这条会立刻炸。
+    #[test]
+    fn rendering_does_not_rewrite_the_source_it_was_given() {
+        let source = String::from("::甲\n\n后面还有正文，别动它。\n");
+        let before = source.clone();
+
+        let mut pages = HashMap::new();
+        pages.insert(
+            "甲".to_string(),
+            TemplatePage::Unreadable {
+                reason: "这一页是加密存的".into(),
+                protection: crate::storage::codec::Protection {
+                    symmetric: true,
+                    ..crate::storage::codec::Protection::plain()
+                },
+            },
+        );
+        let html = render_with_pages(&source, None, Some(Arc::new(pages)));
+
+        assert!(
+            html.contains("data-decrypt=\"yes\""),
+            "渲染期该摆框：{html}"
+        );
+        // 渲染期摆了解锁框，而**原文里没有半个 `decrypt`**
+        assert_eq!(source, before, "原文被改了");
+        assert!(!source.contains("decrypt"), "{source}");
+        assert!(source.contains("::甲"), "{source}");
     }
 
     /// 说法本身有问题（套太深）**不给**解锁框。

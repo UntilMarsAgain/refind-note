@@ -67,31 +67,112 @@ pub(super) fn render_problem_page(template: &Template, node: &Node, fmt: &mut dy
     fmt.cr();
 }
 
-/// `decrypt` —— **读不出来的那一份**摆在原位上的解锁框。
+/// `decrypt` —— 页内解锁。
 ///
-/// ## 为什么它必须在注册表里
+/// ## 它是个**能给人写**的模板
 ///
-/// [`crate::markdown::syntax::template::expand`] 在模板页读不出来时拿不到节点，
-/// 就手工拼一个 `name: "decrypt"` 的 `Template` 交给分发，而分发只认注册表。
-/// 它不在表里的话，"这一页没解锁"会被显示成 `未知模板 :: decrypt` —— 作者看到的是
-/// 自己写错了模板名，而真正的原因是**模板页上了锁**，两边对不上，这正是最难查的一类。
+/// ```text
+/// ::decrypt page=卡片
+///   卡片解开之后，这里替换它的位置。
+/// ```
 ///
-/// ## 它只出标记，不出输入框
+/// `page` 必填（要解锁的是哪一页）。行为只有两种：
 ///
-/// 这里写出来的 `span[data-decrypt]` 只带**数据属性**（哪一种、哪一份、要不要口令、
-/// 为什么读不出来）；输入框、按钮、"显示"这三个动作由前端 `dom/decrypt.ts` 补上。
+/// - **那一页现在读得动** → 渲染底部内容（它是一个 markdown 子页面，
+///   和别的模板的块内容一样重新过一遍解析器）；底部为空就摆一句"已解锁"。
+/// - **读不动** → 摆解锁框（`span[data-decrypt]` 标记 + 几个数据属性）。
+///   解开了以后调用方**重渲染这一篇**，`::decrypt` 自然就换成底部内容了。
 ///
-/// 这么分是因为**同样的框有两条来路**，而信息到达的时间不一样：模板页是渲染时就知道，
-/// 附件是前端异步探明之后才知道。两边都走同一个前端构造器（`decryptBox`），
-/// 于是框的样子与行为只有**一处**定义 —— 标记只是把"这是个解锁框"这件事告诉前端。
+/// 解析器发现某个模板页读不出来时，**就当作写了一个 `::decrypt page=那一页`**
+/// （见 `expand::expand_user_template`）。所以那件事与作者亲手写的走的是同一条路。
 ///
-/// 与 [`render_problem`] 分开是因为**原因不同**：一个是"名字认识、用法不对"，
-/// 一个是"名字没问题，但它指的那一页读不出来"。所以这里**不回显这次的参数** ——
-/// 出问题的不是这次用法，回显出来只会把作者引到错的地方。
+/// ## `page=` 在哪个命名空间里找
 ///
-/// 但**那一页本身的链接要给**（`expand::decrypt_node` 挂在 children 上的那个）：
-/// 口令打不开时，能做的下一步仍然是去把那一页改掉，链接正是那一步。
+/// 与 `::名字` **同一张表**（`Template:` 命名空间，见 `markdown::template_page`）。
+/// 刻意不把普通笔记也塞进那张表：`template_page_key` 会把 `甲` 与 `Template:甲`
+/// 归成同一个键，所以一旦把某篇笔记按页名放进去，`::那个名字` 也会跟着能用 ——
+/// 那是悄悄改了别的模板的语义。代价是 `page=` 只能指模板页；这一点写在帮助页里。
+///
+/// ## 为什么这里有一道自己的深度限制
+///
+/// 底部内容是 `scanner` 用 `state.md.parse` 解析的（见 `scanner.rs` 第 113 行），
+/// **没有**走 `markdown::deeper` —— 而 `MAX_TEMPLATE_DEPTH` 只在
+/// `expand_user_template`（用户模板）里查。于是 `::decrypt` 是内置模板，
+/// 自己套自己**不受那道限制**，会一路递归到爆栈。
+///
+/// 所以这里自己记一笔：`deeper_levels_stay_inside` 那种全局计数在这一支是瞎的。
 pub(super) fn render_decrypt(template: &Template, node: &Node, fmt: &mut dyn Renderer) {
+    // `page` 必填。没写就是用法错误 —— 那是 `render_problem` 的场合，不是解锁框的
+    let Some(page) = template
+        .param("page")
+        .map(str::trim)
+        .filter(|page| !page.is_empty())
+    else {
+        render_problem(
+            template,
+            fmt,
+            "缺少 page=…：::decrypt 要指出要解锁的是哪一页",
+        );
+        return;
+    };
+
+    match crate::markdown::template_page(page) {
+        // 读不动 → 解锁框
+        Some(crate::markdown::TemplatePage::Unreadable { reason, protection }) => {
+            render_decrypt_box(
+                template,
+                node,
+                fmt,
+                &Unreadable {
+                    page: page.to_string(),
+                    reason,
+                    needs_passphrase: protection.symmetric,
+                },
+            );
+        }
+        // 读得动 → 底部内容（空则一句"已解锁"）
+        Some(crate::markdown::TemplatePage::Ready(_)) => {
+            if node.children.is_empty() {
+                render_decrypt_done(fmt, page);
+                return;
+            }
+            // 与别的模板同一套做法：块内容是**一个 markdown 子页面**，
+            // 里面再嵌 `::decrypt` 就照常渲染（作者说的"自然渲染出来是什么就是什么"）
+            fmt.cr();
+            crate::markdown::deeper(|| fmt.contents(&node.children));
+            fmt.cr();
+        }
+        // 没有这一页
+        None => render_problem(
+            template,
+            fmt,
+            &format!("`{page}` 这一页不存在（页名按页面名写）"),
+        ),
+    }
+}
+
+/// 读不出来的那一页，渲染时需要的三样
+struct Unreadable {
+    /// 页名（写进 `data-decrypt-title`）
+    page: String,
+    /// 为什么读不出来（原文，给人看）
+    reason: String,
+    /// 对称层为真；gpg 层为假 —— 它问的是钥匙串或智能卡
+    needs_passphrase: bool,
+}
+
+/// 摆解锁框。
+///
+/// 后端只出**标记**，输入框与按钮由前端 `dom/decrypt.ts` 的 `decryptBox` 造 ——
+/// 同样的框还有另一个来路（加密附件），两边共用那一个构造器，框的样子才只有一处定义。
+/// 钉它的测试在 `expand.rs`：
+/// `the_unlock_box_is_only_a_marker_so_both_callers_share_one_builder`。
+fn render_decrypt_box(
+    template: &Template,
+    node: &Node,
+    fmt: &mut dyn Renderer,
+    locked: &Unreadable,
+) {
     fmt.cr();
     fmt.open(
         "div",
@@ -100,44 +181,62 @@ pub(super) fn render_decrypt(template: &Template, node: &Node, fmt: &mut dyn Ren
     fmt.cr();
     fmt.open("p", &[("class", "template__head".to_string())]);
     fmt.open("span", &[("class", "template__badge".to_string())]);
-    fmt.text("模板页读不出来");
+    fmt.text("这一页还锁着");
     fmt.close("span");
     fmt.close("p");
     fmt.cr();
-    // `expand::decrypt_node` 把标题与原因放在这两个参数里
     fmt.open(
         "span",
         &[
             ("class", "decrypt".to_string()),
             ("data-decrypt", "yes".to_string()),
             ("data-decrypt-kind", "page".to_string()),
-            (
-                "data-decrypt-title",
-                template.param("target").unwrap_or("").to_string(),
-            ),
+            ("data-decrypt-title", locked.page.clone()),
             (
                 "data-decrypt-label",
-                template.param("label").unwrap_or("").to_string(),
+                template.param("label").unwrap_or(&locked.page).to_string(),
             ),
-            ("data-decrypt-reason", template.body.to_string()),
-            // 要不要口令输入框：**后端此刻已经知道**（`expand` 从封装头读来的），
-            // 不写进来就得让前端再猜一次 —— 而猜错是静默的
+            ("data-decrypt-reason", locked.reason.clone()),
             (
                 "data-decrypt-needs-passphrase",
-                match template.param("passphrase") {
-                    Some("yes") => "yes",
-                    _ => "no",
-                }
-                .to_string(),
+                if locked.needs_passphrase { "yes" } else { "no" }.to_string(),
             ),
         ],
     );
     fmt.close("span");
     fmt.cr();
-    // **下一步**：指向那个模板页的链接（见上面为什么必须有它）
-    fmt.open("p", &[("class", "template__where".to_string())]);
-    fmt.contents(&node.children);
-    fmt.close("p");
+    // **下一步**：指向那一页的链接。`internal` 是解析器自己摆的那种占位
+    // （`expand.rs` 的 children 上挂的就是它），作者亲手写的 `::decrypt`
+    // 没有这个 —— 它的 children 是底部内容，锁着的时候不该显示出来。
+    if template.param("internal").is_some() {
+        fmt.open("p", &[("class", "template__where".to_string())]);
+        fmt.contents(&node.children);
+        fmt.close("p");
+        fmt.cr();
+    }
+    fmt.close("div");
+    fmt.cr();
+}
+
+/// 已经解开了、而 `::decrypt` 底部又是空的：摆一句"已解锁"。
+///
+/// 刻意**不删掉这个位置** —— 作者写了 `::decrypt page=X` 就是要在这里占一个位，
+/// 悄悄消失的话，正文会突然少一块，而人不知道那是被程序吃掉了还是自己写错了。
+fn render_decrypt_done(fmt: &mut dyn Renderer, page: &str) {
+    fmt.cr();
+    fmt.open(
+        "div",
+        &[
+            ("class", "decrypt decrypt--done".to_string()),
+            ("data-decrypt-done", "yes".to_string()),
+        ],
+    );
+    fmt.open("span", &[("class", "decrypt__badge".to_string())]);
+    fmt.text("已解锁");
+    fmt.close("span");
+    fmt.open("span", &[("class", "decrypt__label".to_string())]);
+    fmt.text(page);
+    fmt.close("span");
     fmt.cr();
     fmt.close("div");
     fmt.cr();
