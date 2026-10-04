@@ -36,6 +36,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import subprocess
 import sys
@@ -144,8 +145,12 @@ def run(step: Step) -> tuple[bool, str]:
     return True, f"{spent:.1f} 秒{summary_of(done.stdout)}"
 
 
-# 过的时候只留"过了多少"那几行 —— 几百行编译输出里没有别的信息
-COUNTING = ("test result:", "pass ", "fail ", "tests ")
+# 过的时候只留"过了多少" —— 几百行编译输出里没有别的信息。
+# 两种 runner 的计数长得不一样，分开认：
+#   cargo test → `test result: ok. 310 passed; 0 failed; …`
+#   node --test → `ℹ tests 99` / `ℹ pass 99` / `ℹ fail 0`
+CARGO_COUNT = re.compile(r"test result: \w+\. (\d+) passed; (\d+) failed")
+NODE_COUNT = re.compile(r"^. (pass|fail|tests) (\d+)$", re.MULTILINE)
 
 
 def summary_of(text: str) -> str:
@@ -154,9 +159,23 @@ def summary_of(text: str) -> str:
     没有计数行那就给全部 —— 但只有一两句时才给，几百行仍然丢掉。
     """
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    picked = [line for line in lines if any(marker in line for marker in COUNTING)]
-    if picked:
-        return f"（{'; '.join(picked[-3:])}）"
+
+    # `cargo test` 的计数（空的 target 会报 "0 passed"，那种不用报）
+    rust = CARGO_COUNT.findall(text)
+    if rust:
+        passed = sum(int(p) for p, _ in rust)
+        failed = sum(int(f) for _, f in rust)
+        parts = [f"Rust {passed} 通过"]
+        if failed:
+            parts.append(f"{failed} 失败")
+        return f"（{' / '.join(parts)}）"
+
+    # `node --test` 的计数
+    node = {name: int(value) for name, value in NODE_COUNT.findall(text)}
+    if node.get("tests") is not None:
+        return f"（前端 {node['tests']} 条 / 过 {node.get('pass', 0)} / 败 {node.get('fail', 0)}）"
+
+    # 认不出计数：输出很短就全给，几百行仍然丢掉
     if 0 < len(lines) <= 3:
         return f"（{' / '.join(lines)}）"
     return ""

@@ -26,6 +26,7 @@ import { useAttachmentInsert } from "../../composables/useAttachmentInsert.ts";
 import { useCodeMirror } from "../../composables/useCodeMirror.ts";
 import { useNoteEditing } from "../../composables/useNoteEditing.ts";
 import { useNotePreview } from "../../composables/useNotePreview.ts";
+import { protection } from "../../core/preferences.ts";
 
 /**
  * 笔记编辑器。
@@ -83,6 +84,11 @@ const attachments = useAttachmentInsert({
     markdown: editor.markdown,
     status: editor.status,
     busy: editor.busy,
+    // 附件进的是同一个 blob 仓，它也可能要口令；而这里没有单独的口令栏 ——
+    // 就借这一版笔记刚输过的那把。要不要口令看的是**仓库默认**
+    // （`editor.perCommit` 那一栏管的是这篇笔记怎么存，与附件无关）
+    passphrase: editor.passphraseDraft,
+    defaultPolicy: protection,
 });
 
 const codeMirror = useCodeMirror({

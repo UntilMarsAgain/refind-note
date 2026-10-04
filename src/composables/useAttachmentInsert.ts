@@ -34,6 +34,7 @@ import type { EditorView } from "@codemirror/view";
 import { fileReferenceOf } from "../dom/file-links.ts";
 import { clipboardFiles, uploadPasted } from "../dom/paste-files.ts";
 import type { Uploaded } from "../ipc/files.ts";
+import type { Policy } from "../ipc/note.ts";
 
 export interface AttachmentInsertHost {
     /** CodeMirror 实例：插到光标处用；还没有就退回到"追加到末尾" */
@@ -44,6 +45,21 @@ export interface AttachmentInsertHost {
     status: Ref<string>;
     /** 忙标记：上传期间禁掉按钮 */
     busy: Ref<boolean>;
+    /**
+     * 这一版笔记的口令（提交那一栏里输的）。
+     *
+     * 附件进的是**同一个** blob 仓，所以它也可能是加密的；而这里没有单独的口令栏
+     * —— 用户刚为这一版输过的那把就是最该用的那把，于是借它。
+     * 没给就退回到"照仓库默认"，那是后端本来就有的行为。
+     */
+    passphrase?: Ref<string>;
+    /**
+     * 附件这一版**照仓库默认**存（不给 `protection`，后端就按它落）。
+     *
+     * 要它是因为那句"这里没法输口令"必须说得准：新建的附件页照的就是仓库默认，
+     * 而 `add_file` 不给策略时正是照这一页当前的（新页即仓库默认）。
+     */
+    defaultPolicy?: Ref<Policy>;
 }
 
 export interface AttachmentInsert {
@@ -53,7 +69,33 @@ export interface AttachmentInsert {
     onPasteFiles: (event: ClipboardEvent) => Promise<boolean>;
 }
 
+/**
+ * 要不要拦下来先说一声，而不是让后端回一句看不懂的错。
+ *
+ * 后端那句是"这一份是加密的，需要输入口令"——**它是站在读的一侧说的**，
+ * 放在上传失败的场合里就成了谜语：用户明明在往里写，怎么要"输入口令"？
+ * 所以这里在动手之前就判一次，判得出就直接告诉他去哪儿输。
+ *
+ * @returns 拦下来时是一句给用户看的话；不用拦是 `null`
+ */
+export function missingPassphrase(policy: Policy | undefined, typed: string): string | null {
+    if (!policy?.symmetric || typed) {
+        return null;
+    }
+    return "仓库默认给内容套了口令加密，而这里没有口令可输：请在上方「口令」那一栏输一把再插入，或到「文件」页上传";
+}
+
+/** 上传时递过去的口令：只有真要套口令层、而用户确实输了的时候才给 */
+function secretToSend(policy: Policy | undefined, typed: string): string | null {
+    return policy?.symmetric && typed ? typed : null;
+}
+
 export function useAttachmentInsert(host: AttachmentInsertHost): AttachmentInsert {
+    /** 上传之前先判一次"有没有口令可用"，省得传完了才报一句谜语 */
+    function passphraseProblem(): string | null {
+        return missingPassphrase(host.defaultPolicy?.value, host.passphrase?.value ?? "");
+    }
+
     /**
      * 上传一个附件，并在光标处插入对它的引用。
      *
@@ -61,6 +103,12 @@ export function useAttachmentInsert(host: AttachmentInsertHost): AttachmentInser
      * 不是地址 —— 笔记里写的始终是名字。
      */
     async function insertFile() {
+        const problem = passphraseProblem();
+        if (problem) {
+            host.status.value = problem;
+            return;
+        }
+
         const picked = await open({ multiple: true, title: "选择要插入的文件" });
         if (!picked) {
             return;
@@ -69,9 +117,13 @@ export function useAttachmentInsert(host: AttachmentInsertHost): AttachmentInser
 
         host.busy.value = true;
         try {
+            const secret = secretToSend(host.defaultPolicy?.value, host.passphrase?.value ?? "");
             const references: string[] = [];
             for (const path of paths) {
-                const uploaded = await invoke<Uploaded>("upload_file", { path });
+                const uploaded = await invoke<Uploaded>("upload_file", {
+                    path,
+                    passphrase: secret,
+                });
                 references.push(fileReferenceOf(uploaded.entry));
             }
             insertAtCursor(references.join("\n"));
@@ -104,14 +156,26 @@ export function useAttachmentInsert(host: AttachmentInsertHost): AttachmentInser
         if (picked.length === 0) {
             return false;
         }
+        const problem = passphraseProblem();
+        if (problem) {
+            host.status.value = problem;
+            // 仍然算"处理过了"：不这么做的话剪贴板里的文件会连同正文一起被粘贴进来
+            return true;
+        }
 
         host.busy.value = true;
         try {
+            const secret = secretToSend(host.defaultPolicy?.value, host.passphrase?.value ?? "");
             const references: string[] = [];
             await uploadPasted(picked, async (bytes, name) => {
-                const uploaded = await invoke<Uploaded>("upload_bytes", bytes, {
-                    headers: { "x-file-name": encodeURIComponent(name) },
-                });
+                // 二进制通道：请求体整个是文件字节，其余参数只能走请求头（后端从头上取）
+                const headers: Record<string, string> = {
+                    "x-file-name": encodeURIComponent(name),
+                };
+                if (secret) {
+                    headers["x-passphrase"] = encodeURIComponent(secret);
+                }
+                const uploaded = await invoke<Uploaded>("upload_bytes", bytes, { headers });
                 references.push(fileReferenceOf(uploaded.entry));
             });
             insertAtCursor(references.join("\n"));
