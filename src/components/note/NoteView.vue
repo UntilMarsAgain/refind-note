@@ -24,8 +24,6 @@ import type { Via } from "../../ipc/address.ts";
 import type { Note, Reading } from "../../ipc/note.ts";
 import { parentOf } from "../../core/title.ts";
 import { flash } from "../../core/notice.ts";
-import { outlineOf, shouldShowOutline } from "../../core/outline.ts";
-import { headingsIn } from "../../dom/outline.ts";
 // 导出走 `saveNoteAs`（支持 markdown / html / pdf 三档），
 // 不是分支那边的 `saveNoteMarkdown` —— 那个只出 markdown，是本项目更早的做法。
 import { saveNoteAs } from "../../dom/file-save.ts";
