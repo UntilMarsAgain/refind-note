@@ -23,6 +23,7 @@
 //! - [`notes`]：笔记的读写与版本；
 //! - [`files`]：文件页面；
 //! - [`help`] / [`keys`]：帮助页与 GPG 密钥；
+//! - [`lock`]：页内解锁（模板页与文件共用一条）；
 //! - [`maintenance`]：回收站与整理；
 //! - [`namespaces`]：命名空间表；
 //! - [`activity`]：最近更改、浏览历史、特殊页面；
@@ -36,6 +37,7 @@ pub mod diagnostics;
 pub mod files;
 pub mod help;
 pub mod keys;
+pub mod lock;
 pub mod maintenance;
 pub mod namespaces;
 pub mod notes;

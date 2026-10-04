@@ -43,7 +43,7 @@ mod media;
 mod panels;
 mod text;
 
-use super::dispatch::{render_problem_page, TemplateRenderer};
+use super::dispatch::{render_decrypt, render_problem_page, TemplateRenderer};
 use callouts::{render_danger, render_error, render_note, render_tip, render_warning};
 use embeds::{render_code, render_css, render_html, render_js, render_math, render_mermaid};
 use media::{render_audio, render_image, render_video};
@@ -77,8 +77,13 @@ pub static TEMPLATES: &[(&str, TemplateRenderer)] = &[
     ("danger", render_danger),
     ("error", render_error),
     // 不是给人写笔记用的模板，但**必须真的在表里**：`expand::text_node` 造的就是
-    // 一个 `name: "problem"` 的节点，分发只认这张表 —— 它不在，"模板页没解锁"就会被
-    // 显示成"未知模板 :: problem"，把作者引到错的地方去。见 dispatch::render_problem_page。
+    // 一个 `name: "decrypt"` 的节点，分发只认这张表 —— 它不在，"模板页没解锁"就会被
+    // 显示成"未知模板 :: decrypt"，把作者引到错的地方去。见 dispatch::render_decrypt。
+    //
+    // 页内**上锁**的份（模板页、加密附件）摆的就是它 —— 见 `dispatch::render_decrypt`。
+    ("decrypt", render_decrypt),
+    // 说法本身出了错的场合（模板套模板超层数）。它**不给**解锁框：那种情况
+    // 输了口令问题还在，给个输入框是荒唐的。
     ("problem", render_problem_page),
 ];
 

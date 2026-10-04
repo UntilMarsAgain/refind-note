@@ -111,6 +111,8 @@ pub fn run() {
             commands::notes::list_notes,
             commands::notes::render_markdown,
             commands::notes::unlock,
+            // 页内解锁：模板页与文件共用这一条（见 commands/lock.rs）
+            commands::lock::lock_state,
             commands::notes::lock,
             commands::notes::passphrase_stored,
             commands::notes::forget_passphrase,
