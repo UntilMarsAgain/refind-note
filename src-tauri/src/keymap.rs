@@ -402,4 +402,91 @@ mod tests {
             }
         }
     }
+
+    /// 前端那份动作表（`src/core/keymap.ts` 的 `ACTIONS`），从源码里抠出来。
+    ///
+    /// 两边的出厂键位**必须一字不差**：Rust 那边是存盘与剔不认识动作的地方，
+    /// 前端那边是显示与识别的地方，而症状极难看 —— 菜单上写着 `Ctrl+F`，
+    /// 按了没反应，谁也不会想到去比这两张表。
+    ///
+    /// 读源码而不是让前端把表发过来：多一个 RPC 就多一条能失灵的链路，
+    /// 而这里要的只是"别把两份副本改岔了"，文本对一下就够。
+    /// 认的写法是 `ACTIONS` 里那一行：
+    ///
+    /// ```text
+    /// { id: "find", label: "页内查找", keys: ["Ctrl", "F"], group: "查找" },
+    /// ```
+    ///
+    /// 只认**一行动作**（`{ id:` 开头）；写成多行的那种格式认不出来，
+    /// 那时这条测试会以"少了个动作"的形式失败 —— 那正是它该有的反应。
+    fn frontend_actions() -> Vec<(String, Vec<String>)> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("src")
+            .join("core")
+            .join("keymap.ts");
+        let source = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("读不到 {}：{error}", path.display()));
+
+        let mut actions = Vec::new();
+        // 引号里那一个字：跳过前导的引号，取到下一个引号为止
+        fn quoted(after: &str) -> Option<&str> {
+            let rest = after.split_once(QUOTE)?.1;
+            rest.split_once(QUOTE).map(|(text, _)| text)
+        }
+        const QUOTE: char = '"';
+        for line in source.lines() {
+            let Some(rest) = line.trim_start().strip_prefix("{ id: ") else {
+                continue;
+            };
+            let Some(id) = quoted(rest) else {
+                continue;
+            };
+            // `keys: [` 之后到第一个 `]` 为止，拆出来是 `"Ctrl", "F"` 这样的片段
+            let Some((_, keys)) = rest.split_once("keys: [") else {
+                continue;
+            };
+            let keys: Vec<String> = keys
+                .split(']')
+                .next()
+                .unwrap_or_default()
+                .split(',')
+                .map(|key| key.trim().trim_matches(QUOTE).to_string())
+                .filter(|key| !key.is_empty())
+                .collect();
+            actions.push((id.to_string(), keys));
+        }
+        assert!(!actions.is_empty(), "一份都没抠出来：格式变了？");
+        actions
+    }
+
+    #[test]
+    fn the_frontend_table_says_exactly_the_same_as_this_one() {
+        let frontend = frontend_actions();
+        let mut checked = 0;
+
+        for (action, keys) in DEFAULTS {
+            let Some((_, theirs)) = frontend.iter().find(|(id, _)| id == action) else {
+                panic!("前端的 ACTIONS 里没有「{action}」");
+            };
+            assert_eq!(
+                theirs,
+                &keys.iter().map(|key| key.to_string()).collect::<Vec<_>>(),
+                "「{action}」两边的出厂键位对不上",
+            );
+            checked += 1;
+        }
+
+        assert_eq!(
+            checked,
+            frontend.len(),
+            "前端的 ACTIONS 里有 Rust 那边不认的动作：`{}`",
+            frontend
+                .iter()
+                .map(|(id, _)| id.as_str())
+                .filter(|id| !DEFAULTS.iter().any(|(action, _)| action == id))
+                .collect::<Vec<_>>()
+                .join("`、`"),
+        );
+    }
 }
