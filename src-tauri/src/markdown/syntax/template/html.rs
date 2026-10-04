@@ -13,7 +13,7 @@
 //!   出不去 —— 这是净化器该有的默认方向。
 //! - **输出是我们自己拼的**，不是把输入原样吐回去。拼的时候属性值与文本都重新转义，
 //!   所以不存在"原样穿过来了"这种可能。
-//! - **理解与浏览器一致**：解析���实的畸形标签（`<b><i></b></i>`、未闭合的 `<p>`）
+//! - **理解与浏览器一致**：解析真实的畸形标签（`<b><i></b></i>`、未闭合的 `<p>`）
 //!   按规范补成浏览器看到的那棵树，我们与浏览器看的是同一份东西。
 //!
 //! ## 白名单的取舍
@@ -84,7 +84,6 @@ const MAX_NESTING: usize = 8;
 /// 1. 先把 `<markdown>` 那几段取出来，原处留占位记号；
 /// 2. 剩下的按 HTML5 规范解析成树；
 /// 3. 走一遍树，白名单外的丢、白名单里的按规则重建，占位记号处把渲染好的 markdown 塞进去。
-
 pub fn sanitize(source: &str) -> String {
     let (skeleton, slots) = lift_markdown(source);
     let dom = html5ever::parse_document(RcDom::default(), ParseOpts::default())

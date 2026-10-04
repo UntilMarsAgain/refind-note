@@ -210,7 +210,6 @@ export function toggleStar(address: string, title: string): void {
 /** 循环切换的顺序：跟随系统 → 浅色 → 深色 → 跟随系统 */
 const THEME_CYCLE: ThemeMode[] = ["system", "light", "dark"];
 
-/** 换到下一个深浅色（右下角那组按钮里的一个） */
 /**
  * 忘掉这一篇在这次会话里存过的口令（它的每一版）。
  *
@@ -220,6 +219,7 @@ export async function forgetPassphrase(title: string): Promise<void> {
     await invoke("forget_passphrase", { title });
 }
 
+/** 换到下一个深浅色（右下角那组按钮里的一个） */
 export function cycleTheme(): ThemeMode {
     const at = THEME_CYCLE.indexOf(preferences.value.theme);
     // 找不到当前模式时 at 是 -1，(0 % 3) 落在第一项，天然是个安全兜底

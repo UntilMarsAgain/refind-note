@@ -98,7 +98,7 @@ watch(
   },
 );
 
-/** Esc 关闭；Enter 下��个；Shift+Enter 上一个 */
+/** Esc 关闭；Enter 下一个；Shift+Enter 上一个 */
 function onKeydown(event: KeyboardEvent) {
   if (event.key === "Escape") {
     event.preventDefault();

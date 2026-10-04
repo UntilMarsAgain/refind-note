@@ -383,7 +383,7 @@ mod tests {
         for (action, keys) in DEFAULTS {
             for key in *keys {
                 assert!(
-                    !deprecated.contains(&key),
+                    !deprecated.contains(key),
                     "「{action}」用了已废弃的键名 {key}（应为 Arrow{key} 之类）"
                 );
             }

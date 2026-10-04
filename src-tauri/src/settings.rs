@@ -286,15 +286,19 @@ mod tests {
         let workspace = scratch("resident-clamp");
         let path = workspace.settings_file(PREFERENCES_FILE);
 
-        let mut preferences = Preferences::default();
-        preferences.resident_tabs = 9999;
+        let preferences = Preferences {
+            resident_tabs: 9999,
+            ..Default::default()
+        };
         assert_eq!(
             save(&workspace, preferences).unwrap().resident_tabs,
             RESIDENT_TABS_MAX
         );
 
-        let mut preferences = Preferences::default();
-        preferences.resident_tabs = 0;
+        let preferences = Preferences {
+            resident_tabs: 0,
+            ..Default::default()
+        };
         assert_eq!(
             save(&workspace, preferences).unwrap().resident_tabs,
             RESIDENT_TABS_MIN
