@@ -36,12 +36,24 @@ const SELECTOR = "h1, h2, h3, h4, h5, h6";
  *   但 `::html` 里作者手写的 `<h2>` 不一定有 —— 列出来就是个死条目。
  * - **代码块与模板块的标记**：那些只是长得像标题（`.code-frame` 里有行号列，
  *   模板块的头行会被编辑器标出来），它们不是这篇的章节。
+ *
+ * ## 重名的标题：`id` 会重复，而那不是这里能修的
+ *
+ * 后端 `markdown/mod.rs` 那个 `slugify_heading` 是**纯函数**，而
+ * `heading_anchors` 直接拿它的返回值当 `id` —— 所以三个 `## 表格` 渲染出来
+ * 是三个 `id="表格"`，**并没有**错开（这一点由后端那条
+ * `repeated_headings_get_distinct_anchors` 的邻居用例如实记着）。
+ *
+ * 所以错开在这一层做，而且只对**目录**生效：给第 n 个同名的编一个 `key`
+ * （`表格~2`），定位时按「第几个同名的」去找元素。渲染结果一个字不动 ——
+ * 正文里 `[文字](#表格)` 指向第一个，那是既有行为，不该被目录顺手改掉。
  */
 export function headingsIn(root: ParentNode | null): Heading[] {
     if (!root) {
         return [];
     }
 
+    const seen = new Map<string, number>();
     const found: Heading[] = [];
     for (const element of root.querySelectorAll(SELECTOR)) {
         if (!(element instanceof HTMLElement)) {
@@ -50,10 +62,14 @@ export function headingsIn(root: ParentNode | null): Heading[] {
         if (!element.id || element.closest(".code-frame, .template-head")) {
             continue;
         }
-        const tag = element.tagName.toLowerCase();
+        // 同名计数：第一个是 1，第二个 2……
+        const occurrence = (seen.get(element.id) ?? 0) + 1;
+        seen.set(element.id, occurrence);
         found.push({
             id: element.id,
-            level: Number(tag.slice(1)),
+            key: occurrence === 1 ? element.id : `${element.id}~${occurrence}`,
+            occurrence,
+            level: Number(element.tagName.slice(1).toLowerCase()),
             text: element.textContent ?? "",
         });
     }

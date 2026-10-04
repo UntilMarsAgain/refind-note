@@ -39,13 +39,18 @@ import type { OutlineEntry } from "../../core/outline.ts";
 const props = defineProps<{
     /** 目录项（层级已经算好，见 `core/outline.ts`） */
     entries: OutlineEntry[];
-    /** 当前所在的那一节（点过之后标出来） */
+    /** 当前所在的那一节的 `key` */
     active: string;
 }>();
 
 const emit = defineEmits<{
-    /** 点了某一条：滚到那一节，并把章节报给上层叠进地址 */
-    (e: "pick", id: string): void;
+    /**
+     * 点了某一条：滚到那一节，并把章节报给上层叠进地址。
+     *
+     * 派的是**整条**而不是 `id`：重名的标题在正文里共用一个 `id`
+     * （渲染器不给它们错开），只给 `id` 回去定位不到"第几条"。
+     */
+    (e: "pick", entry: OutlineEntry): void;
 }>();
 
 const open = ref(false);
@@ -53,8 +58,8 @@ const open = ref(false);
 /** 标题栏那一行的文案：几节、展开还是收起 */
 const summary = () => (open.value ? "收起本页目录" : `本页目录（${props.entries.length} 节）`);
 
-function pick(id: string) {
-    emit("pick", id);
+function pick(entry: OutlineEntry) {
+    emit("pick", entry);
 }
 </script>
 
@@ -78,15 +83,15 @@ function pick(id: string) {
     <ol v-show="open" class="outline__list">
       <li
           v-for="entry in entries"
-          :key="entry.id"
+          :key="entry.key"
           class="outline__item"
           :style="{ '--depth': entry.depth }"
       >
         <button
             class="outline__link"
-            :class="{ 'outline__link--active': entry.id === active }"
+            :class="{ 'outline__link--active': entry.key === active }"
             type="button"
-            @click="pick(entry.id)"
+            @click="pick(entry)"
         >
           {{ entry.text }}
         </button>

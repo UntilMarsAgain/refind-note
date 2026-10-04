@@ -27,8 +27,26 @@ import {
     type Heading,
 } from "../../src/core/outline.ts";
 
-/** 造一份标题：只写关心的那几个字段 */
-const h = (id: string, level: number, text: string): Heading => ({ id, level, text });
+/**
+ * 造一份标题：`key` 与 `occurrence` 由 `dom/outline.ts` 按同名计数给，
+ * 这里照着补（第一个同名的那条 `key` 就是 `id`）。
+ */
+const h = (id: string, level: number, text: string): Heading => ({
+    id,
+    key: id,
+    occurrence: 1,
+    level,
+    text,
+});
+
+/** 造一条**重名**的标题（第几个同名的） */
+const dup = (id: string, level: number, text: string, occurrence: number): Heading => ({
+    id,
+    key: occurrence === 1 ? id : `${id}~${occurrence}`,
+    occurrence,
+    level,
+    text,
+});
 
 describe("顺序", () => {
     it("就是正文里的次序，不另按字母排", () => {
@@ -177,5 +195,41 @@ describe("滚到哪儿了，该亮着哪一条", () => {
     it("空数组与阈值 0 也不出错", () => {
         assert.equal(activeOf([], 0), -1);
         assert.equal(activeOf([0], 0), 0);
+    });
+});
+
+describe("重名的标题", () => {
+    it("渲染器给它们一样的 id，所以目录要靠 key 分开", () => {
+        // 这一条是接后端那条用例的：三个 `## 表格` 渲染出来是三个 `id="表格"`
+        const entries = outlineOf([
+            dup("表格", 2, "表格", 1),
+            dup("表格", 2, "表格", 2),
+            dup("表格", 2, "表格", 3),
+        ]);
+        assert.deepEqual(
+            entries.map((entry) => entry.key),
+            ["表格", "表格~2", "表格~3"],
+        );
+        // 三条的 id 仍然一样 —— 渲染结果一个字不动
+        assert.deepEqual(
+            entries.map((entry) => entry.id),
+            ["表格", "表格", "表格"],
+        );
+    });
+
+    it("key 一个都不能重（列表的 :key 靠它）", () => {
+        const entries = outlineOf([
+            dup("表格", 2, "表格", 1),
+            dup("表格", 2, "表格", 2),
+            dup("表格", 2, "表格", 3),
+            h("别的", 1, "别的"),
+        ]);
+        const keys = entries.map((entry) => entry.key);
+        assert.equal(new Set(keys).size, keys.length, `key 撞了：${keys.join("、")}`);
+    });
+
+    it("occurrence 原样带下去：定位靠它是第几个同名的", () => {
+        const entries = outlineOf([dup("表格", 2, "甲", 2)]);
+        assert.equal(entries[0]?.occurrence, 2);
     });
 });

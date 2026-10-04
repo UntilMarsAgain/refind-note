@@ -36,8 +36,22 @@
 
 /** 一条标题 */
 export interface Heading {
-    /** 锚点：正文里那个元素的 `id`（点它就滚过去） */
+    /**
+     * 正文里那个元素的 `id`。
+     *
+     * **可能是重复的**：渲染器给三个 `## 表格` 三个一样的 `id`（`slugify_heading`
+     * 是纯函数，没有"错开重名"这一步），所以它只够用来"找到那一批"，
+     * 唯一定位要靠 [`Heading::occurrence`]。
+     */
     id: string;
+    /**
+     * 这一节的身份：目录里用它当列表的 key、用来标"现在在第几节"。
+     *
+     * 同名时带序号（`表格~2`）—— 只对**目录**生效，渲染结果不动。
+     */
+    key: string;
+    /** 同一个 `id` 里的第几个（1 起） */
+    occurrence: number;
     /** 1…6（`h1`…`h6`） */
     level: number;
     /** 显示的文字 */
@@ -86,8 +100,7 @@ export function outlineOf(headings: readonly Heading[]): OutlineEntry[] {
     const levels = [...new Set(kept.map((heading) => heading.level))].sort((a, b) => a - b);
 
     return kept.map((heading) => ({
-        id: heading.id,
-        level: heading.level,
+        ...heading,
         text: plain(heading.text),
         depth: Math.max(0, levels.indexOf(heading.level)),
     }));

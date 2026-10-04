@@ -31,6 +31,7 @@ import { headingsIn } from "../../dom/outline.ts";
 import { saveNoteAs } from "../../dom/file-save.ts";
 import { useFindInPage } from "../../composables/useFindInPage.ts";
 import { useOutline } from "../../composables/useOutline.ts";
+import type { OutlineEntry } from "../../core/outline.ts";
 import ExportPicker from "./ExportPicker.vue";
 import FindBar from "./FindBar.vue";
 import NoteContent from "./NoteContent.vue";
@@ -212,9 +213,10 @@ const contentRef = ref<InstanceType<typeof NoteContent> | null>(null);
 const outline = useOutline(contentRef);
 
 // 目录里点一条：滚过去，并把章节报给上层（与正文里点锚点是同一条路）
-function onPickSection(id: string) {
-    outline.pick(id);
-    emit("section", id);
+function onPickSection(entry: OutlineEntry) {
+    outline.pick(entry);
+    // 报的是 `id`：地址里的 `#章节` 就是它（与点正文锚点同一套）
+    emit("section", entry.id);
 }
 
 // 正文里点锚点也会换章节：目录上那一项要跟着亮

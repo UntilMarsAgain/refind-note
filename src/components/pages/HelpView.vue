@@ -23,6 +23,7 @@ import { BookOpen, Code } from "@lucide/vue";
 import type { HelpPage } from "../../ipc/help.ts";
 import { useFindInPage } from "../../composables/useFindInPage.ts";
 import { useOutline } from "../../composables/useOutline.ts";
+import type { OutlineEntry } from "../../core/outline.ts";
 import FindBar from "../note/FindBar.vue";
 import NoteContent from "../note/NoteContent.vue";
 import OutlinePanel from "../note/OutlinePanel.vue";
@@ -194,9 +195,9 @@ function onAction() {
 }
 
 /** 目录里点一条：滚过去，并把章节报给上层（与正文里点锚点是同一条路） */
-function onPickSection(id: string) {
-  outline.pick(id);
-  emit("section", id);
+function onPickSection(entry: OutlineEntry) {
+  outline.pick(entry);
+  emit("section", entry.id);
 }
 
 /** 正文里点锚点：目录上那一项跟着亮 */

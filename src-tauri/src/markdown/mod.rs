@@ -466,6 +466,27 @@ mod tests {
         assert!(html.contains(r##"href="#%E8%A1%A8%E6%A0%BC""##), "{html}");
     }
 
+    /// **重名的标题拿到的是同一个 `id`** —— 这条钉的是**现状**，不是愿望。
+    ///
+    /// [`slugify_heading`] 是纯函数，而 `heading_anchors` 直接拿它的返回值当 `id`，
+    /// 所以三个 `## 表格` 就是三个 `id="表格"`（实测如此，2026-10 记）。
+    ///
+    /// 记下来是因为前端**已经踩到并处理了**这一条：`components/note/OutlinePanel.vue`
+    /// 的 `v-for :key` 用的是 `key` 而不是 `id`，`dom/outline.ts` 按「第几个同名的」
+    /// 定位元素。哪天这一层真去给重名错开（`-1`、`-2`），那边要跟着改 ——
+    /// 而错开与否对正文里的 `[文字](#表格)` 是有影响的（它指向第一个）。
+    #[test]
+    fn repeated_headings_share_one_anchor_id() {
+        let html = render("## 表格\n\n## 表格\n\n## 表格\n");
+        assert_eq!(
+            html.matches(r##"id="表格""##).count(),
+            3,
+            "三个同名标题，三个一样的 id：{html}"
+        );
+        // 没有悄悄错开成 -1 / -2（那样前端那边的"第几个同名的"就白做了）
+        assert!(!html.contains("表格-1"), "重名并没有被错开：{html}");
+    }
+
     /// 代码片段里的字面量不许被排版规则改写。
     ///
     /// 排版规则（typographer / smartquotes）会把 `--` 变成 `–`、把直引号变成弯引号 ——
