@@ -138,9 +138,7 @@ pub(super) fn decide(
             // "清单里没有"有三种可能：别的机器删了、清单没列全、桶被清空/换了。
             // 只有**云端那份账也记着它没了**，才是第一种。分不清就别删 ——
             // "本地新写的东西被当成旧版本删掉"就是这么来的。
-            Some(stamp)
-                if stamp.hash == local.hash && evidence.cloud == CloudSays::Gone =>
-            {
+            Some(stamp) if stamp.hash == local.hash && evidence.cloud == CloudSays::Gone => {
                 (Decision::DeleteLocal, "云端已经删掉".to_string())
             }
             Some(stamp) if stamp.hash == local.hash => (
@@ -157,9 +155,7 @@ pub(super) fn decide(
             // 本机删过 —— 但**"本机没有"和"我删的"是两回事**：删除会留下凭据
             // （笔记的日志进回收站，见 `trashed_at`）。有凭据才替人删云端那份；
             // 没有就取回来 —— 宁可多一份，也别把云端唯一的那一份抹掉。
-            Some(_) if evidence.trashed => {
-                (Decision::DeleteRemote, "本机已经删掉".to_string())
-            }
+            Some(_) if evidence.trashed => (Decision::DeleteRemote, "本机已经删掉".to_string()),
             Some(_) => (
                 Decision::Download,
                 "云端还有这一份、本机没了 —— 取回来（要删它请在本机删）".to_string(),

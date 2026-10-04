@@ -227,8 +227,6 @@ function onScroll() {
     }
     syncCollapsed(scroller.value?.scrollTop ?? 0);
 }
-
-/** 右下角那组按钮要能滚动渲染区，而滚动容器在这里 */
 // ------------------------------------------------------------ 页内查找
 
 /**
@@ -296,10 +294,12 @@ defineExpose({
         并不是真丢了 —— 滚动位置每次滚动就写进 `tab.scroll`，编辑器另有 `editor-state`
         兜着，重新进来时从那两份手工状态还原。
 
-        key 一律用 `tab.id`：所有视图都 watch 自己的身份 props 并重读（见各组件里
-        `watch(() => [props.title, props.reference], …)` 那一处），所以复用实例读到的
-        不会是上一篇的内容。同一个标签页换视图（看 → 历史）是**组件类型变了**，
-        KeepAlive 会把旧的那一份挤掉 —— 那是对的，旧视图本来就不再显示了。
+        key 用 [`viewKey`]（标签页 + 视图类型一起带上，理由在上面那段）：只用
+        `tab.id` 时，同一个标签页从"新标签页"跳到"全部页面"再到"笔记"，
+        每一步都是同一个 key 换了组件类型，KeepAlive 剪那个已停用的旧实例时
+        会崩，然后整个渲染区冻住。所有视图都 watch 自己的身份 props 并重读
+        （见各组件里 `watch(() => [props.title, props.reference], …)` 那一处），
+        所以复用实例读到的不会是上一篇的内容。
       -->
       <KeepAlive :max="residentLimit">
         <SettingsPage v-if="specialPage === 'settings'" :key="viewKey('settings')" :focus="section"/>
@@ -396,6 +396,7 @@ defineExpose({
             :display="helpPage.title"
             :source="mode?.kind === 'edit'"
             :editable="route?.editable ?? false"
+            :section="route?.address.section ?? ''"
             :starred="starredHere"
             :collapsed="collapsed"
             :find-request="findRequest"
@@ -416,6 +417,7 @@ defineExpose({
             :reference="mode.ref"
             :collapsed="collapsed"
             :via="route?.via ?? null"
+            :section="route?.address.section ?? ''"
             :starred="starredHere"
             :find-request="findRequest"
             :find-step="findStep"

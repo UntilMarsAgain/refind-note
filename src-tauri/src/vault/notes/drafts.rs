@@ -6,8 +6,7 @@
 
 use std::fs;
 
-use super::{body_meta, modified_at,
-            Draft};
+use super::{body_meta, modified_at, Draft};
 use crate::storage::codec::Secrets;
 use crate::storage::session;
 use crate::storage::workspace::write_bytes;

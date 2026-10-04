@@ -219,7 +219,10 @@ mod tests {
 
         // 菜单那几页一个都不能少
         for menu in PAGES {
-            assert!(every.iter().any(|slug| slug == menu), "菜单里的 {menu} 少了");
+            assert!(
+                every.iter().any(|slug| slug == menu),
+                "菜单里的 {menu} 少了"
+            );
         }
 
         // 按文件名排（与 `all_sources` 一致，所以这一页的列表顺序是稳定的）
@@ -236,6 +239,56 @@ mod tests {
         );
 
         cleanup(&database);
+    }
+
+    /// 「全部页面」顶部那排小按钮摆的是"**常去**"的那几页，而列表里是"**全部**" ——
+    /// 这个区别正是那一页要说的；而后端 `PAGES` 是定长数组、命令也没把它送过去，
+    /// 所以前端 `AllPages.vue` 里**又写了一份**（那边注释里也写着"用测试盯着两处不漂"，
+    /// 这一条就是那个测试）。
+    ///
+    /// 漂了之后的症状：菜单里列的是《首页》，而「全部页面」顶上一排点开却是
+    /// "没有这一页帮助" —— 两处各说各话，而谁也不会想到去比它们。
+    ///
+    /// 直接读源码对一遍，与 `keymap.rs` 里那条"前后端出厂键位必须一致"是同一个做法：
+    /// 多一条 RPC 就多一条能失灵的链路，而这里要的只是"别把两份副本改岔了"。
+    #[test]
+    fn the_all_pages_buttons_list_the_same_pages_as_the_menu() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("src")
+            .join("components")
+            .join("pages")
+            .join("AllPages.vue");
+        let source = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("读不到 {}：{error}", path.display()));
+
+        // 认的是那一行：`const MENU_PAGES = ["首页", "目录", "语法速览"];`
+        let line = source
+            .lines()
+            .find(|line| line.contains("MENU_PAGES"))
+            .unwrap_or_else(|| panic!("{} 里找不到 MENU_PAGES", path.display()));
+        let theirs: Vec<String> = line
+            .split('[')
+            .nth(1)
+            .and_then(|rest| rest.split(']').next())
+            .unwrap_or_default()
+            .split(',')
+            .map(|slug| {
+                slug.trim()
+                    .trim_matches(|ch| ch == '"' || ch == '\'')
+                    .to_string()
+            })
+            .filter(|slug| !slug.is_empty())
+            .collect();
+
+        assert_eq!(
+            theirs,
+            PAGES
+                .iter()
+                .map(|page| page.to_string())
+                .collect::<Vec<_>>(),
+            "「全部页面」顶上那排按钮与菜单列的页对不上"
+        );
     }
 
     /// 菜单那三页与全表**都是能打开的**（不是"列出来却是死的"）

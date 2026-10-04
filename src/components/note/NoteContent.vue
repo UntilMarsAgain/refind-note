@@ -45,14 +45,26 @@ const emit = defineEmits<{
 const rootEl = ref<HTMLElement | null>(null);
 
 /**
- * 把正文那个容器交给外面（页内查找要往里包 `<mark>`）。
+ * 正文收拾好了没有 —— 一个**递增的计数**。
+ *
+ * 为什么不是布尔量：`v-html` 换一次正文就是一个新的"收拾过"，
+ * 而布尔量在已经为 true 时再设 true 不会触发 watch —— 第二次就不会被通知。
+ * 这与 `findRequest` 用计数而不是布尔的理由是同一条（见 `NoteView` 那边的注释）。
+ *
+ * 谁在等它：**本页目录**。标题的 `id` 与那些高亮、复制按钮都是**收拾时**才有的，
+ * 所以目录得在收拾之后才算，否则会数到一个还没成型的 DOM。
+ */
+const ready = ref(0);
+
+/**
+ * 把正文那个容器交给外面（页内查找要往里包 `<mark>`，目录要数标题）。
  *
  * 为什么不放在 `NoteContent` 里自己查找：查找条（输入框、上下一个按钮）是**界面**，
  * 该跟着窗口走；查找状态却**跟着正文走** —— 正文换了一篇、`v-html` 换了一次，
  * 那些高亮就得重做。两者分开，`NoteContent` 只出容器，具体怎么查由外面决定
  * （见 `dom/find-in-page.ts`）。
  */
-defineExpose({ rootEl });
+defineExpose({ rootEl, ready });
 
 const COPY_TEXT = "复制";
 const COPIED_TEXT = "已复制";
@@ -110,6 +122,8 @@ function decorateCodeBlocks() {
     applyLineNumbers(root);
     // 笔记 HTML 的收尾：正文右键菜单，以及图片取不到时换一句说明
     decorateNoteHtml(root);
+    // 告诉外面"现在是收拾好的"：本页目录要在这之后才数得出标题（见 `ready`）
+    ready.value += 1;
 }
 
 onMounted(decorateCodeBlocks);

@@ -5,8 +5,7 @@
 
 use std::sync::Arc;
 
-use super::{is_wrong_passphrase, Event, Note, NoteState,
-            Reading, DEFAULT_MIME};
+use super::{is_wrong_passphrase, Event, Note, NoteState, Reading, DEFAULT_MIME};
 use crate::storage::codec::{Protection, Secrets};
 use crate::storage::session;
 use crate::vault::database::{now, Database};
@@ -282,7 +281,10 @@ impl Database {
     /// 2. **绝不弹口令**（见 [`codec::without_prompting`]）—— 渲染是"顺手看一眼"，
     ///    不该因为某一页没解锁就把界面挂在一个口令框上。取不到就白纸黑字写清楚，
     ///    让作者自己决定去不去解锁（打开那一页一次，口令就进了这一趟的缓存）。
-    fn template_pages(&self, markdown: &str) -> std::collections::HashMap<String, crate::markdown::TemplatePage> {
+    fn template_pages(
+        &self,
+        markdown: &str,
+    ) -> std::collections::HashMap<String, crate::markdown::TemplatePage> {
         use crate::markdown::TemplatePage;
 
         let mut pages = std::collections::HashMap::new();
@@ -337,9 +339,7 @@ impl Database {
             .map(|protection| protection.symmetric || protection.encrypt.is_some())
             .unwrap_or(false);
 
-        let locked = || {
-            format!("《{title}》是加密的：打开它一次（解锁）之后，模板就能嵌进来了")
-        };
+        let locked = || format!("《{title}》是加密的：打开它一次（解锁）之后，模板就能嵌进来了");
 
         // **只读字节，不渲染** —— 这一条最要紧：`read_note` 会顺手把 HTML 也渲染出来，
         // 而渲染又要读模板页（就是这里）→ 自己套自己，栈直接爆掉（"打开就卡死"）。

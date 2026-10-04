@@ -172,12 +172,47 @@ pub fn write_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
     }
 
     let temporary = path.with_extension("tmp");
-
-    fs::write(&temporary, bytes)
+    write_private(&temporary, bytes)
         .map_err(|error| format!("写入 {} 失败：{error}", temporary.display()))?;
     replace_file(&temporary, path)
         .map_err(|error| format!("落盘 {} 失败：{error}", path.display()))?;
 
+    Ok(())
+}
+
+/// 写一个**只有本人读得动**的文件。
+///
+/// ## 为什么不是 `fs::write`
+///
+/// `fs::write` 建出来的文件走 umask，通常是 `0644` —— **别人读得动**。
+/// 而这个仓库里落着笔记正文、内容块、以及 `settings/sync.json` 里的
+/// **云端钥匙与 S3 私钥**。
+///
+/// 之前靠"写完再 `chmod`"（见 `features::sync::settings::restrict`）补，
+/// 但那有个**窗口**：从落盘到改权限之间，文件已经是 world-readable 的了；
+/// 而进程要是正好死在那个窗口里，那份文件就**永远**是 `0644`。
+///
+/// 所以权限在**创建那一刻**就给对（`OpenOptions::mode`），并且落笔之后再
+/// 显式设一次 —— `mode` 只在**新建**时生效，崩溃残留的临时文件是旧的、不会改。
+fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+
+    let mut file = options.open(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // 见上：上一次崩溃留下的临时文件是旧的，`mode` 对它不生效
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    }
+    file.write_all(bytes)?;
     Ok(())
 }
 
@@ -237,6 +272,37 @@ mod tests {
         assert!(workspace.database_dir().is_dir());
         assert!(workspace.settings_dir().is_dir());
         assert_eq!(workspace.root(), root.as_path());
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 落盘的文件**只有本人读得动** —— 而且是**创建那一刻**就那样。
+    ///
+    /// 这一条盯的是"写完再 chmod"那种补法：它有个窗口，进程死在窗口里
+    /// 那份文件就永远宽着（而 `settings/sync.json` 里是云端钥匙与 S3 私钥）。
+    ///
+    /// 只在 unix 上有意义（`PermissionsExt` 那套），别的平台跳过。
+    #[cfg(unix)]
+    #[test]
+    fn what_gets_written_is_readable_by_its_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = scratch("private");
+        let workspace = Workspace::open(root.clone()).unwrap();
+
+        let target = workspace.settings_file("sync.json");
+        write_json(&target, &serde_json::json!({ "key": "秘密" })).unwrap();
+
+        let mode = fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "落盘的文件宽了：{mode:o}");
+
+        // 崩溃残留的临时文件也一样：那次 `mode` 对它不生效，靠的是显式那一次
+        let leftover = target.with_extension("tmp");
+        fs::write(&leftover, vec![b'x'; 8]).unwrap();
+        fs::set_permissions(&leftover, fs::Permissions::from_mode(0o644)).unwrap();
+        write_json(&target, &serde_json::json!({ "key": "还是秘密" })).unwrap();
+        let mode = fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "重写之后宽了：{mode:o}");
 
         let _ = fs::remove_dir_all(&root);
     }

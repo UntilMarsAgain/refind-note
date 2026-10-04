@@ -36,5 +36,9 @@ pub fn register(md: &mut MarkdownIt) {
 ///
 /// 与上面 `register` 里那三行一一对应 —— 加一种就两边一起加。
 pub fn names() -> [&'static str; 3] {
-    ["math（$…$ / $$…$$）", "template（::名字）", "wikilink（[[目标]]）"]
+    [
+        "math（$…$ / $$…$$）",
+        "template（::名字）",
+        "wikilink（[[目标]]）",
+    ]
 }

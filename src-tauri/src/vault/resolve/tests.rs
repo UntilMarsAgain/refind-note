@@ -90,7 +90,11 @@ fn exporting_writes_the_markdown_source() {
 
     // 取不到的位置：报错，而不是悄悄当成功
     assert!(database
-        .export_note("导出我", None, std::path::Path::new("/没有这个目录/也/不许/写.md"))
+        .export_note(
+            "导出我",
+            None,
+            std::path::Path::new("/没有这个目录/也/不许/写.md")
+        )
         .is_err());
 
     let _ = std::fs::remove_file(&target);

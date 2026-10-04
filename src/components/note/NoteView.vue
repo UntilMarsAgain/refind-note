@@ -24,11 +24,16 @@ import type { Via } from "../../ipc/address.ts";
 import type { Note, Reading } from "../../ipc/note.ts";
 import { parentOf } from "../../core/title.ts";
 import { flash } from "../../core/notice.ts";
+// 导出走 `saveNoteAs`（支持 markdown / html / pdf 三档），
+// 不是分支那边的 `saveNoteMarkdown` —— 那个只出 markdown，是本项目更早的做法。
 import { saveNoteAs } from "../../dom/file-save.ts";
 import { useFindInPage } from "../../composables/useFindInPage.ts";
+import { useOutline } from "../../composables/useOutline.ts";
+import type { OutlineEntry } from "../../core/outline.ts";
 import ExportPicker from "./ExportPicker.vue";
 import FindBar from "./FindBar.vue";
 import NoteContent from "./NoteContent.vue";
+import OutlinePanel from "./OutlinePanel.vue";
 import PageHeader, { type PageAction } from "./PageHeader.vue";
 import StorageBadge from "./StorageBadge.vue";
 
@@ -52,6 +57,13 @@ const props = defineProps<{
     collapsed: boolean;
     /** 被指令带过来时的"从哪儿来" */
     via?: Via | null;
+    /**
+     * 地址里带的章节（`#某节`）。
+     *
+     * 目录上那一项要跟着它亮：直接打开 `某页#某节`（深链、书签、后退回来）时，
+     * 用户看到的是"我落在这一节"，而目录什么都不指，那是两回事。
+     */
+    section?: string;
     /** 这一页星标过没有 */
     starred?: boolean;
     /**
@@ -188,6 +200,35 @@ const find = useFindInPage();
 
 /** `NoteContent` 用 `defineExpose` 交出来的正文容器（查找要往里包 `<mark>`） */
 const contentRef = ref<InstanceType<typeof NoteContent> | null>(null);
+
+// ------------------------------------------------------------ 本页目录
+
+/**
+ * 这一篇的目录（接线在 `useOutline.ts`，判定与层级在 `core/outline.ts`）。
+ *
+ * 它与页内查找共用同一个时机、同一个容器 —— 标题的 `id` 是**渲染时**才有的。
+ */
+const outline = useOutline(contentRef);
+
+// 目录里点一条：滚过去，并把章节报给上层（与正文里点锚点是同一条路）
+function onPickSection(entry: OutlineEntry) {
+    outline.pick(entry);
+    // 报的是 `id`：地址里的 `#章节` 就是它（与点正文锚点同一套）
+    emit("section", entry.id);
+}
+
+// 正文里点锚点也会换章节：目录上那一项要跟着亮
+function onSection(id: string) {
+    outline.mark(id);
+    emit("section", id);
+}
+
+// 地址里带来的章节（深链 / 后退回来）：目录上那一项也要亮
+watch(
+    () => props.section ?? "",
+    (section) => outline.sync(section),
+    { immediate: true },
+);
 
 // 把容器交给查找层；换了一篇就重建 —— 高亮属于旧正文，留着会罩在不相干的内容上
 watch(
@@ -335,12 +376,18 @@ watch(
         <p v-if="note.summary" class="note__summary">{{ note.summary }}</p>
       </header>
 
+      <!--
+        本页目录：放在正文**上面**（标题与元信息之下、正文之上），收起时不占地方。
+        条目不足四节就不画，见 `core/outline.ts` 的 `MIN_HEADINGS`。
+      -->
+      <OutlinePanel :entries="outline.entries.value" :active="outline.active.value" @pick="onPickSection"/>
+
       <NoteContent
           ref="contentRef"
           :html="note.html"
           @wikilink="emit('navigate', $event.title)"
           @wikilink-new="emit('navigate-new-tab', $event)"
-          @section="emit('section', $event)"
+          @section="onSection"
       />
 
       <!-- 页内查找：贴在渲染区右上角（`find-bar.css` 里写了层叠关系） -->

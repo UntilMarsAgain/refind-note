@@ -28,7 +28,10 @@ fn a_bucket_in_the_hostname_is_not_repeated_in_the_path() {
         secret_key: "SK".to_string(),
         ..Default::default()
     };
-    assert_eq!(S3::new(plain).unwrap().path_of("db/meta.json"), "/notes/db/meta.json");
+    assert_eq!(
+        S3::new(plain).unwrap().path_of("db/meta.json"),
+        "/notes/db/meta.json"
+    );
 }
 
 /// 同一个 ETag 的几种写法要读成同一个值 —— 清单走 XML、GET/HEAD 走响应头。

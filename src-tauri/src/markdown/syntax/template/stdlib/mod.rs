@@ -44,9 +44,7 @@ mod panels;
 mod text;
 
 use super::dispatch::{render_problem_page, TemplateRenderer};
-use callouts::{
-    render_danger, render_error, render_note, render_tip, render_warning,
-};
+use callouts::{render_danger, render_error, render_note, render_tip, render_warning};
 use embeds::{render_code, render_css, render_html, render_js, render_math, render_mermaid};
 use media::{render_audio, render_image, render_video};
 use panels::{render_tabs, render_theme};

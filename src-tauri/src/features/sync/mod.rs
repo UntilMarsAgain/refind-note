@@ -204,10 +204,12 @@ pub fn run(
         &root,
         workspace,
         &mut index,
-        cloud.as_ref(),
-        transform.as_ref(),
-        settings.reupload,
-        &beating,
+        Cloud {
+            account: cloud.as_ref(),
+            transform: transform.as_ref(),
+            force_upload: settings.reupload,
+            progress: &beating,
+        },
     );
 
     // 不管成没成，锁都要放掉：留着它，别的机器要等过期才能动
@@ -232,18 +234,37 @@ pub fn run(
     Ok(report)
 }
 
+/// 对账要用的"云端侧那几样"，捆成一个结构传。
+///
+/// 原来是四个平行的参数（云端账本 / 变换 / 整份重传 / 进度回调），加上 s3、root、
+/// workspace、index 就是八个 —— 调用处那一串 `&beating` 后面跟谁，全靠回头数。
+/// 捆起来之后参数表只说"在哪、拿哪份账、怎么封、报给谁"四件事，
+/// 而 [`reconcile`] 的签名也回到了能一眼看完的长度。
+struct Cloud<'a> {
+    /// 云端那份账（没有就是 `None`）—— 判"云端删没删"要它当证据
+    account: Option<&'a Index>,
+    /// 字节的封装/解封（端到端加密关着时就是原样进出）
+    transform: &'a dyn SyncTransform,
+    /// "整份重传"：忽略账本，全部按本地为准推上去
+    force_upload: bool,
+    /// 报进度（顺带续锁的那个包装也走这里，见调用处）
+    progress: &'a dyn Fn(Progress),
+}
+
 /// 对账 + 动手（锁已经拿到了）
 fn reconcile(
     s3: &S3,
     root: &Path,
     workspace: &Workspace,
     index: &mut Index,
-    // 云端那份账（没有就是 `None`）—— 判"云端删没删"要它当证据
-    cloud: Option<&Index>,
-    transform: &dyn SyncTransform,
-    force_upload: bool,
-    progress: &dyn Fn(Progress),
+    cloud: Cloud<'_>,
 ) -> Result<SyncReport, String> {
+    let Cloud {
+        account,
+        transform,
+        force_upload,
+        progress,
+    } = cloud;
     let mut report = SyncReport::default();
 
     // ---- 两边的清单 ----
@@ -283,7 +304,7 @@ fn reconcile(
         .iter()
         .map(|path| {
             let evidence = Evidence {
-                cloud: match cloud {
+                cloud: match account {
                     Some(cloud) if cloud.files.contains_key(path) => CloudSays::Listed,
                     Some(_) => CloudSays::Gone,
                     None => CloudSays::NoAccount,
@@ -539,10 +560,7 @@ fn relative_of(s3: &S3, key: &str) -> Option<String> {
     let prefix = prefix_of(s3);
     let relative = key.strip_prefix(&prefix)?;
     // 锁与账本是云端自己的东西，不是仓库里的文件 —— 别把它们下载到工作目录里
-    if relative.is_empty()
-        || relative == LOCK_KEY
-        || relative == LATEST_KEY
-        || !is_synced(relative)
+    if relative.is_empty() || relative == LOCK_KEY || relative == LATEST_KEY || !is_synced(relative)
     {
         return None;
     }

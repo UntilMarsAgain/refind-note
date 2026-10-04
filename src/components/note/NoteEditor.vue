@@ -17,7 +17,7 @@
 -->
 
 <script setup lang="ts">
-import { onBeforeUnmount, onDeactivated, onMounted, shallowRef, watch } from "vue";
+import { computed, onBeforeUnmount, onDeactivated, onMounted, shallowRef, watch } from "vue";
 import type { EditorView } from "@codemirror/view";
 import { Check, ImagePlus, RotateCcw, Save, Trash2, X } from "@lucide/vue";
 import StoragePicker from "../common/StoragePicker.vue";
@@ -26,6 +26,8 @@ import { useAttachmentInsert } from "../../composables/useAttachmentInsert.ts";
 import { useCodeMirror } from "../../composables/useCodeMirror.ts";
 import { useNoteEditing } from "../../composables/useNoteEditing.ts";
 import { useNotePreview } from "../../composables/useNotePreview.ts";
+import { protection } from "../../core/preferences.ts";
+import { countOf, describeCount } from "../../core/count.ts";
 
 /**
  * 笔记编辑器。
@@ -83,7 +85,20 @@ const attachments = useAttachmentInsert({
     markdown: editor.markdown,
     status: editor.status,
     busy: editor.busy,
+    // 附件进的是同一个 blob 仓，它也可能要口令；而这里没有单独的口令栏 ——
+    // 就借这一版笔记刚输过的那把。要不要口令看的是**仓库默认**
+    // （`editor.perCommit` 那一栏管的是这篇笔记怎么存，与附件无关）
+    passphrase: editor.passphraseDraft,
+    defaultPolicy: protection,
 });
+
+/**
+ * 状态行右边那几个数：写了多少。
+ *
+ * 规则在 `core/count.ts`（中文一字一算、拉丁连着算一个，字符按**码点**数 ——
+ * `text.length` 会把一个 emoji 数成两个）。这里只负责算出来摆上去。
+ */
+const counted = computed(() => countOf(editor.markdown.value));
 
 const codeMirror = useCodeMirror({
     view,
@@ -299,9 +314,10 @@ watch(editor.markdown, (value) => {
 
     <p class="editor__status">
       <span class="editor__message">{{ editor.status.value }}</span>
-      <!-- 字符数靠状态行右侧 -->
+      <!-- 写了多少：状态行右侧。行数也摆上，翻长稿时有用 -->
       <span class="editor__meta">
-        <span>{{ editor.markdown.value.length }} 字符</span>
+        <span>{{ describeCount(counted) }}</span>
+        <span>{{ counted.lines }} 行</span>
       </span>
     </p>
   </section>

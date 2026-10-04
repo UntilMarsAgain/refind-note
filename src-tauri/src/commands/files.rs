@@ -158,7 +158,11 @@ pub fn delete_file(title: String) -> Result<(), String> {
 
 /// 另存为：把某一版复制到用户选的位置
 #[tauri::command]
-pub fn export_file(app: AppHandle, title: String, target: Option<String>) -> Result<String, String> {
+pub fn export_file(
+    app: AppHandle,
+    title: String,
+    target: Option<String>,
+) -> Result<String, String> {
     let (_, database) = open_database()?;
     // 没给路径（手机上）就按页面名落进下载目录
     let name = title.trim().split(':').next_back().unwrap_or(&title).trim();

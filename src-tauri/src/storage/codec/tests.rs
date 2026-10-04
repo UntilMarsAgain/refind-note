@@ -4,10 +4,9 @@
 //! 各份报告、类型）—— 测试大多走的就是这条正路。要碰各层内部那几把私有钥匙时，
 //! 得从对应子模块单独导入：`use super::*` 不会带出**孙模块**的项。
 
-use super::*;
 use super::gpg::FORCE_NO_GPG;
 use super::symmetric::{open_with, seal_with};
-
+use super::*;
 
 /// 算法在 JSON 里怎么写：界面（`ipc/note.ts`）按这串字选，写错了就是一句
 /// "unknown variant `aes-256-gcm`"。老文件里是 `aes256-gcm`（少一个横线），

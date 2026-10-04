@@ -135,7 +135,9 @@ impl Preferences {
             self.theme = "system".to_string();
         }
 
-        self.resident_tabs = self.resident_tabs.clamp(RESIDENT_TABS_MIN, RESIDENT_TABS_MAX);
+        self.resident_tabs = self
+            .resident_tabs
+            .clamp(RESIDENT_TABS_MIN, RESIDENT_TABS_MAX);
 
         self
     }
@@ -284,17 +286,30 @@ mod tests {
         let workspace = scratch("resident-clamp");
         let path = workspace.settings_file(PREFERENCES_FILE);
 
-        let mut preferences = Preferences::default();
-        preferences.resident_tabs = 9999;
-        assert_eq!(save(&workspace, preferences).unwrap().resident_tabs, RESIDENT_TABS_MAX);
+        let preferences = Preferences {
+            resident_tabs: 9999,
+            ..Default::default()
+        };
+        assert_eq!(
+            save(&workspace, preferences).unwrap().resident_tabs,
+            RESIDENT_TABS_MAX
+        );
 
-        let mut preferences = Preferences::default();
-        preferences.resident_tabs = 0;
-        assert_eq!(save(&workspace, preferences).unwrap().resident_tabs, RESIDENT_TABS_MIN);
+        let preferences = Preferences {
+            resident_tabs: 0,
+            ..Default::default()
+        };
+        assert_eq!(
+            save(&workspace, preferences).unwrap().resident_tabs,
+            RESIDENT_TABS_MIN
+        );
 
         // 没写这一项的老文件用默认值
         fs::write(&path, r#"{"zoom":1.0}"#).unwrap();
-        assert_eq!(load(&workspace).unwrap().resident_tabs, DEFAULT_RESIDENT_TABS);
+        assert_eq!(
+            load(&workspace).unwrap().resident_tabs,
+            DEFAULT_RESIDENT_TABS
+        );
 
         cleanup(&workspace);
     }

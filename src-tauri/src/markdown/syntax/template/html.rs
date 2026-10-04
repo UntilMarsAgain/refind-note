@@ -13,7 +13,7 @@
 //!   出不去 —— 这是净化器该有的默认方向。
 //! - **输出是我们自己拼的**，不是把输入原样吐回去。拼的时候属性值与文本都重新转义，
 //!   所以不存在"原样穿过来了"这种可能。
-//! - **理解与浏览器一致**：解析���实的畸形标签（`<b><i></b></i>`、未闭合的 `<p>`）
+//! - **理解与浏览器一致**：解析真实的畸形标签（`<b><i></b></i>`、未闭合的 `<p>`）
 //!   按规范补成浏览器看到的那棵树，我们与浏览器看的是同一份东西。
 //!
 //! ## 白名单的取舍
@@ -84,7 +84,6 @@ const MAX_NESTING: usize = 8;
 /// 1. 先把 `<markdown>` 那几段取出来，原处留占位记号；
 /// 2. 剩下的按 HTML5 规范解析成树；
 /// 3. 走一遍树，白名单外的丢、白名单里的按规则重建，占位记号处把渲染好的 markdown 塞进去。
-
 pub fn sanitize(source: &str) -> String {
     let (skeleton, slots) = lift_markdown(source);
     let dom = html5ever::parse_document(RcDom::default(), ParseOpts::default())
@@ -144,8 +143,10 @@ fn find_tag(haystack: &str, from: usize, name: &str) -> Option<usize> {
         }
         // 标签名后面必须是空白、`>` 或 `/` —— 否则那是 `<markdowner>` 之类
         let after = rest[name.len()..].chars().next();
-        if matches!(after, None | Some(' ') | Some('\t') | Some('\n') | Some('\r') | Some('>'))
-            || rest[name.len()..].starts_with('/')
+        if matches!(
+            after,
+            None | Some(' ') | Some('\t') | Some('\n') | Some('\r') | Some('>')
+        ) || rest[name.len()..].starts_with('/')
         {
             return Some(start);
         }
@@ -291,11 +292,18 @@ fn write_text(text: &str, slots: &[String], out: &mut String) {
         };
         out.push_str(&escape_text(&rest[..open]));
         let index: String = after[..close].to_string();
-        match index.trim().parse::<usize>().ok().and_then(|i| slots.get(i)) {
+        match index
+            .trim()
+            .parse::<usize>()
+            .ok()
+            .and_then(|i| slots.get(i))
+        {
             Some(body) => render_slot(body, out),
             None => {
                 // 记号对不上任何一段：当普通文字留着，别把作者写的东西弄丢
-                out.push_str(&escape_text(&rest[open..open + SLOT_OPEN.len_utf8() + close + 1]));
+                out.push_str(&escape_text(
+                    &rest[open..open + SLOT_OPEN.len_utf8() + close + 1],
+                ));
             }
         }
         rest = &after[close + SLOT_CLOSE.len_utf8()..];
@@ -310,8 +318,8 @@ fn render_slot(body: &str, out: &mut String) {
             "&lt;markdown&gt; 套了超过 {MAX_NESTING} 层，已经停在这里（是不是自己套自己？）"
         )));
         return;
-    }    // `render_nested` 沿用当前这一趟的链接解析器与模板页表，
-    // 所以里面的内部链接不会一律变红链、里面的 `::html src=` 也还能取到页
+    } // `render_nested` 沿用当前这一趟的链接解析器与模板页表，
+      // 所以里面的内部链接不会一律变红链、里面的 `::html src=` 也还能取到页
     let html = crate::markdown::deeper(|| crate::markdown::render_nested(body));
     out.push_str(&html);
 }
@@ -367,13 +375,21 @@ const RULES: &[(&str, &[&str])] = &[
     ("li", &["class", "title", "lang", "dir", "value"]),
     ("main", COMMON),
     ("nav", COMMON),
-    ("ol", &["class", "title", "lang", "dir", "start", "reversed", "type"]),
+    (
+        "ol",
+        &["class", "title", "lang", "dir", "start", "reversed", "type"],
+    ),
     ("p", COMMON),
     ("section", COMMON),
     ("summary", COMMON),
     ("ul", COMMON),
     // —— 行内
-    ("a", &["class", "title", "lang", "dir", "href", "target", "rel", "download"]),
+    (
+        "a",
+        &[
+            "class", "title", "lang", "dir", "href", "target", "rel", "download",
+        ],
+    ),
     ("abbr", COMMON),
     ("b", COMMON),
     ("bdi", COMMON),
@@ -381,11 +397,17 @@ const RULES: &[(&str, &[&str])] = &[
     ("cite", COMMON),
     ("code", COMMON),
     ("data", &["class", "title", "lang", "dir", "value"]),
-    ("del", &["class", "title", "lang", "dir", "cite", "datetime"]),
+    (
+        "del",
+        &["class", "title", "lang", "dir", "cite", "datetime"],
+    ),
     ("dfn", COMMON),
     ("em", COMMON),
     ("i", COMMON),
-    ("ins", &["class", "title", "lang", "dir", "cite", "datetime"]),
+    (
+        "ins",
+        &["class", "title", "lang", "dir", "cite", "datetime"],
+    ),
     ("kbd", COMMON),
     ("mark", COMMON),
     ("q", &["class", "title", "lang", "dir", "cite"]),
@@ -410,19 +432,49 @@ const RULES: &[(&str, &[&str])] = &[
     ("colgroup", &["class", "title", "lang", "dir", "span"]),
     ("table", COMMON),
     ("tbody", COMMON),
-    ("td", &["class", "title", "lang", "dir", "colspan", "rowspan", "headers", "abbr"]),
+    (
+        "td",
+        &[
+            "class", "title", "lang", "dir", "colspan", "rowspan", "headers", "abbr",
+        ],
+    ),
     ("tfoot", COMMON),
-    ("th", &["class", "title", "lang", "dir", "colspan", "rowspan", "headers", "abbr", "scope"]),
+    (
+        "th",
+        &[
+            "class", "title", "lang", "dir", "colspan", "rowspan", "headers", "abbr", "scope",
+        ],
+    ),
     ("thead", COMMON),
     ("tr", COMMON),
     // —— 代码与预格式化（`::code` 那类自定义标记是靠 class 挂在这层上的）
     ("pre", COMMON),
     // —— 图片与音视频
-    ("img", &["class", "title", "lang", "dir", "src", "alt", "width", "height", "loading"]),
+    (
+        "img",
+        &[
+            "class", "title", "lang", "dir", "src", "alt", "width", "height", "loading",
+        ],
+    ),
     ("picture", COMMON),
-    ("source", &["class", "title", "lang", "dir", "src", "srcset", "type", "media"]),
-    ("track", &["class", "title", "lang", "dir", "src", "kind", "srclang", "label"]),
-    ("audio", &["class", "title", "lang", "dir", "src", "controls", "loop", "muted", "preload"]),
+    (
+        "source",
+        &[
+            "class", "title", "lang", "dir", "src", "srcset", "type", "media",
+        ],
+    ),
+    (
+        "track",
+        &[
+            "class", "title", "lang", "dir", "src", "kind", "srclang", "label",
+        ],
+    ),
+    (
+        "audio",
+        &[
+            "class", "title", "lang", "dir", "src", "controls", "loop", "muted", "preload",
+        ],
+    ),
     (
         "video",
         &[
@@ -434,7 +486,10 @@ const RULES: &[(&str, &[&str])] = &[
 
 /// 按标签名查属性规则。`None` = 不在白名单里。
 fn allowed(tag: &str) -> Option<&'static [&'static str]> {
-    RULES.iter().find(|(name, _)| *name == tag).map(|(_, attrs)| *attrs)
+    RULES
+        .iter()
+        .find(|(name, _)| *name == tag)
+        .map(|(_, attrs)| *attrs)
 }
 
 /// 这些标签**连内容一起**丢掉。
@@ -445,7 +500,8 @@ fn allowed(tag: &str) -> Option<&'static [&'static str]> {
 fn skip_subtree(tag: &str) -> bool {
     matches!(
         tag,
-        "script" | "style"
+        "script"
+            | "style"
             | "link"
             | "meta"
             | "base"
@@ -481,8 +537,20 @@ fn skip_subtree(tag: &str) -> bool {
 fn is_void(tag: &str) -> bool {
     matches!(
         tag,
-        "area" | "base" | "br" | "col" | "embed" | "hr" | "img" | "input" | "link" | "meta"
-            | "param" | "source" | "track" | "wbr"
+        "area"
+            | "base"
+            | "br"
+            | "col"
+            | "embed"
+            | "hr"
+            | "img"
+            | "input"
+            | "link"
+            | "meta"
+            | "param"
+            | "source"
+            | "track"
+            | "wbr"
     )
 }
 
@@ -500,7 +568,9 @@ fn keep_attribute(name: &str, rules: &[&str], value: &str) -> Option<String> {
         return None;
     }
     match name {
-        "href" | "src" | "srcset" | "cite" | "poster" | "download" => safe_url(value).then(|| value.to_string()),
+        "href" | "src" | "srcset" | "cite" | "poster" | "download" => {
+            safe_url(value).then(|| value.to_string())
+        }
         // 只认 `_blank` / `_self`：`_top` 与框架名能把人带走，而这里没有框架
         "target" => matches!(value, "_blank" | "_self").then(|| value.to_string()),
         "rel" => Some(value.to_string()),
@@ -630,7 +700,10 @@ mod tests {
     #[test]
     fn ordinary_urls_and_relative_targets_stay() {
         let html = clean(r#"<a href="https://example.com/x?y=1">外链</a>"#);
-        assert!(html.contains(r#"href="https://example.com/x?y=1""#), "{html}");
+        assert!(
+            html.contains(r#"href="https://example.com/x?y=1""#),
+            "{html}"
+        );
 
         let relative = clean(r#"<a href="另一页">内部</a>"#);
         assert!(relative.contains("另一页"), "{relative}");
@@ -790,8 +863,15 @@ mod tests {
                <details open><summary>细</summary><p>内</p></details>"#,
         );
         for needle in [
-            "<table>", "<thead>", "<th scope=\"col\">", "<td colspan=\"2\">",
-            "<ul>", "<li>一</li>", "<blockquote", "<details open>", "<summary>细</summary>",
+            "<table>",
+            "<thead>",
+            "<th scope=\"col\">",
+            "<td colspan=\"2\">",
+            "<ul>",
+            "<li>一</li>",
+            "<blockquote",
+            "<details open>",
+            "<summary>细</summary>",
         ] {
             assert!(html.contains(needle), "少了 {needle}: {html}");
         }

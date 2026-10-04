@@ -18,8 +18,15 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+
+    /* `tests/web/` 里的测试 import `node:test` 与 `node:assert`，
+       所以要显式点名 Node 的类型。点名之后 TS 不再自动扫 `@types` 下其余包，
+       而这个项目没有别的全局类型包要扫（DOM 那些在 `lib` 里）。 */
+    "types": ["node"]
   },
-  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.tsx", "src/**/*.vue"],
+  /* `tests/` 也进来：测试是要被 `vue-tsc` 当源码一起查的，
+     否则测试里写错一个函数名，只有跑起来才发现。 */
+  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.tsx", "src/**/*.vue", "tests/**/*.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

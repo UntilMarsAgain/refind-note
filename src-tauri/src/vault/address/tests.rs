@@ -207,3 +207,98 @@ fn the_wire_format_matches_the_frontend_mirror() {
     assert_eq!(wire["address"]["mode"]["kind"], "rollback");
     assert_eq!(wire["address"]["mode"]["ref"], "7");
 }
+
+// ------------------------------------------------------------------ 切分本身
+
+/// `split_address` 是"只切不问"的那一层（判合法是 `parse` 与 `title` 的事）。
+///
+/// 单独测它，是因为**书写顺序自由**与**同名成分后者覆盖前者**这两条规矩
+/// 写在它的注释里，而从 `parse` 那头测不出来 —— 两者最终的结果一样，
+/// 只有直接看切出来的三段才能钉住"是怎么切的"。
+///
+/// `split_address` 是 `pub(super)`，而私有性逐层向下可见，所以这里够得着。
+fn split(raw: &str) -> (String, Option<String>, Option<String>) {
+    let parts = super::split::split_address(raw);
+    (parts.name, parts.state, parts.section)
+}
+
+#[test]
+fn the_name_stops_at_the_first_marker() {
+    assert_eq!(split("示例笔记"), ("示例笔记".into(), None, None));
+    assert_eq!(
+        split("示例笔记@view-3"),
+        ("示例笔记".into(), Some("view-3".into()), None)
+    );
+    assert_eq!(
+        split("示例笔记#小节"),
+        ("示例笔记".into(), None, Some("小节".into()))
+    );
+}
+
+#[test]
+fn the_two_markers_may_come_in_either_order() {
+    // 「书写顺序自由」：`名称#段落@状态` 也认得
+    assert_eq!(
+        split("示例笔记#小节@view-3"),
+        (
+            "示例笔记".into(),
+            Some("view-3".into()),
+            Some("小节".into())
+        )
+    );
+    assert_eq!(
+        split("示例笔记@view-3#小节"),
+        (
+            "示例笔记".into(),
+            Some("view-3".into()),
+            Some("小节".into())
+        )
+    );
+}
+
+#[test]
+fn the_later_one_of_the_same_marker_wins() {
+    // `a#x#y` 的段落是 y —— 而这**不是**"两个段落"，切分只留一段
+    assert_eq!(split("a#x#y"), ("a".into(), None, Some("y".into())));
+    assert_eq!(
+        split("a@edit@view"),
+        ("a".into(), Some("view".into()), None)
+    );
+}
+
+#[test]
+fn an_empty_component_counts_as_not_written() {
+    assert_eq!(split("a@"), ("a".into(), None, None));
+    assert_eq!(split("a#"), ("a".into(), None, None));
+    assert_eq!(split("a@#"), ("a".into(), None, None));
+    // 只写了状态，段落仍然没写
+    assert_eq!(split("a@edit#"), ("a".into(), Some("edit".into()), None));
+}
+
+#[test]
+fn whitespace_around_the_parts_is_trimmed() {
+    assert_eq!(
+        split("  示例笔记  @  view-3  #  小节  "),
+        (
+            "示例笔记".into(),
+            Some("view-3".into()),
+            Some("小节".into())
+        )
+    );
+}
+
+#[test]
+fn multibyte_markers_do_not_cut_a_character_in_half() {
+    // 名字里带中文时，`find` 给的是**字节**下标 —— 而切分要的是字符边界。
+    // 这一条盯住 `char_indices` 那个用法（按字节切会切出半个字）。
+    let (name, state, section) = split("水文/航道@edit#小节");
+    assert_eq!(name, "水文/航道");
+    assert_eq!(state.as_deref(), Some("edit"));
+    assert_eq!(section.as_deref(), Some("小节"));
+}
+
+#[test]
+fn an_empty_input_gives_an_empty_name() {
+    assert_eq!(split(""), (String::new(), None, None));
+    assert_eq!(split("   "), (String::new(), None, None));
+}

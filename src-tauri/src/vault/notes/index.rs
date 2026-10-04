@@ -6,7 +6,6 @@
 use std::fs;
 use std::path::PathBuf;
 
-
 use super::{fold, Event, NoteState, Titles};
 use crate::storage::workspace::{append_line, read_json, write_json};
 use crate::vault::database::Database;

@@ -4,8 +4,7 @@
 
 use std::fs;
 
-use super::{Event, NoteSummary, RevisionSummary,
-            DEFAULT_MIME};
+use super::{Event, NoteSummary, RevisionSummary, DEFAULT_MIME};
 use crate::vault::database::{now, Database};
 
 impl Database {

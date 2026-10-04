@@ -5,7 +5,7 @@ use super::*;
 use crate::features::sync::lock::{acquire, LockBody};
 use crate::features::sync::rules::{decide, Decision, Evidence, Local, Remote};
 use crate::features::sync::settings::{Stamp, SyncSettings};
-use crate::storage::s3::{S3, S3Config};
+use crate::storage::s3::{S3Config, S3};
 use crate::storage::workspace::Workspace;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -438,7 +438,11 @@ fn an_etag_that_only_differs_in_case_is_not_a_change() {
         etag: "9f2c4a".to_string(),
         modified: 100,
     };
-    let (decision, _) = decide(false, Some(&here), Some(&there), Some(&stamp),
+    let (decision, _) = decide(
+        false,
+        Some(&here),
+        Some(&there),
+        Some(&stamp),
         Evidence::none(),
     );
     assert_eq!(decision, Decision::Nothing, "只差大小写不算云端变了");
@@ -454,16 +458,24 @@ fn the_cloud_layer_uses_the_chosen_cipher() {
     let key = generate_key().unwrap();
 
     let first = workspace("cipher-sm4");
-    std::fs::write(first.root().join("db/objects/0/1.log"), "{\"rev\":1}\n".as_bytes())
-        .unwrap();
+    std::fs::write(
+        first.root().join("db/objects/0/1.log"),
+        "{\"rev\":1}\n".as_bytes(),
+    )
+    .unwrap();
 
     let mut settings = settings_for(&address, &key);
     settings.cipher = crate::storage::codec::Cipher::Sm4Gcm;
-    assert_eq!(settings.view().cipher, crate::storage::codec::Cipher::Sm4Gcm);
+    assert_eq!(
+        settings.view().cipher,
+        crate::storage::codec::Cipher::Sm4Gcm
+    );
     run(&first, &settings, &|_| {}, false).unwrap();
 
     // 云端那份的封装头上记着用的是哪一档（magic(4) + 版本(1) + 算法(1)，见 CloudEnvelope）
-    let stored = bucket.bucket.lock().unwrap()["notes/db/objects/0/1.log"].0.clone();
+    let stored = bucket.bucket.lock().unwrap()["notes/db/objects/0/1.log"]
+        .0
+        .clone();
     assert_eq!(&stored[..4], b"RNDS", "应当是封装过的");
     assert_eq!(stored[5], 2, "算法那一字节：2 = 国密 SM4");
 
@@ -604,7 +616,10 @@ fn a_forced_sync_takes_a_lock_that_is_still_warm() {
         Err(message) => message,
     };
     assert!(polite.contains("锁"), "该说清是锁挡着：{polite}");
-    assert!(bucket.bucket.lock().unwrap().contains_key(&key), "锁还该在原处");
+    assert!(
+        bucket.bucket.lock().unwrap().contains_key(&key),
+        "锁还该在原处"
+    );
 
     // 强制：抢过来，锁里换成我们的名字
     let lock = acquire(&s3, true).expect("强制同步应当拿到锁");

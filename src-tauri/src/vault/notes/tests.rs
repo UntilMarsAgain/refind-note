@@ -92,25 +92,34 @@ fn a_user_template_is_invoked_by_its_name() {
 
     database.create("Template:名片").unwrap();
     database
-        .commit(
-            "Template:名片",
-            "**{{谁}}** 的名片\n\n{{body}}",
-            None,
-        )
+        .commit("Template:名片", "**{{谁}}** 的名片\n\n{{body}}", None)
         .unwrap();
 
     database.create("某页").unwrap();
     let source = "::名片 谁=\"甲\"\n  这一行是正文\n";
     let html = database.render_html(source, "某页").unwrap();
-    assert!(!html.contains("template--unknown"), "不该报未知模板：{html}");
+    assert!(
+        !html.contains("template--unknown"),
+        "不该报未知模板：{html}"
+    );
     assert!(html.contains("<strong>甲</strong>"), "参数要填进去：{html}");
-    assert!(html.contains("这一行是正文"), "块内容要填进 {{{{body}}}}：{html}");
+    assert!(
+        html.contains("这一行是正文"),
+        "块内容要填进 {{{{body}}}}：{html}"
+    );
 
     // 内置的优先：名字撞上时按内置的算
     database.create("Template:quote").unwrap();
-    database.commit("Template:quote", "用户写的 quote", None).unwrap();
-    let quote = database.render_html("::quote\n  一句引文\n", "某页").unwrap();
-    assert!(quote.contains("quote__origin") || quote.contains("class=\"quote\""), "{quote}");
+    database
+        .commit("Template:quote", "用户写的 quote", None)
+        .unwrap();
+    let quote = database
+        .render_html("::quote\n  一句引文\n", "某页")
+        .unwrap();
+    assert!(
+        quote.contains("quote__origin") || quote.contains("class=\"quote\""),
+        "{quote}"
+    );
     assert!(!quote.contains("用户写的 quote"), "内置的该赢：{quote}");
 
     // 真没有这一页：还是报未知模板（那才是"未知"）
@@ -193,7 +202,9 @@ fn a_template_page_can_be_embedded_by_name() {
 
     // 普通命名空间里的页面**不是**模板页：`src=` 取不到它（只认 `Template:`）
     database.create("一张普通笔记").unwrap();
-    database.commit("一张普通笔记", "不该被嵌进来", None).unwrap();
+    database
+        .commit("一张普通笔记", "不该被嵌进来", None)
+        .unwrap();
     let ordinary = database
         .render_html("::html src=\"一张普通笔记\"\n", "某页")
         .unwrap();

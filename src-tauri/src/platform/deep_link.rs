@@ -120,11 +120,11 @@ pub fn status(app: &AppHandle) -> String {
             .map(|text| text.lines().any(|it| it.trim() == line))
             .unwrap_or(false);
 
-        return match (has_desktop, linked) {
+        match (has_desktop, linked) {
             (true, true) => "已注册（桌面项与默认关联都在）".to_string(),
             (true, false) => "桌面项在，但默认关联没写进 mimeapps.list".to_string(),
             (false, _) => "还没注册（找不到那份 .desktop）".to_string(),
-        };
+        }
     }
 
     #[cfg(not(target_os = "linux"))]
