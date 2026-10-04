@@ -15,91 +15,35 @@
 //   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * 页内解锁：`readable()` 那个判断，与 `boxShape()` 框的形状。
+ * 页内解锁框的形状。
  *
- * 这里是**那个 bug 的回归测试**。它原来长这样：
+ * ## 这个文件改过一次，原因记在这里
  *
- *     if (!info.needs_unlock || readable(info)) return;
- *     // readable()：gpg 那一层"由系统代理管" → true
+ * 原来这里测的是一个叫 `readable()` 的函数：拿 `file_info` 的明文头去猜
+ * "这一份读不读得动"，然后**提前**决定要不要摆解锁框。它有两处都是错的：
  *
- * 于是 gpg 加密的附件**连解锁框都不摆**，`<img>` 直接去撞 404，而
- * `platform::protocol` 把"解密失败"和"没有这一份"一起答成 404，前端于是说
- * "图片不存在"。没有框，也就没有重试的机会 —— 正是报告里说的那三样。
+ * ```
+ * // gpg 那一层由系统代理管：直接去读就是了，读的时候它自己会问
+ * if (info.needs_secret_key && !info.needs_passphrase) return true;
+ * ```
  *
- * 修法是：`readable()` 遇到 gpg 必须说"不知道"，由 `lockState` 去**真的读一次**。
- * 那一步只有后端做得了，所以这里测的是"它别再乐观"。
+ * - **猜 gpg**："本机有没有那把私钥、代理答不答应"从明文头里**看不出来**。
+ *   说"读得动" → 框都不摆，`<img>` 去撞 404，报成"图片不存在"且无法重试；
+ *   说"读不动" → 白摆一个框，而 gpg 大部分时候是自动的（钥匙的口令有缓存、
+ *   智能卡碰一下就行），人为了看一张图先得点一下"解锁"，点完它自己就解开了。
+ * - **提前**：规格是"先试，失败了才摆框"（见 `dom/decrypt.ts` 抬头）。
+ *
+ * 所以 `readable()` 与 `unlockFile` **一起删了**，判断挪到两个真读一次的地方：
+ * `<img>` 加载失败之后（`dom/note-html.ts` 的 `markMissing`）、以及附件详情页
+ * 打开时（`composables/useFileDetail.ts`）。
+ *
+ * 留下来的是**框的形状** —— 那一部分与"猜不猜"无关，且它是纯函数、能测。
  */
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { boxShape } from "../../src/dom/decrypt.ts";
-import { readable } from "../../src/dom/file-unlock.ts";
-import type { FileInfo } from "../../src/ipc/files.ts";
-
-/** 造一个 `file_info` 的产物，只填这个判断要用的字段 */
-function info(over: Partial<FileInfo> = {}): FileInfo {
-    return {
-        title: "File:桥.png",
-        name: "桥.png",
-        mime: "image/png",
-        size: 1,
-        rev: 1,
-        modified: "",
-        url: "refind://localhost/file/%E6%A1%A5.png",
-        // 这几项这个判断用不到；填**合法值**而不是 null ——
-        // Rust 侧它们不是 Option（没压过时是 Deflate / Aes256Gcm），
-        // 填 null 的话这个文件就成了"测试数据与真实形状不一致"，反而骗人。
-        protection: {
-            compress: false,
-            compression: "deflate",
-            sign: null,
-            encrypt: null,
-            symmetric: false,
-            cipher: "aes-256-gcm",
-        },
-        needs_unlock: false,
-        passphrase_ready: false,
-        needs_passphrase: false,
-        needs_secret_key: false,
-        ...over,
-    };
-}
-
-describe("readable 说不说「读得动」", () => {
-    it("没加密的当然读得动", () => {
-        assert.equal(readable(info()), true);
-    });
-
-    // ↓↓↓ 这三条是这个文件存在的理由 ↓↓↓
-    it("gpg 加密的：说「不知道」，不能说「读得动」", () => {
-        // 本机有没有那把私钥、代理答不答应，只有真读才知道。
-        // 说"读得动"的后果是框都不摆，`<img>` 去撞 404，报成"图片不存在"。
-        assert.equal(readable(info({ needs_unlock: true, needs_secret_key: true })), false);
-    });
-
-    it("gpg 加口令的，口令在手也说「不知道」", () => {
-        // 口令解开的是外面那层，里面还有一层要问钥匙串。
-        // 只看 `passphrase_ready` 就说读得动，于是解密失败又被报成"图片不存在"。
-        assert.equal(
-            readable(
-                info({
-                    needs_unlock: true,
-                    needs_passphrase: true,
-                    needs_secret_key: true,
-                    passphrase_ready: true,
-                }),
-            ),
-            false,
-        );
-    });
-
-    it("纯口令的，口令在手才说读得动", () => {
-        const locked = info({ needs_unlock: true, needs_passphrase: true });
-        assert.equal(readable(locked), false, "还没口令就说读得动是错的");
-        assert.equal(readable({ ...locked, passphrase_ready: true }), true);
-    });
-});
 
 describe("解锁框的形状由「要不要口令」唯一决定", () => {
     it("口令层：给输入框，并且说清下一步", () => {
@@ -109,14 +53,22 @@ describe("解锁框的形状由「要不要口令」唯一决定", () => {
         assert.match(shape.hint, /口令/);
     });
 
-    it("gpg 层：不给输入框（多给了也要看见，但那是错的形状）", () => {
+    it("gpg 层：不给输入框，也不提口令", () => {
         const shape = boxShape(false);
         assert.equal(shape.showsInput, false);
-        // 不该提口令 —— gpg 问的是钥匙串，让人输口令是误导
+        // 不该提口令 —— gpg 问的是钥匙串或智能卡，让人输口令是误导
         assert.doesNotMatch(shape.hint, /口令/);
     });
 
     it("两条路的按钮都叫同一个字", () => {
+        // 分成两个字会让人以为不是一件事 —— 它们做的是同一件事：
+        // 让后端真的去加载一次（`resolveDecrypt`），只是那一次里问的是谁不一样
         assert.equal(boxShape(true).button, boxShape(false).button);
+    });
+
+    it("形状真的由那一个布尔值决定，没有别的东西偷偷进来", () => {
+        // 这一条钉的是"唯一"两个字：将来谁想按 gpg/口令之外的东西再分一次形状
+        // （比如"这一版既对称又 gpg"），得在这里先说清楚为什么
+        assert.deepEqual(Object.keys(boxShape(true)).sort(), ["button", "hint", "showsInput"]);
     });
 });

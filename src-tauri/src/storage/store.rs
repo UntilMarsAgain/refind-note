@@ -97,8 +97,21 @@ impl BlobStore {
 
     /// 取出内容（照头解层）
     pub fn get(&self, address: &str, secrets: &Secrets<'_>) -> Result<Vec<u8>, String> {
-        let file = self.read_stored(address)?;
-        codec::decode(&file, secrets).map_err(|error| error.to_string())
+        self.get_typed(address, secrets)
+            .map_err(|error| error.to_string())
+    }
+
+    /// 同 [`Self::get`]，但**保住错误类型**。
+    ///
+    /// 上层要分辨"这是上了锁"与"这东西坏了"（见 [`codec::CodecError::is_lock`]），
+    /// 而那件事在 `Display` 出来的字符串里分不出来 —— gpg 的失败就不在
+    /// `WRONG_PASSPHRASE_MESSAGE` 那句话里。所以这条留一个类型化的入口，
+    /// [`Self::get`] 仍然给字符串（大部分调用方只需要一句给人看的话）。
+    pub fn get_typed(&self, address: &str, secrets: &Secrets<'_>) -> codec::Result<Vec<u8>> {
+        let file = self
+            .read_stored(address)
+            .map_err(codec::CodecError::Corrupt)?;
+        codec::decode(&file, secrets)
     }
 
     /// 只看头：保护状态与内容自述（**不需要口令**）

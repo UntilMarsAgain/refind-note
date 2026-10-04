@@ -49,6 +49,7 @@
 //! 不必知道它究竟在哪个文件。
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::fs;
 use std::path::Path;
 
@@ -200,6 +201,12 @@ pub enum Reading {
     /// 界面据此说"再试一次"，而不是让人对着一个没有反应的输入框发呆。
     Locked {
         protection: Protection,
+        /// 为什么读不出来，**给人看的原文**。
+        ///
+        /// 不做归类：gpg 那边可能是"没有私钥"、"代理被取消了"、"解密失败" ——
+        /// 该分别说，压成一句"解密失败"等于把人引到错的地方。
+        /// 界面据此决定解锁框上写什么、以及要不要给口令输入框（看 `protection`）。
+        reason: String,
         wrong_passphrase: bool,
     },
 }
@@ -253,8 +260,54 @@ pub fn fold(events: &[Event]) -> NoteState {
 /// 这个错是不是"口令不对"。
 ///
 /// 认的是那句话本身，而它的写法只有 `codec` 一处 —— 两边不会各自漂走。
-fn is_wrong_passphrase(error: &str) -> bool {
-    error.contains(crate::storage::codec::WRONG_PASSPHRASE_MESSAGE)
+/// 装配一版正文时的失败。
+///
+/// 分两类的理由见 [`AssembleError::codec`]：上层要分辨"上了锁"（有出路，摆个框让人
+/// 解锁）与"这东西坏了"（没出路）。以前这个分辨是在 `Display` 出来的字符串里找字，
+/// 而 gpg 的失败压根不在那句话里 —— 于是它被当成"坏了"，人看到一句技术话，
+/// 既没有框也没有重试。
+#[derive(Debug)]
+pub(super) enum AssembleError {
+    /// 解层失败（口令不对 / 要口令 / gpg 那边的问题 / 没装 gpg）
+    Codec(crate::storage::codec::CodecError),
+    /// 不是解层的事（渲染失败、正文不是文本……）
+    Other(String),
+}
+
+impl AssembleError {
+    /// 解层那一层的错误（`Other` 时没有）
+    pub(super) fn codec(&self) -> Option<&crate::storage::codec::CodecError> {
+        match self {
+            Self::Codec(error) => Some(error),
+            Self::Other(_) => None,
+        }
+    }
+
+    /// 是不是"上了锁 / 解不开"，而不是"东西坏了"
+    pub(super) fn is_lock(&self) -> bool {
+        self.codec().is_some_and(|error| error.is_lock())
+    }
+
+    /// 刚才是"口令不对"（可以让人改了再输一次）
+    pub(super) fn is_wrong_passphrase(&self) -> bool {
+        self.codec()
+            .is_some_and(|error| error.is_wrong_passphrase())
+    }
+}
+
+impl From<crate::storage::codec::CodecError> for AssembleError {
+    fn from(error: crate::storage::codec::CodecError) -> Self {
+        Self::Codec(error)
+    }
+}
+
+impl fmt::Display for AssembleError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Codec(error) => write!(f, "{error}"),
+            Self::Other(reason) => write!(f, "{reason}"),
+        }
+    }
 }
 
 /// 生成一个没被用过的 id：纯 ASCII 十六进制，撞了就再取一个

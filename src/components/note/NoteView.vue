@@ -278,6 +278,14 @@ watch(
   },
 );
 
+/**
+ * 上了锁时后端给的那一份（`reason` / `protection` / `wrong_passphrase`）。
+ *
+ * 为 null 表示没锁。**不是布尔**：理由与"要不要口令输入框"都在里面，
+ * 前端不再自己判断那两件事（判断只有后端知道 —— 它刚读过封装头）。
+ */
+const locked = ref<Extract<Reading, { state: "locked" }> | null>(null);
+
 async function load() {
     loading.value = true;
     error.value = "";
@@ -288,19 +296,22 @@ async function load() {
             reference: props.reference,
         });
 
-        // 上了锁就把地址换成 `@unlock`：输入口令的地方是**那一页**，不是这里。
-        // 看的是旧版本就带上版本号 —— 口令按版本存，要解的是那一版。
+        // 上了锁 → **就地**摆解锁框，不跳去 `@unlock`。
+        //
+        // 原来是 `emit("redirect", "…@unlock")`：读一篇加密笔记会把人整个送到另一个
+        // 地址去，于是"我在读哪一篇"这件事在过程中丢了，而且解锁框里那几条逃生路
+        // （版本历史 / 删除）离上下文很远。
+        //
+        // 后端这一支已经把该说的都说了（`reason` 是原话，`protection` 决定要不要
+        // 给口令输入框，`wrong_passphrase` 决定说"再输一次"还是说别的），所以就地
+        // 摆框不需要前端再判断什么。见 `components/note/UnlockView.vue`。
         if (reading.state === "locked") {
             note.value = null;
-            emit(
-                "redirect",
-                props.reference === null
-                    ? `${props.title}@unlock`
-                    : `${props.title}@unlock-${props.reference}`,
-            );
+            locked.value = reading;
             return;
         }
 
+        locked.value = null;
         note.value = reading.note;
     } catch (reason) {
         note.value = null;
@@ -321,6 +332,24 @@ watch(
 <template>
   <div class="note">
     <p v-if="loading" class="note__hint">正在读「{{ title }}」…</p>
+
+    <!--
+      上了锁：**就地**的解锁框（作者定的：不要跳去 `@unlock`）。
+
+      用的是 `UnlockView` 那一个组件 —— 地址栏敲 `名字@unlock` 走的是同一个，
+      两处不会长成两个样子。`inline` 只是把"返回「这一篇」"那颗去掉：
+      已经在这一篇上了，没什么可返回的。
+    -->
+    <UnlockView
+        v-else-if="locked"
+        :title="title"
+        :reference="props.reference ?? null"
+        inline
+        :needs-passphrase="locked.protection.symmetric"
+        :reason="locked.reason"
+        :wrong-passphrase="locked.wrong_passphrase"
+        @unlocked="load"
+    />
 
     <div v-else-if="error" class="note__error">
       <p class="note__error-text">{{ error }}</p>

@@ -36,7 +36,7 @@ import { loadBrowsing } from "./core/browsing.ts";
 import { dismissNotice, flash, notice } from "./core/notice.ts";
 import { syncBeforeClose, syncClosing, syncProgress } from "./core/sync.ts";
 import { currentWindow } from "./core/window-api.ts";
-import { setRereadNote } from "./dom/decrypt.ts";
+import { setRevealDecrypted } from "./dom/decrypt.ts";
 import { setOpenInNewTab } from "./dom/note-html.ts";
 import { syncNowAndReport } from "./core/sync.ts";
 import { isMobile } from "./core/platform.ts";
@@ -399,11 +399,25 @@ onMounted(() => {
   installWheelZoom();
   // 正文右键里的"在新标签页打开"与 Ctrl+点击走同一个实现
   setOpenInNewTab(openTabWith);
-  // 页内解锁框解开**模板页**之后要重读这一篇：正文是后端渲染的 HTML，模板内容在
-  // 渲染期就烤进去了，补不了那一块（附件不用 —— 换一个元素就行，见 dom/decrypt.ts）。
-  // 用 `replace`：与 `afterUnlock` 同一件事 —— 解锁之后原来那条"读不出来"的记录
-  // 留着只会把这一页再送回来。
-  setRereadNote((title) => void navigate(title, "replace"));
+    // 页内解锁框解开之后，"把那一块换成什么"由各处自己挑最对的做法
+    // （见 dom/decrypt.ts 抬头）：正文那一篇自己重读、附件换一个元素、
+    // 页内嵌着的模板页要重渲染整篇 —— 它的参数是**调用点**给的，
+    // 后端单独算出来的那一块会把参数丢掉。
+    //
+    // 这里只管一种：**解开的不是当前这一篇**（那一定是正文里嵌着的模板页），
+    // 于是要刷新的是当前这一篇。当前这一篇自己的解锁走的是 `NoteView` 里的
+    // `load()`，不经过这里。
+    setRevealDecrypted((kind, title) => {
+      if (kind !== "page") {
+        return;
+      }
+      const outcome = active.value?.route?.outcome;
+      if (outcome?.kind === "note" && outcome.title === title) {
+        renderPane.value?.reload();
+        return;
+      }
+      void navigate(title, "replace");
+    });
   void interceptClose();
   // 深链来的时候**开一个新标签页**，不动人正在看的这一页：
   // 对方是从别处点了一个链接过来的，不是要你离开手上这一页 ——

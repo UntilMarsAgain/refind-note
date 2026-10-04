@@ -17,10 +17,19 @@
 /**
  * 页内解锁 —— 与 Rust 侧 `src-tauri/src/commands/lock.rs` 一一对应。
  *
- * 页内读不出来的份有两条来路 —— 被 `::` 引用的模板页、加密附件 —— 它们都摆同一个
- * 解锁框，所以后端也只给一条命令。字段名是 snake_case：Rust 那侧没有全局 serde
- * rename，改这边就要改那边，而改错了一边是**静默**的（收到 `undefined`，而 `undefined`
- * 是假值）。Rust 侧有测试钉住这一点。
+ * 这是在 `::decrypt` 上**提交之后**调的那一条：交口令（可省）→ 后端真的去加载一次
+ * → 报告成不成。
+ *
+ * ## 为什么"成不成"只能问后端
+ *
+ * gpg 那一层没有口令，也没有"先试试看"——它要么被 gpg-agent 悄悄解开（钥匙的口令
+ * 有缓存、或者智能卡碰一下就行），要么失败，而失败之前什么迹象都没有。渲染期还
+ * 是**故意不问**的（一篇笔记会被渲染很多次，每次弹一个 pinentry 窗口是荒唐的）。
+ *
+ * 所以"到底行不行"只能由人按一下那个按钮来问。这条命令就是那一次问。
+ *
+ * 字段名是 snake_case：Rust 那边没有全局 serde rename，改一边就要改两边，而改错了
+ * 是**静默**的（收到 `undefined`，而 `undefined` 是假值）。Rust 侧有测试钉住。
  */
 
 import { invoke } from "@tauri-apps/api/core";
@@ -28,44 +37,42 @@ import { invoke } from "@tauri-apps/api/core";
 /** 解锁框的种类 */
 export type LockKind = "page" | "file";
 
-/**
- * 一份东西现在的锁状态。
- *
- * `readable` 与 `needs_unlock` 是两件事，别混：前者是**真的去读了一次**才知道的，
- * 后者是"明文头里写着要解锁"。gpg 那一层两者会不一致 —— 头说要解锁，而真读的时候
- * 才发现没有私钥。正因为如此，界面必须听 `readable` 的，不能听 `needs_unlock` 的。
- */
-export interface LockState {
+/** 真的加载一次之后的结果 */
+export interface ResolveResult {
     kind: LockKind;
-    /** 页内解锁框拿它去重新问（`unlock` 与 `read` 都按标题走） */
+    /** 解锁框拿它去重新问 */
     title: string;
-    /** 仓库里有没有这一份。为假时后面几个字段都没意义 */
-    exists: boolean;
-    /** 要不要先解锁才能读（明文头里写着） */
-    needs_unlock: boolean;
-    /** 需要口令（对称层）。gpg 那一层为假 —— 它问的是钥匙串 */
-    needs_passphrase: boolean;
-    /** gpg 加密的（有没有私钥真要读的时候才知道） */
-    needs_secret_key: boolean;
-    /** 口令正躺在本次会话里 */
-    passphrase_ready: boolean;
-    /** **真的去读过了，读得动吗** */
+    /** 读成了没有 */
     readable: boolean;
-    /** 读不动时为什么（原文，给人看） */
+    /** 读不成时为什么（原文，给人看） */
     reason: string;
+    /** 刚才是"口令不对"——界面据此说"再输一次"，而不是让人对着没反应的输入框发呆 */
+    wrong_passphrase: boolean;
+    /** 要不要给口令输入框。对称层为真；gpg 层为假——它问的是钥匙串或智能卡 */
+    needs_passphrase: boolean;
 }
 
 /**
- * 交口令（可省）→ 真的去读一次 → 报告读得动读不动。
+ * 交口令（可省）→ 后端真的加载一次 → 成或不成。
  *
- * 口令错了**不**抛错，而是 `readable: false` + `reason`：解锁框要留在原地，
- * 让人改了口令再按一次。
+ * **口令错了不抛**：`readable: false` 加一句 `reason`。解锁框要留在原地让人改了
+ * 再按一次，抛错的话前端只知道"失败了"，得另外约定怎么区分"口令不对"与
+ * "这份东西坏了"。
+ *
+ * 成功时**不返回内容**——由界面自己重读。后端要把三种上下文（笔记、页内嵌着的
+ * 模板页、附件）都算成一段 HTML 塞回来，就得替每种各写一遍，而模板那一路注定是
+ * 错的：`::卡片` 的参数是调用点给的，只看模板页本身算不出来。
  */
-export async function lockState(
+export async function resolveDecrypt(
     kind: LockKind,
     title: string,
     reference?: string | null,
     passphrase?: string,
-): Promise<LockState> {
-    return await invoke<LockState>("lock_state", { kind, title, reference, passphrase });
+): Promise<ResolveResult> {
+    return await invoke<ResolveResult>("resolve_decrypt", {
+        kind,
+        title,
+        reference,
+        passphrase,
+    });
 }

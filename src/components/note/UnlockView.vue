@@ -17,57 +17,96 @@
 -->
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { Lock, Unlock } from "@lucide/vue";
-import { unlock } from "../../core/preferences.ts";
+import { resolveDecrypt } from "../../ipc/lock.ts";
 
 /**
- * 等待并输入口令（`名称@unlock`）。
+ * 等口令（`名称@unlock`，或者**就地**摆在读不出来的那一面上）。
  *
- * 读一篇上了锁的笔记时会先落到这一页 —— 口令**按版本存**，同一篇的不同版本可以用
- * 不同的密码，所以在别的版本上解过锁不等于这一版能读。
+ * ## 两种摆法，一个组件
  *
- * 口令交给后端**当场验**（错的不会存下来）；验过之后 emit `unlocked`，
- * 由上层把地址换回那一页（它自己会重读）。
+ * - 地址栏敲 `名字@unlock` → 它是整页（`inline` 为假）；
+ * - 打开一篇加密笔记 → 它就摆在**那一篇的位置上**（`inline` 为真）。
+ *     这是作者要的：原来读一篇加密笔记会把人整个送到 `@unlock` 那个地址去，
+ *     于是"我在读哪一篇"在过程中丢了。
+ *
+ * 两处共用一个组件，所以框的样子、逃生路、"再输一次"的说法都不会分家。
+ *
+ * ## 为什么走 `resolveDecrypt` 而不是 `unlock`
+ *
+ * `unlock`（`core/preferences.ts`）只**交口令**，交完就回来 —— 它证明不了成不成。
+ * 口令层还好（`unlock` 后端当场验，错的会抛），但 **gpg 那一层根本没有口令**，
+ * 于是失败只体现在后面某次读取上，表现为一句技术话，人既没有重试也没有按钮。
+ *
+ * `resolveDecrypt` 交完口令会**真的去加载一次**，失败时给一句人话（`reason`）——
+ * 那才是能作数的一步。见 `src-tauri/src/commands/lock.rs` 抬头。
  */
 const props = defineProps<{
   title: string;
   /** 要解哪一版；token 字符串，null = 最新版 */
   reference: string | null;
+  /** 就地摆在读不出来的正文位置（省掉"返回这一篇"那颗 —— 已经在这一篇上了） */
+  inline?: boolean;
+  /** 要不要口令输入框。**由后端给**：对称层为真；gpg 层为假 —— 它问的是钥匙串或智能卡 */
+  needsPassphrase?: boolean;
+  /** 后端给的原因（原文，给人看） */
+  reason?: string;
+  /** 刚才是"口令不对"——据此说"再输一次" */
+  wrongPassphrase?: boolean;
 }>();
 
 const emit = defineEmits<{
-  /** 口令已交给后端：上层去重读 */
+  /** 解开了：上层去重读（它自己知道该重读哪一份） */
   (e: "unlocked"): void;
   /** 去别的地方（历史 / 删除……）：地址归上层管 */
   (e: "navigate", input: string): void;
-  /** 不解了：回到这一篇的阅读页（它会照旧说"需要口令"） */
+  /** 不解了：回到这一篇的阅读页（它会照旧说"需要口令"）。就地模式下没有这颗 */
   (e: "cancel"): void;
 }>();
 
 const passphrase = ref("");
 const busy = ref(false);
-const error = ref("");
+/** 失败时那句话。**留���输入框** —— 没有"再输一次"的机会，比报错本身更难受 */
+const problem = ref(props.reason ?? "");
+const wantsPassphrase = ref(props.needsPassphrase ?? true);
+
+const heading = computed(() =>
+  props.reference === null ? `「${props.title}」需要解锁` : `「${props.title}」第 ${props.reference} 版需要解锁`,
+);
+
 /**
- * 输一次口令。
+ * 提交一次。
  *
- * 后端**当场验**：错的口令不会存下来，报一句"口令不对"。所以这里出错时**不清输入框**，
- * 改一下再点就是了 —— 没有"再输一次"的机会，比报错本身更难受。
+ * 出错时**不清输入框**：错口令不该让人重新打一遍。
  */
 async function submit() {
-  if (!passphrase.value) {
+  if (busy.value) {
     return;
   }
-
   busy.value = true;
-  error.value = "";
+  problem.value = "";
 
   try {
-    await unlock(props.title, props.reference, passphrase.value);
+    const result = await resolveDecrypt(
+      "page",
+      props.title,
+      props.reference,
+      wantsPassphrase.value ? passphrase.value : undefined,
+    );
+    if (!result.readable) {
+      problem.value = result.reason || "还是读不出来";
+      // 后端说这一版还要口令（既对称又 gpg，外层解开后里面还要问）：
+      // 把输入框补上。少这一步的话人会看到一个"解锁"按钮，按了又被要口令。
+      if (result.needs_passphrase && !wantsPassphrase.value) {
+        wantsPassphrase.value = true;
+      }
+      return;
+    }
     passphrase.value = "";
     emit("unlocked");
   } catch (reason) {
-    error.value = String(reason);
+    problem.value = String(reason);
   } finally {
     busy.value = false;
   }
@@ -75,19 +114,28 @@ async function submit() {
 </script>
 
 <template>
-  <section class="unlock">
+  <!--
+    `inline` 只改两件事：省掉"返回这一篇"那颗（已经在这一篇上了），
+    以及外层不加那一段留白 —— 就地的时候上面就是页头。
+  -->
+  <section class="unlock" :class="{ 'unlock--inline': inline }">
     <h1 class="unlock__title">
       <Lock :size="20" :stroke-width="1.8" />
-      「{{ title }}」{{ reference === null ? "需要口令" : `第 ${reference} 版需要口令` }}
+      {{ heading }}
     </h1>
 
-    <p class="unlock__hint">
+    <p v-if="wantsPassphrase" class="unlock__hint">
       此笔记以口令加密存储。口令仅用于本次会话，<strong>不会保存到磁盘</strong>，
       关闭程序后需要重新输入。
+    </p>
+    <p v-else class="unlock__hint">
+      这一篇由 gpg 加密，解锁由系统代理办 —— 它多半会自己就解开（钥匙的口令有缓存，
+      或者智能卡碰一下就行）。按一下「解锁」就是让它去试。
     </p>
 
     <div class="unlock__field">
       <input
+        v-if="wantsPassphrase"
         v-model="passphrase"
         class="unlock__input"
         type="password"
@@ -101,7 +149,7 @@ async function submit() {
       </button>
     </div>
 
-    <p v-if="error" class="unlock__error">{{ error }}</p>
+    <p v-if="problem" class="unlock__error">{{ problem }}</p>
 
     <!--
       想不起口令、或者这台机器上根本没有 gpg 时，得留几条不用解锁也走得通的路：
@@ -115,7 +163,12 @@ async function submit() {
       <button type="button" class="unlock__escape" @click="emit('navigate', title + '@delete')">
         删除这一篇
       </button>
-      <button class="unlock__back" type="button" @click="emit('cancel')">
+      <button
+        v-if="!inline"
+        class="unlock__back"
+        type="button"
+        @click="emit('cancel')"
+      >
         返回「{{ title }}」
       </button>
     </div>

@@ -131,6 +131,17 @@ export type Reading =
     | {
     state: "locked";
     protection: Protection;
+    /**
+     * 为什么读不出来，**给人看的原文**。
+     *
+     * 不做归类：gpg 那边可能是"没有私钥"、"解密已取消：口令没有输入"、别的 ——
+     * 该分别说，压成一句"解密失败"等于把人引到错的地方。
+     *
+     * 这一支涵盖**两种**上锁：对称层（`protection.symmetric`）与 gpg 层
+     * （`protection.encrypt`）。以前 gpg 解不开走的是"报一句原始错误"，人看到的是
+     * 技术话，没有框也没有重试 —— 而它恰恰是最该给框的那一种。
+     */
+    reason: string;
     /** 刚才那把口令是错的（这次会话里的已被丢掉）—— 界面据此说"再试一次" */
     wrong_passphrase: boolean;
 };

@@ -8,6 +8,63 @@ use super::gpg::FORCE_NO_GPG;
 use super::symmetric::{open_with, seal_with};
 use super::*;
 
+/// `is_lock` 分的是"解不开"与"坏了" —— 上层据此决定给不给解锁框。
+///
+/// 以前这个判断是在 `Display` 出来的字符串里找字（`is_wrong_passphrase`），
+/// 而 **gpg 的失败压根不在那句话里** —— 于是 gpg 解不开的笔记走的是"报一句原始
+/// 错误"，人看到的是技术话，既没有框也没有重试。这条测试就是把那个分界钉住：
+/// gpg 那些**必须**算成"解不开"。
+#[test]
+fn a_gpg_failure_counts_as_locked_and_a_corrupt_file_does_not() {
+    // 解不开 → 该给框（人点一下、输个口令、碰一下智能卡，都有出路）
+    for error in [
+        CodecError::PassphraseNeeded,
+        CodecError::WrongPassphrase,
+        CodecError::Gpg("解密失败".into()),
+        CodecError::Gpg("解密已取消：口令没有输入".into()),
+        CodecError::GpgUnavailable,
+    ] {
+        assert!(error.is_lock(), "{error:?} 应当算「解不开」");
+    }
+
+    // 坏了 → **不该**给框。输了口令问题还在，而那个输入框会把人困住，
+    // 让他以为是自己弄错了什么
+    for error in [
+        CodecError::NotEnvelope("头坏了".into()),
+        CodecError::UnknownLayer("未来的一层".into()),
+        CodecError::Corrupt("载荷短了".into()),
+    ] {
+        assert!(!error.is_lock(), "{error:?} 不该算「解不开」");
+    }
+}
+
+/// "口令不对"要与"根本没试过"分开：前者值得让人改了再输一次
+#[test]
+fn only_the_wrong_passphrase_is_flagged_as_worth_retrying() {
+    assert!(CodecError::WrongPassphrase.is_wrong_passphrase());
+    // gpg 的失败**不是**"口令不对" —— 它可能是没有私钥、或者代理被取消了，
+    // 说成"口令不对"会让人一遍遍输一个根本不相关的口令
+    assert!(!CodecError::Gpg("没有私钥".into()).is_wrong_passphrase());
+    assert!(!CodecError::PassphraseNeeded.is_wrong_passphrase());
+}
+
+/// 每一条都说清是哪一类，不是把内部名直接抛给人
+#[test]
+fn every_variant_says_something_a_person_can_act_on() {
+    for (error, needle) in [
+        (CodecError::PassphraseNeeded, "口令"),
+        (CodecError::WrongPassphrase, "口令不对"),
+        (CodecError::Gpg("没有私钥".into()), "没有私钥"),
+        (CodecError::GpgUnavailable, "没有 gpg"),
+        (CodecError::Corrupt("载荷短了".into()), "不成形"),
+    ] {
+        assert!(
+            error.to_string().contains(needle),
+            "{error:?} 的那句话里该有「{needle}」"
+        );
+    }
+}
+
 /// 算法在 JSON 里怎么写：界面（`ipc/note.ts`）按这串字选，写错了就是一句
 /// "unknown variant `aes-256-gcm`"。老文件里是 `aes256-gcm`（少一个横线），
 /// 也要能读回来 —— 那正是这条测试存在的原因。

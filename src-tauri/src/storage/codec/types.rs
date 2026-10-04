@@ -209,6 +209,22 @@ pub struct Protection {
 }
 
 impl Protection {
+    /// 什么都没套：落盘的就是明文
+    ///
+    /// 有**两处**要它：还没有正文的那一版（0 版）压根没有封装头，
+    /// 以及"连头都读不出来"的场合（那时只能 conservatively 当成没加密 ——
+    /// 宁可让人点一下让 gpg 去问，也不要摆一个骗人的口令输入框）。
+    pub fn plain() -> Self {
+        Self {
+            compress: false,
+            compression: Compression::default(),
+            sign: None,
+            encrypt: None,
+            symmetric: false,
+            cipher: Cipher::default(),
+        }
+    }
+
     /// 什么都没做：落盘的就是明文
     #[cfg(test)]
     pub fn is_plain(&self) -> bool {

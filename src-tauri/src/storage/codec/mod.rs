@@ -132,6 +132,33 @@ pub enum CodecError {
     Corrupt(String),
 }
 
+impl CodecError {
+    /// 这一条是不是"**上了锁 / 解不开**"，而不是"东西坏了"。
+    ///
+    /// ## 为什么要有这个判断
+    ///
+    /// 上层要据此决定给不给**解锁框**：解不开的场合摆个框让人输口令、点一下让
+    /// gpg 去问钥匙串，是有出路的；坏掉的场合摆框是荒唐的 —— 输了口令问题还在，
+    /// 而人会被那个输入框困住，以为是自己弄错了什么。
+    ///
+    /// 以前这个判断是 `is_wrong_passphrase` 那种**在 Display 出来的字符串里找字**，
+    /// 而 gpg 的失败压根不在那句话里 —— 于是 gpg 解不开的笔记走的是"报一个原始错误"，
+    /// 人看到的是一句技术话，既没有框也没有重试（这正是它要修的那一类）。
+    ///
+    /// `WrongPassphrase` 归在这一类里：它也是"再输一次就有出路"。
+    pub fn is_lock(&self) -> bool {
+        matches!(
+            self,
+            Self::PassphraseNeeded | Self::WrongPassphrase | Self::Gpg(_) | Self::GpgUnavailable
+        )
+    }
+
+    /// 刚才是"口令不对"（可以让人改了再输一次）——与"根本没试过"要分开说
+    pub fn is_wrong_passphrase(&self) -> bool {
+        matches!(self, Self::WrongPassphrase)
+    }
+}
+
 impl fmt::Display for CodecError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -150,7 +177,7 @@ impl fmt::Display for CodecError {
 
 impl std::error::Error for CodecError {}
 
-type Result<T> = std::result::Result<T, CodecError>;
+pub type Result<T> = std::result::Result<T, CodecError>;
 
 // ---------------------------------------------------------------- 编码
 

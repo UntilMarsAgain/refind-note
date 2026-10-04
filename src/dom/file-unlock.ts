@@ -18,8 +18,19 @@
  * 加密文件的解锁。
  *
  * 文件进了 blob 仓，就与笔记一样可能带口令层或 gpg 加密层 —— 于是"把这张图显示出来"
- * 这件事不再是无条件的：**先问后端"这一版怎么存的、现在读不读得动"**，
- * 读不动就摆一个解锁按钮，而不是让 `<img>` 去撞一堵 404 的墙。
+ * 这件事不再是无条件的。
+ *
+ * 这里只提供**看头**的那一问（`fileInfo`，不读字节）与**解锁之后绕开缓存**的那一手
+ * （`freshUrl`）。判断"要不要摆解锁框"**不在这里** —— 它在 `<img>` 真的加载失败
+ * 之后才做，见 `dom/note-html.ts` 的 `markMissing`。
+ *
+ * 原来这里还有一个 `readable()`，拿头去猜"读不读得动"，连同 `unlockFile` 一起删了：
+ *
+ * - `readable()` 对 gpg 只能猜（本机有没有私钥、代理答不答应，猜不出来），而猜出来的
+ *   后果是**白摆一个框**（gpg 大部分时候是自动的）或**该摆不摆**（人被卡住）。
+ *   现在改成"先试，失败再问"，不问预测值。
+ * - `unlockFile` 只交口令就收工，证明不了成不成；`ipc/lock.ts` 的 `resolveDecrypt`
+ *   交完口令会**真的加载一次**，那才是能作数的那一步。
  */
 
 import { invoke } from "@tauri-apps/api/core";
@@ -43,33 +54,6 @@ export async function fileInfo(name: string): Promise<FileInfo | null> {
 // 表现成"图片不存在"且无法重试（见 `dom/decrypt.ts` 抬头那段）。
 // `lockState` 交完口令会**真的去读一次**，所以那一步能说话。
 // 现在它没有调用方，留着只会让人以为"交口令"就够。
-
-/**
- * 这一份**已经**读得动吗（不是"大概读得动"）。
- *
- * ## gpg 那一层不能乐观
- *
- * 原来这里写着「gpg 由系统代理管：直接去读就是了」→ 返回 true。于是
- * `attachVaultFile` **连框都不摆**，`<img>` 去撞 404，而 `platform::protocol`
- * 把"解密失败"与"没有这一份"一起答成 404，前端于是说"图片不存在" ——
- * 没有框，也就没有重试的机会。这是那个 bug 的**触发点**。
- *
- * 本机有没有那把私钥、代理答不答应，**只有真读才知道** —— 所以这里必须说"不知道"，
- * 由 `lockState` 去真的读一次（见 `dom/decrypt.ts`）。
- *
- * @see the_same_readable_verdict_for_every_layer_including_gpg
- */
-export function readable(info: FileInfo): boolean {
-    if (!info.needs_unlock) {
-        return true;
-    }
-    // gpg 在场就是"不知道" —— 哪怕口令已经在手也一样：口令解开的是外面那层，
-    // 里面还有一层要问钥匙串，而那把私钥在不在没人提前知道。
-    if (info.needs_secret_key) {
-        return false;
-    }
-    return info.passphrase_ready;
-}
 
 /** 带一个"这次是新读的"后缀：解锁之后要让 webview 重新去取，而不是吃缓存 */
 export function freshUrl(url: string): string {

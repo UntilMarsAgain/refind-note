@@ -120,6 +120,16 @@ pub(super) fn render_decrypt(template: &Template, node: &Node, fmt: &mut dyn Ren
                 template.param("label").unwrap_or("").to_string(),
             ),
             ("data-decrypt-reason", template.body.to_string()),
+            // 要不要口令输入框：**后端此刻已经知道**（`expand` 从封装头读来的），
+            // 不写进来就得让前端再猜一次 —— 而猜错是静默的
+            (
+                "data-decrypt-needs-passphrase",
+                match template.param("passphrase") {
+                    Some("yes") => "yes",
+                    _ => "no",
+                }
+                .to_string(),
+            ),
         ],
     );
     fmt.close("span");

@@ -14,35 +14,41 @@
 //   You should have received a copy of the GNU Affero General Public License
 //   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! 页内解锁：一条命令管住"笔记"与"文件"两种上了锁的份。
+//! 页内解锁：**在 `::decrypt` 上提交之后**调的那一条。
 //!
-//! ## 为什么要有这一条
+//! ## 这一条为什么非得"真的去加载"
 //!
-//! 页内读不出来的份有两条来路 —— 模板页（`::decrypt` 那个框）与加密附件
-//! （`::image`/`![…]` 换成的那个框），而它们原本是两套：后一套在前端手工搭 DOM，
-//! 提示文案写在 TS 里；前一套在后端渲染，文案写在 Rust 里。行为于是分了家。
+//! 因为**别的任何办法都证明不了它成不成**。三层里只有两层会自己说话：
 //!
-//! 更要紧的是**它们各自都没验证过解锁成功**。口令层还好：`unlock` 当场验，
-//! 错的会抛出来，框留在原地（见 `vault::resolve::revisions::unlock` 为什么那么写）。
-//! 但 **gpg 那一层没有口令**，于是没有任何一步说话 —— 点"显示"、换掉框、
-//! `<img>` 去拉、`platform::protocol` 把解密失败**和"没有这一份"一起**答成 404、
-//! 前端于是说"图片不存在"。框已经没了，人既不能重试也看不到按钮。
+//! - **口令层**：`unlock` 当场验，错口令会抛出来（见
+//!   `vault::resolve::revisions::unlock` 为什么那么写）。所以它一直是好的。
+//! - **gpg 层**：没有口令，也没有"先试试看"这回事 —— 它要么被 gpg-agent 悄悄解开
+//!   （钥匙的口令有缓存、或者智能卡碰一下就行），要么失败。而失败之前
+//!   **什么迹象都没有**。
+//! - **渲染期**：这一层**故意不问**（`codec::without_prompting`，见
+//!   `vault::notes::read::read_for_embedding`）—— 渲染一篇笔记时弹一个 pinentry
+//!   窗口是荒唐的，那一页会被渲染很多次（编辑器每敲一个字一次）。
 //!
-//! 所以这里的关键是 [`LockState::readable`]：它不是**推断**出来的，是**真的去读了一次**
-//! 才知道的。没有口令的那一层，只有真读才会说话。
+//! 于是"到底行不行"只能由**人按一下那个按钮**来问。这就是这一条命令存在的理由，
+//! 也是 `::decrypt` 上那个按钮为什么不是"改个地址重新导航"那么简单。
 //!
-//! ## 形状为什么两边一样
+//! ## 为什么成功时不返回内容
 //!
-//! 返回的字段对两种份都成立，于是前端的解锁框只有**一个**实现
-//! （`src/dom/decrypt.ts` 的 `decryptBox`），差别只在 `kind` 决定解锁之后怎么刷新：
-//! 文件换一个元素就行，模板页得整页重渲染（模板内容是渲染期烤进 HTML 的）。
+//! 成功时只说"成了"，由界面自己重读。这样"替换掉那个占位"这件事**每处都做得对**：
 //!
-//! `reason` 是给**人**看的，所以走原文，不做归类 —— "没有私钥"与"代理被取消了"
-//! 该分别说，不该都被压成"解密失败"。
+//! - 页内嵌着的模板页：重渲染那一篇 —— `::卡片` 的参数是**调用点**给的，
+//!   只看模板页本身算不出来（见 `markdown::syntax::template::fill::substitute`）；
+//! - 读的那一篇笔记：重读它自己；
+//! - 一个附件：换上真的地址。
+//!
+//! 后端要把这三样都算成一段 HTML 塞回来，就得替三种上下文各写一遍，而模板那一路
+//! **注定是错的**。所以分工是：后端负责**说清成不成、为什么不成**（只有它知道），
+//! 界面负责**替换**（只有它知道）。
 
 use serde::Serialize;
 
 use crate::open_database;
+use crate::storage::codec::Protection;
 use crate::vault::database::Database;
 
 /// 页内解锁框的种类
@@ -59,70 +65,49 @@ impl Kind {
     /// 认这个字符串；认不出就是 `None`，由调用方决定怎么报错
     pub fn parse(text: &str) -> Option<Self> {
         match text.trim().to_ascii_lowercase().as_str() {
-            "page" | "note" => Some(Kind::Page),
-            "file" => Some(Kind::File),
+            "page" | "note" | "template" => Some(Kind::Page),
+            "file" | "attachment" => Some(Kind::File),
             _ => None,
         }
     }
 }
 
-/// 一份东西现在的锁状态
-/// 字段名保持 snake_case —— 与 `ipc/files.ts` 的 `FileInfo` 同一套约定
-/// （Rust 那侧没有全局的 serde rename，所以两边都得照着写）
+/// 真的加载一次之后的结果
+///
+/// 字段名是 **snake_case**，与 `ipc/files.ts` 的 `FileInfo` 同一套约定 ——
+/// Rust 这侧没有全局 serde rename，谁在这边改成 camelCase，前端就会静默收到
+/// `undefined`，而 `undefined` 是假值（"不需要口令"被当成真，框上不出现输入框）。
+/// 测试 `the_result_serializes_to_the_names_the_frontend_expects` 钉住这一点。
 #[derive(Debug, Serialize)]
-pub struct LockState {
+pub struct ResolveResult {
     pub kind: Kind,
-    /// 页内解锁框拿它去重新问（`unlock` 与 `read` 都按标题走）
+    /// 页内解锁框拿它去重新问
     pub title: String,
-    /// 仓库里有没有这一份。为假时后面几个字段都没意义
-    pub exists: bool,
-    /// 要不要先解锁才能读
-    pub needs_unlock: bool,
-    /// 需要口令（对称层）。gpg 那一层为假 —— 它问的是钥匙串
-    pub needs_passphrase: bool,
-    /// gpg 加密的（有没有私钥真要读的时候才知道）
-    pub needs_secret_key: bool,
-    /// 口令正躺在本次会话里
-    pub passphrase_ready: bool,
-    /// **真的去读过了，读得动吗**
+    /// 读成了没有
     pub readable: bool,
-    /// 读不动时为什么（原文，给人看）
+    /// 读不成时为什么（**原文，给人看**）
     pub reason: String,
+    /// 刚才是"口令不对"（界面据此说"再输一次"，而不是让人对着没反应的输入框发呆）
+    pub wrong_passphrase: bool,
+    /// 要不要给口令输入框。对称层为真；gpg 层为假 —— 它问的是钥匙串或智能卡
+    pub needs_passphrase: bool,
 }
 
-impl LockState {
-    /// 仓库里压根没有这一份 —— 与"上了锁"是两件事，不能混
-    fn missing(kind: Kind, title: &str) -> Self {
-        Self {
-            kind,
-            title: title.to_string(),
-            exists: false,
-            needs_unlock: false,
-            needs_passphrase: false,
-            needs_secret_key: false,
-            passphrase_ready: false,
-            readable: false,
-            reason: format!("仓库里没有「{title}」"),
-        }
-    }
-}
-
-/// 页内解锁：**交口令（可省）→ 真的去读一次 → 报告读得动读不动**。
+/// 在 `::decrypt` 上提交之后：**交口令（可省）→ 真的加载一次 → 成或不成**。
 ///
-/// 这是页内解锁框唯一的出口。两条来路（模板页、文件）都走它，所以框的行为只有一处定义。
+/// **口令错了不由这一条抛**：抛了前端只知道"失败了"，得另外约定怎么区分
+/// "口令不对，再输一次"与"这份东西坏了，别试了"。所以口令错与 gpg 失败都
+/// 按平常返回（`Ok`），由 `reason` 与 `wrong_passphrase` 说清楚 —— 解锁框拿到的
+/// 就是那一句人话。
 ///
-/// ## 口令错了为什么不 `Err`
-///
-/// 返回 `Ok` 里 `readable: false` + `reason`，而不是把命令本身判失败：解锁框**要在原地
-/// 留下来**，让人改了口令再按一次。命令抛错的话前端只能知道"失败了"，得另外约定
-/// 怎么区分"口令错了"与"仓库坏了"。这里让**每次尝试都有结构化的答案**，框就不必猜。
+/// 真正抛的只有"这个命令自己不成立"那几样：种类不认识、这一页压根不在仓库里。
 #[tauri::command]
-pub fn lock_state(
+pub fn resolve_decrypt(
     kind: String,
     title: String,
     reference: Option<String>,
     passphrase: Option<String>,
-) -> Result<LockState, String> {
+) -> Result<ResolveResult, String> {
     let Some(kind) = Kind::parse(&kind) else {
         return Err(format!("不认识的种类：{kind:?}（要 page 或 file）"));
     };
@@ -134,67 +119,96 @@ pub fn lock_state(
         database.unlock(&title, reference.as_deref(), passphrase)?;
     }
 
-    match kind {
-        Kind::Page => Ok(page_state(&database, &title, reference.as_deref())),
-        Kind::File => Ok(file_state(&database, &title, reference.as_deref())),
+    Ok(match kind {
+        Kind::Page => probe_page(&database, &title, reference.as_deref()),
+        Kind::File => probe_file(&database, &title, reference.as_deref()),
+    })
+}
+
+fn fail(kind: Kind, title: &str, reason: String) -> ResolveResult {
+    ResolveResult {
+        kind,
+        title: title.to_string(),
+        readable: false,
+        reason,
+        wrong_passphrase: false,
+        needs_passphrase: false,
     }
 }
 
-/// 一篇笔记的锁状态
-fn page_state(database: &Database, title: &str, reference: Option<&str>) -> LockState {
-    // 头（怎么存的、口令在不在）不需要口令 —— 头本来就是明文
-    let head = database.note_head(title, reference);
-    let mut state = LockState {
-        kind: Kind::Page,
-        title: title.to_string(),
-        exists: database.exists(title),
-        needs_unlock: head.as_ref().is_ok_and(|head| head.needs_unlock),
-        needs_passphrase: head.as_ref().is_ok_and(|head| head.needs_passphrase),
-        needs_secret_key: head.as_ref().is_ok_and(|head| head.needs_secret_key),
-        passphrase_ready: head.as_ref().is_ok_and(|head| head.passphrase_ready),
-        readable: false,
-        reason: String::new(),
+/// 真的读一篇（或一版）笔记
+///
+/// 走的是**界面那条路**（`read_*_for_display`），不是 `read_note` ——
+/// 只有前者会把"解不开"归成 `Locked` 并带上一句人话（`reason`）；
+/// `read_note` 给的是一句原始错误，界面拿它拼不出解锁框。
+fn probe_page(database: &Database, title: &str, reference: Option<&str>) -> ResolveResult {
+    use crate::vault::notes::Reading;
+
+    let reading = match reference {
+        Some(token) => match crate::vault::resolve::token_to_rev(token) {
+            Ok(rev) => database.read_revision_for_display(title, rev),
+            Err(why) => return fail(Kind::Page, title, why),
+        },
+        None => database.read_for_display(title),
     };
 
-    if !state.exists {
-        state.reason = format!("仓库里没有「{title}」");
-        return state;
+    match reading {
+        Ok(Reading::Ready { .. }) => ResolveResult {
+            kind: Kind::Page,
+            title: title.to_string(),
+            readable: true,
+            reason: String::new(),
+            wrong_passphrase: false,
+            needs_passphrase: false,
+        },
+        Ok(Reading::Locked {
+            protection,
+            reason,
+            wrong_passphrase,
+        }) => ResolveResult {
+            kind: Kind::Page,
+            title: title.to_string(),
+            readable: false,
+            reason,
+            wrong_passphrase,
+            needs_passphrase: protection.symmetric,
+        },
+        // `locate` 之类的失败：这一页压根不在仓库里
+        Err(why) => fail(Kind::Page, title, why),
     }
-
-    // **真的去读**：gpg 那一层只有到这一步才会说话（有没有私钥、代理答不答应）
-    match database.read_note(title, reference) {
-        Ok(_) => state.readable = true,
-        Err(why) => state.reason = why,
-    }
-    state
 }
 
-/// 一个文件页面的锁状态
-fn file_state(database: &Database, title: &str, reference: Option<&str>) -> LockState {
+/// 真的读一个文件
+fn probe_file(database: &Database, title: &str, reference: Option<&str>) -> ResolveResult {
+    // 头先读：它决定要不要给口令输入框（**不需要口令**，头是明文）
     let info = match database.file_info(title, reference) {
         Ok(info) => info,
-        // `file_info` 认不出这个标题：既不是文件也不是笔记
-        Err(_) => return LockState::missing(Kind::File, title),
+        Err(why) => return fail(Kind::File, title, why),
     };
-
-    let mut state = LockState {
-        kind: Kind::File,
-        title: title.to_string(),
-        exists: true,
-        // `needs_unlock` 在 `FileEntry` 上（serde flatten 进 `FileInfo`）
-        needs_unlock: info.entry.needs_unlock,
-        needs_passphrase: info.needs_passphrase,
-        needs_secret_key: info.needs_secret_key,
-        passphrase_ready: info.passphrase_ready,
-        readable: false,
-        reason: String::new(),
-    };
+    let needs_passphrase = info.needs_passphrase;
+    let protection: Protection = info.entry.protection;
 
     match database.read_file(title, reference) {
-        Ok(_) => state.readable = true,
-        Err(why) => state.reason = why,
+        Ok(_) => ResolveResult {
+            kind: Kind::File,
+            title: title.to_string(),
+            readable: true,
+            reason: String::new(),
+            wrong_passphrase: false,
+            needs_passphrase,
+        },
+        Err(why) => {
+            let wrong_passphrase = why.contains(crate::storage::codec::WRONG_PASSPHRASE_MESSAGE);
+            ResolveResult {
+                kind: Kind::File,
+                title: title.to_string(),
+                readable: false,
+                reason: why,
+                wrong_passphrase,
+                needs_passphrase: protection.symmetric || needs_passphrase,
+            }
+        }
     }
-    state
 }
 
 #[cfg(test)]
@@ -205,35 +219,38 @@ mod tests {
     fn the_kind_string_is_read_loosely_but_refuses_the_rest() {
         assert_eq!(Kind::parse("page"), Some(Kind::Page));
         assert_eq!(Kind::parse(" Page "), Some(Kind::Page));
+        assert_eq!(Kind::parse("template"), Some(Kind::Page));
         assert_eq!(Kind::parse("FILE"), Some(Kind::File));
-        assert_eq!(Kind::parse("note"), Some(Kind::Page));
+        assert_eq!(Kind::parse("attachment"), Some(Kind::File));
         // 认不出的必须给 None，不能悄悄当成某一种
         assert_eq!(Kind::parse("目录"), None);
         assert_eq!(Kind::parse(""), None);
     }
 
-    /// 序列化后的字段名要跟前端 `ipc/lock.ts` 里的一致 —— 改一边就要改另一边。
-    ///
-    /// 这一条钉的是 **snake_case**：仓库里别的地方（`FileInfo`）都是 snake_case，
-    /// Rust 那侧又没有全局 serde rename，所以谁在这边改成 camelCase，
-    /// 前端就会静默收到 `undefined` —— 而 `undefined` 是假值，于是
-    /// "不需要口令"会被当成真，框上不会出现输入框。这个 bug 静默且难查。
     #[test]
-    fn the_state_serializes_to_the_names_the_frontend_expects() {
-        let json = serde_json::to_string(&LockState::missing(Kind::File, "File:桥.png")).unwrap();
+    fn the_kind_serializes_lowercase_because_the_frontend_dispatches_on_it() {
+        assert_eq!(serde_json::to_string(&Kind::File).unwrap(), "\"file\"");
+        assert_eq!(serde_json::to_string(&Kind::Page).unwrap(), "\"page\"");
+    }
+
+    /// 序列化后的字段名要跟前端 `ipc/decrypt.ts` 里的一致。
+    ///
+    /// 这一条钉的是 **snake_case**：谁在这边改成 camelCase，前端就会静默收到
+    /// `undefined`，而 `undefined` 是假值 —— 于是"不需要口令"被当成真，
+    /// 框上不会出现输入框，人就卡在那儿了。这个 bug 静默且难查。
+    #[test]
+    fn the_result_serializes_to_the_names_the_frontend_expects() {
+        let result = fail(Kind::File, "File:桥.png", "仓库里没有".to_string());
+        let json = serde_json::to_string(&result).unwrap();
         for field in [
             "kind",
             "title",
-            "exists",
-            "needs_unlock",
-            "needs_passphrase",
-            "needs_secret_key",
-            "passphrase_ready",
             "readable",
             "reason",
+            "wrong_passphrase",
+            "needs_passphrase",
         ] {
             assert!(json.contains(field), "少了 {field}：{json}");
-            // 顺带钉住"别偷偷变成 camelCase"
             let camel: String = field
                 .split('_')
                 .map(|part| {

@@ -31,7 +31,7 @@ import { scheduleDiagrams } from "./diagrams.ts";
 import { decryptBox, wireDecrypt } from "./decrypt.ts";
 import { fileTargetOf, fileUrl, vaultKeyOf } from "./file-links.ts";
 import { saveNameOf, saveVaultFile, savableTitle } from "./file-save.ts";
-import { fileInfo, freshUrl, readable } from "./file-unlock.ts";
+import { fileInfo, freshUrl } from "./file-unlock.ts";
 import { viewImage } from "./image-viewer.ts";
 import { renderMath } from "./math.ts";
 import { wireTabs } from "./tabs.ts";
@@ -50,16 +50,59 @@ export function setOpenInNewTab(handler: (title: string) => void) {
 }
 
 /**
- * 图片取不到时**换成一句说明**，而不是留一个破图标：
- * 读者要知道的是"这张图不在了"，而不是盯着一个加载失败的方框猜。
+ * 图片取不到时的两条出路：**解锁框**（这一份是加密的）或者**一句说明**。
+ *
+ * ## 为什么这里能分出这两者
+ *
+ * `<img>` 的 error 事件**看不见响应状态与头** —— 它只知道"没加载出来"，而
+ * `platform::protocol` 把"没有这一份"、"上了锁"、"gpg 解密失败"一起答成 404。
+ * 所以判据不能来自 error 事件，得来自**已经拿在手里的那份 `file_info`**
+ * （`attachVaultFile` 把它挂在 `data-vault-locked` 上）：它说加密了就是解不开，
+ * 说没加密就是这份东西真的坏了。
+ *
+ * ## 摆框而不是说"图片不存在"
+ *
+ * 这正是那个 bug：原来这一支直接说"图片不存在"、不留任何出路，于是人既不能重试
+ * 也看不到按钮，而真相是**按一下就能让 gpg 去问**。
+ *
+ * 框是 [`decryptBox`] 造的，与正文里 `::decrypt` 那个框**同一个**。
  */
 function markMissing(image: HTMLImageElement) {
-    // 本仓库的文件还在**问后端**"这一份是怎么回事"（加密？不存在？可读？）：
-    // 这段时间里取不到字节是正常的，不能就此判它"不存在" ——
-    // 加密的那些本来就取不到，而它们该看到的是解锁框（见 `attachVaultFile`）
     if (image.dataset.missing || image.dataset.vault === "pending") {
         return;
     }
+
+    // 这一份是加密的 → 摆解锁框（`image` 自己就是替换掉的那个节点）
+    if (image.dataset.vaultLocked === "yes") {
+        // 先占位：`decryptBox` 的回调要用到这个框，而它是在框建好之后才被按的
+        let box: HTMLElement | null = null;
+        box = decryptBox({
+            kind: "file",
+            title: image.dataset.vaultTitle ?? "",
+            label: image.dataset.vaultLabel || image.dataset.vaultTitle || "",
+            needsPassphrase: image.dataset.vaultNeedsPassphrase === "yes",
+            onRevealed: () => {
+                if (!box) {
+                    return;
+                }
+                const live = image.cloneNode() as HTMLImageElement;
+                // 带个"这次是新读的"后缀，免得 webview 吃上一次失败的缓存
+                live.src = freshUrl(image.getAttribute("src") ?? "");
+                live.dataset.imageReady = "yes";
+                // **把 `vault*` 那几个搬过去**：gpg 可能又失败一次（没有私钥、
+                // 代理被取消），那时要再摆一个框，而不是这一次就改口说"图片不存在"。
+                live.dataset.vaultLocked = image.dataset.vaultLocked ?? "";
+                live.dataset.vaultTitle = image.dataset.vaultTitle ?? "";
+                live.dataset.vaultLabel = image.dataset.vaultLabel ?? "";
+                live.dataset.vaultNeedsPassphrase = image.dataset.vaultNeedsPassphrase ?? "no";
+                attachImage(live);
+                box.replaceWith(live);
+            },
+        });
+        image.replaceWith(box);
+        return;
+    }
+
     image.dataset.missing = "yes";
     const placeholder = document.createElement("span");
     placeholder.className = "image-missing";
@@ -259,19 +302,30 @@ export function decorateNoteHtml(root: HTMLElement): void {
 }
 
 /**
- * 加密的图片：**先摆一个"解锁"的地方，别让 `<img>` 去撞 404**。
+ * 仓库里的文件（图片、音视频、附件）：先**照常显示**，加载不了再问为什么。
  *
- * 文件进了 blob 仓就可能带口令层或 gpg 加密层 —— 那两种情况下"直接显示"是不成立的：
- * 后端取不到字节，图片只会加载失败。所以这里先问一句"这一版怎么存的、现在读不读得动"
- * （后端只看明文头，不需要口令），读不动就摆解锁框：口令层的当场输口令（原位，不跳页），
- * gpg 层的点一下就去读（由系统代理去问口令）。
+ * ## 为什么不再"看见加密就摆框"
  *
- * 框本身是 [`decryptBox`] 造的 —— 与正文里 `::decrypt` 那个框**同一个**。这里只负责
- * "探明之后把它摆出来"和"解锁之后把真正的图片换回去"。
+ * 原来的做法是拿 `file_info` 的头去判断：`needs_unlock` 且"口令不在手"就摆解锁框。
+ * 那个判断对 gpg 是**错的** —— gpg 大部分时候是自动的（钥匙的口令有缓存，或者
+ * 智能卡碰一下就行），先摆一个框等于让人白点一下；而它对"自动解开了"的那些，
+ * 本来什么都不用做。
+ *
+ * 现在的顺序按作者定的规格来：**先试**（让 `<img>` 去拉），**失败了再问**。
+ *
+ * ## 失败了怎么问
+ *
+ * `<img>` 的 error 事件看不见响应状态与头 —— 它只知道"没加载出来"。所以问的是
+ * **已经拿在手里的那份 `file_info`**（不读字节，只看明文头）：
+ *
+ * - 它说没加密 → 那就不是锁的问题，是这份东西真的坏了（被删了、截断了）。
+ *   说"图片不存在"，并**不**摆框 —— 输了口令问题还在，把人困在一个没用的输入框前。
+ * - 它说加密了 → 那就是**解不开**。摆框，并且把 `file_info` 给不出的东西留给
+ *   用户按按钮时去问后端（`resolve_decrypt` 真的去加载一次，见 `dom/decrypt.ts`）。
  */
 async function attachVaultFile(image: HTMLImageElement, name: string) {
     const info = await fileInfo(name);
-    // 问明白了：往后取不到就是真取不到（图坏了、被删了），照常提示"不存在"
+    // 问明了：往后 `<img>` 加载不到就是**真的**加载不到，可以照实说了
     delete image.dataset.vault;
 
     if (!info) {
@@ -296,29 +350,29 @@ async function attachVaultFile(image: HTMLImageElement, name: string) {
         return;
     }
 
-    if (!info.needs_unlock || readable(info)) {
+    if (!info.needs_unlock) {
+        // 根本没加密：加载不到就是这份东西坏了/没了。`markMissing` 已经挂好了
+        // （`attachImage` 里挂的），等它自己触发。
         return;
     }
 
-    const box = decryptBox({
-        kind: "file",
-        title: info.title,
-        label: info.name,
-        needsPassphrase: info.needs_passphrase,
-        // 解锁之后：把真正的图片换回来。
-        //
-        // 注意这里换的是**框自己**，不是页面上的某个占位 —— 框是我们刚插进去的，
-        // 按住它就不会与别人抢位置（正文明明已经有另一张图也是这个文件）。
-        onRevealed: () => {
-            const live = image.cloneNode() as HTMLImageElement;
-            // 带个后缀，免得 webview 吃上一次的失败缓存（**上一次真的失败过**）
-            live.src = freshUrl(image.getAttribute("src") ?? info.url);
-            live.dataset.imageReady = "yes";
-            attachImage(live);
-            box.replaceWith(live);
-        },
-    });
-    image.replaceWith(box);
+    // 加密的：摆不摆框由**加载失败**决定，不由这里决定 —— 先把"这一份是加密的"
+    // 这件事记在元素上，`markMissing` 认它
+    image.dataset.vaultLocked = "yes";
+    image.dataset.vaultTitle = info.title;
+    image.dataset.vaultLabel = info.name;
+    image.dataset.vaultNeedsPassphrase = info.needs_passphrase ? "yes" : "no";
+
+    // **补一刀**：图片有可能在 `fileInfo` 回来**之前**就加载失败了。那一次
+    // `markMissing` 撞上 `data-vault="pending"` 就提前返回了（问明白之前不能判它
+    // "不存在"），而失败**只发生一次** —— 探明之后没人再叫它，于是那一次失败
+    // 被静静吃掉：既没有解锁框，也没有"图片不存在"。
+    //
+    // 这是既有行为里就有的漏，与本次改动无关，但正好落在同一条路上：不补这一刀，
+    // "先试，失败再摆框"就有一段时间窗是黑的。
+    if (image.isConnected && image.complete && image.naturalWidth === 0) {
+        markMissing(image);
+    }
 }
 
 /** 这个类型该用哪个播放器；不是音视频就是 null（那就照常当图片） */

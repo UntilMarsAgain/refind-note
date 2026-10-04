@@ -650,9 +650,13 @@ fn a_locked_revision_reports_its_own_protection() {
         Reading::Locked {
             protection,
             wrong_passphrase,
+            reason,
         } => {
             assert!(protection.symmetric, "保护头该来自第 1 版（加密的那版）");
             assert!(wrong_passphrase);
+            // 原因也要说清是"口令不对"：界面据此提示"再输一次"，
+            // 而不是让人对着一个没反应的输入框发呆
+            assert!(reason.contains("口令不对"), "{reason}");
         }
         other => panic!("口令错了应当报上锁，而不是 {other:?}"),
     }

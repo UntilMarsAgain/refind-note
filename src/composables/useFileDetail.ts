@@ -36,7 +36,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Download, History, Pencil, Trash2, Upload } from "@lucide/vue";
 import type { PageAction } from "../components/note/PageHeader.vue";
 import { flash } from "../core/notice.ts";
-import { readable as infoReadable } from "../dom/file-unlock.ts";
+import { resolveDecrypt } from "../ipc/lock.ts";
 import type { FileEntry, FileInfo } from "../ipc/files.ts";
 import { useFileActions } from "./useFileActions.ts";
 import { useFileStorage } from "./useFileStorage.ts";
@@ -63,8 +63,15 @@ export interface FileDetail {
   problem: Ref<string>;
   /** 看的是不是一个旧版本 */
   older: Ref<boolean>;
-  /** 这一份现在读得动吗（读不动就摆解锁框，不让 `<img>` 去撞一堵 404 的墙） */
+  /**
+   * 这一份**试过**了没有、读得动吗（读不动就摆解锁框）
+   *
+   * 与正文里插进来的那张图是同一件事、同一套判据。两处都是真读一次，不是拿头去猜
+   * —— 见下面 `readable` 那段。
+   */
   readable: Ref<boolean>;
+  /** 试过了但读不成时的原因（原文，给人看），摆在解锁框里 */
+  unlockProblem: Ref<string>;
   /** 原位输入的口令：只有口令层才用得上 */
   passphrase: Ref<string>;
   /** 正在改名：页内输入框摆出来没有 */
@@ -131,10 +138,34 @@ export function useFileDetail(source: FileDetailSource): FileDetail {
     loading.value = true;
     problem.value = "";
     try {
-      entry.value = await invoke<FileInfo>("file_info", {
+      const found = await invoke<FileInfo>("file_info", {
         key: source.title.value,
         reference: source.reference.value ?? null,
       });
+      entry.value = found;
+
+      // 读完头之后**真的试一次**（作者定的：先试，失败了才摆框）。
+      //
+      // 为什么不能只看头：gpg 大部分时候是自动的（钥匙的口令有缓存、智能卡碰一下
+      // 就行），而"本机有没有那把私钥、代理答不答应"从明文头里看不出来。原来那个
+      // `readable()` 只能猜，猜出来的后果是**白摆一个框** —— 人为了看一张图先得
+      // 点一下"解锁"，而点完它自己就解开了。
+      //
+      // 没加密的不用试：读不读得动与加密无关。
+      if (!found.needs_unlock) {
+        readableNow.value = true;
+      } else {
+        unlockProblem.value = "";
+        const result = await resolveDecrypt(
+          "file",
+          found.title,
+          source.reference.value ?? null,
+        );
+        readableNow.value = result.readable;
+        if (!result.readable) {
+          unlockProblem.value = result.reason;
+        }
+      }
     } catch (reason) {
       entry.value = null;
       problem.value = String(reason);
@@ -146,13 +177,21 @@ export function useFileDetail(source: FileDetailSource): FileDetail {
   watch(() => [source.title.value, source.reference.value], () => void load(), { immediate: true });
 
   /**
-   * 这一份现在读得动吗。
+   * 这一份**试过**了没有、读得动吗。
    *
-   * 判法不在这里另写一份：正文里插进来的那张图（`dom/note-html.ts`）问的是同一件事，
-   * 那条规矩写在 `dom/file-unlock.ts` 的 `readable()` 里 —— 两处各判一次，
-   * 改了一边另一边就会安静地判错（表现为"解锁按钮不见了"）。
+   * 与正文里插进来的那张图是**同一件事、同一套判据**（那边是 `<img>` 加载失败之后
+   * 再问，见 `dom/note-html.ts` 的 `markMissing`）。两处各猜一次的话，改了一边
+   * 另一边就会安静地判错 —— 表现为"解锁按钮不见了"或者"白摆一个框"。
+   *
+   * 区别只在**什么时候问**：那边等 `<img>` 失败（不花额外一趟解密），这边是打开
+   * 这一页就问（这里没有 `<img>` 的失败事件可等）。两处都是**真读一次**，
+   * 都不是拿头去猜 —— 猜不出来的那种（gpg）只能靠真读。
    */
-  const readable = computed(() => (entry.value ? infoReadable(entry.value) : false));
+  /** 试过之后的结论（不是预测 —— 见上面那段说明） */
+  const readableNow = ref(false);
+  /** 试过了但读不成时的原因（原文，给人看），摆在解锁框里 */
+  const unlockProblem = ref("");
+  const readable = computed(() => readableNow.value);
 
   const actions: PageAction[] = [
     { name: "update", label: "传新版", icon: Upload },
@@ -194,12 +233,21 @@ export function useFileDetail(source: FileDetailSource): FileDetail {
     }
     busy.value = true;
     try {
-      await invoke("unlock", {
-        title: found.title,
-        // 看的是哪一版就解哪一版（口令按版本存）
-        reference: source.reference.value ?? null,
-        passphrase: passphrase.value,
-      });
+      // `resolveDecrypt` 而不是 `unlock`：交完口令**真的去加载一次**。
+      // 原来那个 `unlock` 交完就回来，证明不了成不成 —— gpg 那一层根本没有口令，
+      // 失败只体现在后面某次读取上（表现为一句技术话，且没有重试的入口）。
+      const result = await resolveDecrypt(
+        "file",
+        found.title,
+        source.reference.value ?? null,
+        passphrase.value,
+      );
+      if (!result.readable) {
+        // 框留在原地，人改了口令可以再试。原来这里无条件 `load()`，
+        // 于是框整个换掉、错误只闪一下就没了。
+        unlockProblem.value = result.reason;
+        return;
+      }
       passphrase.value = "";
       await load();
     } catch (reason) {
@@ -315,6 +363,7 @@ export function useFileDetail(source: FileDetailSource): FileDetail {
 
   return {
     entry,
+    unlockProblem,
     loading,
     busy,
     problem,

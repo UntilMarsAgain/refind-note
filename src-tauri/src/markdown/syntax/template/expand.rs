@@ -32,9 +32,12 @@ pub(super) fn expand_user_template(
     let source = match crate::markdown::template_page(name) {
         Some(crate::markdown::TemplatePage::Ready(text)) => text,
         // 有这一页但读不出来（没解锁、坏了）：**说清原因**，别报成"未知模板"
-        Some(crate::markdown::TemplatePage::Unreadable(why)) => {
+        Some(crate::markdown::TemplatePage::Unreadable { reason, protection }) => {
             // 上锁 → 摆**解锁框**，不是一句提示。人和那个加密附件用的是同一个框。
-            return Some(decrypt_node(name, &why));
+            //
+            // "要不要给口令输入框"从 `protection.symmetric` 来 —— 后端此刻已经知道，
+            // 不必让前端再猜一次（猜错是静默的，见 `TemplatePage::Unreadable`）。
+            return Some(decrypt_node(name, &reason, protection.symmetric));
         }
         None => return None,
     };
@@ -85,7 +88,7 @@ impl NodeValue for ExpandedTemplate {
 ///
 /// 两者都挂一个指向那个模板页的链接：口令打不开时，能做的下一步仍然是去把
 /// 那一页改掉 —— 看到提示就能点过去，而不是自己回想"刚才那个 `::卡片` 是哪一页"。
-fn locked_node(name: &str, why: &str, kind: &str) -> Node {
+fn locked_node(name: &str, why: &str, kind: &str, needs_passphrase: bool) -> Node {
     let page = format!("{TEMPLATE_NAME}:{name}");
     let mut node = Node::new(Template {
         name: kind.to_string(),
@@ -95,6 +98,10 @@ fn locked_node(name: &str, why: &str, kind: &str) -> Node {
         params: vec![
             ("target".to_string(), page.clone()),
             ("label".to_string(), name.to_string()),
+            (
+                "passphrase".to_string(),
+                if needs_passphrase { "yes" } else { "no" }.to_string(),
+            ),
         ],
         body: why.to_string(),
     });
@@ -104,12 +111,15 @@ fn locked_node(name: &str, why: &str, kind: &str) -> Node {
 
 /// 说法本身有问题 —— 不给解锁框
 fn problem_node(name: &str, why: &str) -> Node {
-    locked_node(name, why, "problem")
+    locked_node(name, why, "problem", false)
 }
 
 /// 上了锁 —— 给解锁框，参数见 [`dispatch::render_decrypt`]
-fn decrypt_node(name: &str, why: &str) -> Node {
-    locked_node(name, why, "decrypt")
+///
+/// `needs_passphrase` 由**后端**给（它刚读过那一页的封装头）：对称层要问口令，
+/// gpg 层不问 —— 它问的是钥匙串或智能卡。
+fn decrypt_node(name: &str, why: &str, needs_passphrase: bool) -> Node {
+    locked_node(name, why, "decrypt", needs_passphrase)
 }
 
 #[cfg(test)]
@@ -120,10 +130,21 @@ mod tests {
 
     /// 模板页表里只有一页，且是**读不出来**的那种
     fn unreadable(name: &str) -> TemplatePages {
+        unreadable_with(name, "需要口令", false)
+    }
+
+    /// 读不出来，且**说清是哪一层**（决定解锁框要不要给口令输入框）
+    fn unreadable_with(name: &str, reason: &str, symmetric: bool) -> TemplatePages {
         let mut pages = HashMap::new();
         pages.insert(
             name.to_string(),
-            TemplatePage::Unreadable("需要口令".into()),
+            TemplatePage::Unreadable {
+                reason: reason.to_string(),
+                protection: crate::storage::codec::Protection {
+                    symmetric,
+                    ..crate::storage::codec::Protection::plain()
+                },
+            },
         );
         Arc::new(pages)
     }
@@ -173,6 +194,37 @@ mod tests {
         assert!(!html.contains(r#"type="password""#), "{html}");
         assert!(!html.contains(r#"class="file-locked__go""#), "{html}");
         assert!(!html.contains(r#"class="file-locked__input""#), "{html}");
+    }
+
+    /// 解锁框上**要不要口令输入框**由后端写进标记里，前端不必猜。
+    ///
+    /// 这一条钉的是"只有后端知道"：它在渲染的时候刚读过那一页的封装头
+    /// （`TemplatePage::Unreadable` 带着 `protection` 就是为此）。
+    /// 猜错是**静默**的 —— gpg 的框上多一个输入框（人白输一次），
+    /// 或者口令的框上没有（人卡在那儿，什么也做不了）。
+    #[test]
+    fn the_marker_carries_the_real_answer_about_whether_a_passphrase_is_wanted() {
+        let symmetric = render_with_pages(
+            "::卡片\n",
+            None,
+            Some(unreadable_with("卡片", "需要口令", true)),
+        );
+        assert!(
+            symmetric.contains(r#"data-decrypt-needs-passphrase="yes""#),
+            "对称层要问口令：{symmetric}"
+        );
+
+        let gpg = render_with_pages(
+            "::卡片\n",
+            None,
+            Some(unreadable_with("卡片", "gpg 那边出错了：没有私钥", false)),
+        );
+        assert!(
+            gpg.contains(r#"data-decrypt-needs-passphrase="no""#),
+            "gpg 层不问口令（它问的是钥匙串）：{gpg}"
+        );
+        // 原因照原样传下去：gpg 的失败有好几种，不该被压成同一句话
+        assert!(gpg.contains("没有私钥"), "{gpg}");
     }
 
     /// 说法本身有问题（套太深）**不给**解锁框。

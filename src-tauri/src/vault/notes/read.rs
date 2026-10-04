@@ -5,11 +5,37 @@
 
 use std::sync::Arc;
 
-use super::{is_wrong_passphrase, Event, Note, NoteState, Reading, DEFAULT_MIME};
+use super::{AssembleError, Event, Note, NoteState, Reading, DEFAULT_MIME};
 use crate::storage::codec::{Protection, Secrets};
 use crate::storage::session;
 use crate::vault::database::{now, Database};
 use crate::vault::target::{PageIndex, Resolver};
+
+/// 一页用来嵌入的正文读不出来时，带回来的两样东西。
+///
+/// 为什么要带保护状态：渲染的时候界面已经没机会再问后端了 —— 它得**当场**决定
+/// 解锁框上要不要给口令输入框。那件事只有一个地方知道答案（这一页的封装头），
+/// 所以这里把它一起带出去，而不是让界面猜。
+#[derive(Debug, Clone)]
+struct EmbeddedFailure {
+    /// 为什么读不出来（原文，给人看）
+    reason: String,
+    /// 这一页怎么存的
+    protection: Protection,
+}
+
+impl EmbeddedFailure {
+    /// 连这一页是什么都还没定下来的失败（找不到、事件链读不出来）
+    ///
+    /// 那不是"这一页上了锁"，所以保护状态给"什么都没套"—— 界面于是不会摆
+    /// 一个骗人的口令框，而是把 `reason` 那句话摆出来。
+    fn other(reason: String) -> Self {
+        Self {
+            reason,
+            protection: Protection::plain(),
+        }
+    }
+}
 
 impl Database {
     /// 读一篇笔记的**最新一版**。口令从这次会话里取。
@@ -25,6 +51,7 @@ impl Database {
             state.blob.clone(),
             state.summary.clone(),
         )
+        .map_err(|error| error.to_string())
     }
 
     /// 回滚到某一版：**解锁那一版、照这篇当前的保护重新落一份**。
@@ -80,6 +107,7 @@ impl Database {
         let state = self.state_of(&id)?;
 
         self.assemble(&id, &state, rev, at, blob, summary)
+            .map_err(|error| error.to_string())
     }
 
     /// 交给界面读**最新一版**：上了锁就明说。
@@ -93,6 +121,7 @@ impl Database {
         if let Some(protection) = self.lock_of(&id, state.rev, &state.blob)? {
             return Ok(Reading::Locked {
                 protection,
+                reason: "这一篇是加密存的，输入口令后显示".to_string(),
                 wrong_passphrase: false,
             });
         }
@@ -108,15 +137,32 @@ impl Database {
 
         match assembled {
             Ok(note) => Ok(Reading::Ready { note }),
-            Err(error) if is_wrong_passphrase(&error) => {
-                // 口令不对：丢掉**这一版**的那把，这样界面把人带回去时还能重新输
-                session::forget(&id, state.rev);
+            // **任何"解不开"都归成 Locked**，不报原始错误。
+            //
+            // 这一支原来是 `is_wrong_passphrase`（在字符串里找"口令不对"那句话），
+            // 所以 **gpg 解不开的笔记走的是 `Err`** —— 人看到的是一句技术话，
+            // 没有框、没有重试，而它恰恰是最该给框的那一种（点一下就能让 gpg 去问
+            // 钥匙串/智能卡）。口令错了与 gpg 失败在这里合流，区别只在 `reason`
+            // 与 `wrong_passphrase` 两个字段里说。
+            Err(error) if error.is_lock() => {
+                let wrong_passphrase = error.is_wrong_passphrase();
+                if wrong_passphrase {
+                    // 口令不对：丢掉**这一版**的那把，这样界面把人带回去时还能重新输
+                    session::forget(&id, state.rev);
+                }
                 Ok(Reading::Locked {
+                    // 保护头读不到就报出去 —— 编一个"没加密"的默认值
+                    // 会让界面摆出一个**没有输入框**的解锁框，而真相是文件坏了
                     protection: self.blobs().protection(&state.blob)?,
-                    wrong_passphrase: true,
+                    reason: if wrong_passphrase {
+                        "口令不对，再输一次".to_string()
+                    } else {
+                        error.to_string()
+                    },
+                    wrong_passphrase,
                 })
             }
-            Err(error) => Err(error),
+            Err(error) => Err(error.to_string()),
         }
     }
 
@@ -128,6 +174,7 @@ impl Database {
         if let Some(protection) = self.lock_of(&id, rev, &blob)? {
             return Ok(Reading::Locked {
                 protection,
+                reason: "这一版是加密存的，输入口令后显示".to_string(),
                 wrong_passphrase: false,
             });
         }
@@ -136,14 +183,23 @@ impl Database {
         // 保护头要读**这一版**的 blob：`assemble` 会把它拿走，所以先留一份
         match self.assemble(&id, &state, rev, at, blob.clone(), summary) {
             Ok(note) => Ok(Reading::Ready { note }),
-            Err(error) if is_wrong_passphrase(&error) => {
-                session::forget(&id, rev);
+            Err(error) if error.is_lock() => {
+                let wrong_passphrase = error.is_wrong_passphrase();
+                if wrong_passphrase {
+                    session::forget(&id, rev);
+                }
                 Ok(Reading::Locked {
+                    // 同上：读不到就报出去，不编默认值
                     protection: self.blobs().protection(&blob)?,
-                    wrong_passphrase: true,
+                    reason: if wrong_passphrase {
+                        "口令不对，再输一次".to_string()
+                    } else {
+                        error.to_string()
+                    },
+                    wrong_passphrase,
                 })
             }
-            Err(error) => Err(error),
+            Err(error) => Err(error.to_string()),
         }
     }
 
@@ -200,7 +256,7 @@ impl Database {
         modified: String,
         blob: String,
         summary: Option<String>,
-    ) -> Result<Note, String> {
+    ) -> Result<Note, AssembleError> {
         let display = state.title.clone();
 
         let (markdown, protection) = if blob.is_empty() {
@@ -218,16 +274,22 @@ impl Database {
             )
         } else {
             let passphrase = session::passphrase_for(id, rev);
-            let bytes = self.blobs().get(
+            // **类型化**的那一条：要分辨"上了锁"与"坏了"，字符串里分不出来
+            let bytes = self.blobs().get_typed(
                 &blob,
                 &Secrets {
                     passphrase: passphrase.as_deref(),
                 },
             )?;
-            let markdown =
-                String::from_utf8(bytes).map_err(|_| format!("「{display}」不是文本"))?;
+            let markdown = String::from_utf8(bytes)
+                .map_err(|_| AssembleError::Other(format!("「{display}」不是文本")))?;
 
-            (markdown, self.blobs().protection(&blob)?)
+            (
+                markdown,
+                self.blobs()
+                    .protection(&blob)
+                    .map_err(crate::storage::codec::CodecError::Corrupt)?,
+            )
         };
 
         // 指令页面（`$$COMMAND$$` 打头）**按原文看**：包成代码块再渲染，
@@ -238,7 +300,8 @@ impl Database {
             let resolver = self.resolver_for(&display);
             crate::markdown::render_with(&crate::markdown::fence_code(&markdown), Some(&resolver))
         } else {
-            self.render_html(&markdown, &display)?
+            self.render_html(&markdown, &display)
+                .map_err(AssembleError::Other)?
         };
 
         Ok(Note {
@@ -309,7 +372,10 @@ impl Database {
 
             let page = match self.read_for_embedding(title) {
                 Ok(text) => TemplatePage::Ready(text),
-                Err(why) => TemplatePage::Unreadable(why),
+                Err(failure) => TemplatePage::Unreadable {
+                    reason: failure.reason,
+                    protection: failure.protection,
+                },
             };
             pages.insert(crate::markdown::template_page_key(&parsed.page), page);
         }
@@ -321,9 +387,9 @@ impl Database {
     ///
     /// 缓存键是"标题 + 版本号"：那一页提交了新版本，缓存自然失效；
     /// 而编辑器预览每敲一个字就重渲染一次，没有这一层缓存就是每次几十次解密。
-    fn read_for_embedding(&self, title: &str) -> Result<String, String> {
-        let id = self.locate(title)?;
-        let state = self.state_of(&id)?;
+    fn read_for_embedding(&self, title: &str) -> Result<String, EmbeddedFailure> {
+        let id = self.locate(title).map_err(EmbeddedFailure::other)?;
+        let state = self.state_of(&id).map_err(EmbeddedFailure::other)?;
         let rev = state.rev;
 
         if let Some((cached_rev, text)) = session::cached_page(title) {
@@ -339,7 +405,13 @@ impl Database {
             .map(|protection| protection.symmetric || protection.encrypt.is_some())
             .unwrap_or(false);
 
-        let locked = || format!("《{title}》是加密的：打开它一次（解锁）之后，模板就能嵌进来了");
+        // 保护状态就是那一句 `encrypted` 的根据，读出来一并带走 ——
+        // 渲染的时候界面要靠它决定要不要给口令输入框，那时已经没机会再问了。
+        let protection = self
+            .blobs()
+            .protection(&state.blob)
+            .unwrap_or_else(|_| Protection::plain());
+        let locked = || format!("《{title}》是加密的：解锁之后，模板就能嵌进来了");
 
         // **只读字节，不渲染** —— 这一条最要紧：`read_note` 会顺手把 HTML 也渲染出来，
         // 而渲染又要读模板页（就是这里）→ 自己套自己，栈直接爆掉（"打开就卡死"）。
@@ -347,14 +419,22 @@ impl Database {
         let read = crate::storage::codec::without_prompting(|| self.read_bytes(title, None));
         match read {
             Ok((bytes, _mime)) => {
-                let text = String::from_utf8(bytes)
-                    .map_err(|_| format!("《{title}》不是文本，嵌不进来"))?;
+                let text = String::from_utf8(bytes).map_err(|_| EmbeddedFailure {
+                    reason: format!("《{title}》不是文本，嵌不进来"),
+                    protection: Protection::plain(),
+                })?;
                 session::cache_page(title, rev, text.clone());
                 Ok(text)
             }
             // 加密的页面读失败，多半就是没解锁（gpg 那边拿不到口令）
-            Err(_) if encrypted => Err(locked()),
-            Err(error) => Err(format!("《{title}》读不出来：{error}")),
+            Err(_) if encrypted => Err(EmbeddedFailure {
+                reason: locked(),
+                protection,
+            }),
+            Err(error) => Err(EmbeddedFailure {
+                reason: format!("《{title}》读不出来：{error}"),
+                protection,
+            }),
         }
     }
 

@@ -14,15 +14,6 @@ use crate::storage::session;
 use crate::vault::database::Database;
 use crate::vault::notes::Reading;
 
-/// 一篇笔记某一版的头（见 `Database::note_head`）
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct NoteHead {
-    pub needs_unlock: bool,
-    pub needs_passphrase: bool,
-    pub needs_secret_key: bool,
-    pub passphrase_ready: bool,
-}
-
 impl Database {
     /// 导出：把某一版的 markdown **原文**写到用户选的位置。
     ///
@@ -165,44 +156,6 @@ impl Database {
             Some(token) => token_to_rev(token)?,
         };
         Ok(session::passphrase_for(&id, rev).is_some())
-    }
-
-    /// 一篇笔记某一版的**头**：怎么存的、这次会话里口令在不在。
-    ///
-    /// **不需要口令** —— 封装的头本来就是明文，所以"要不要解锁"这件事在读字节之前
-    /// 就已经答得出来（`features::files::file_info` 那边是同一件事，文件侧另有一份）。
-    ///
-    /// ## 为什么不复用 `file_info`
-    ///
-    /// `file_info` 先过 `file_title`，它会把**不是文件**的标题塞进 `File:` 前缀 ——
-    /// 于是拿它问一篇笔记会去找 `File:卡片`，找不到。所以笔记侧得自己走一遍。
-    /// 两边逻辑几乎一样是刻意的：它们回答的是同一个问题（"这一份要不要解锁"），
-    /// 分成两个函数是为了让"文件标题的规范化"只留在文件那一侧。
-    pub fn note_head(&self, title: &str, reference: Option<&str>) -> Result<NoteHead, String> {
-        let rev = match reference {
-            Some(token) => Some(token_to_rev(token)?),
-            None => None,
-        };
-        let (id, rev) = self.resolve_revision(title, rev)?;
-
-        let state = self.state_of(&id)?;
-        let blob = if rev == state.rev {
-            state.blob.clone()
-        } else {
-            self.event_at(&id, title, rev)?.1
-        };
-        // 还没有正文的那一版（0 版）没什么可解的，当成没套层。
-        // 所以这里不去造一个 `Protection`（那一版压根没有头），直接算三个布尔 ——
-        // 空 blob 当成"什么层都没套"，和 `unlock` 里的 `sealed` 是同一个判断。
-        let sealed = !blob.is_empty() && self.blobs().protection(&blob)?.symmetric;
-        let encrypted = !blob.is_empty() && self.blobs().protection(&blob)?.encrypt.is_some();
-
-        Ok(NoteHead {
-            needs_unlock: sealed || encrypted,
-            needs_passphrase: sealed,
-            needs_secret_key: encrypted,
-            passphrase_ready: session::passphrase_for(&id, rev).is_some(),
-        })
     }
 
     /// 给某一版解锁：`reference` 是 token，`None` = 最新版。

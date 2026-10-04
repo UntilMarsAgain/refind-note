@@ -68,7 +68,7 @@ pub fn source_of(template: &Template) -> Result<String, String> {
 
     match crate::markdown::template_page(name) {
         Some(TemplatePage::Ready(text)) => Ok(text),
-        Some(TemplatePage::Unreadable(why)) => Err(why),
+        Some(TemplatePage::Unreadable { reason, .. }) => Err(reason),
         None => {
             // 报的是**归一之后**的页面名：写 `template:卡片` 时就别再叠一层前缀
             let page = crate::markdown::template_page_key(name);
