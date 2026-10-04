@@ -31,6 +31,31 @@ impl Database {
         crate::storage::workspace::write_bytes(target, note.markdown.as_bytes())
     }
 
+    /// 导出：把某一版渲染成**一段完整的 HTML 文档**写到目标位置。
+    ///
+    /// 与 [`Self::export_note`]（markdown 原文）的区别有两处，都是"完整"带来的：
+    ///
+    /// - **自带骨架**：`render_html` 给的是正文片段（`<p>`、`<h1>` 那些），
+    ///   直接存成文件、用浏览器打开就是一堆裸标签。这里补上 `<meta charset>`
+    ///   （不然中文在部分浏览器里显示成乱码）、标题，以及一段把正文样式
+    ///   一起带出去的 `<style>` —— **不引外部 CSS**：导出的文件要能单独拿走、
+    ///   在没有网络的地方照样能看，而笔记里可能引用了图片与模板资源。
+    /// - **内部链接指不出去**：仓库外的地址（`../某页`）在单个文件里没有意义，
+    ///   所以渲染时**不给解析器**（`None`）—— 链接仍是链接，但不是"能点的内部链接"。
+    ///   这与阅读页相反：那里能点是因为程序知道怎么跳。
+    pub fn export_note_html(
+        &self,
+        title: &str,
+        reference: Option<&str>,
+        target: &std::path::Path,
+    ) -> Result<(), String> {
+        let Reading::Ready { note } = self.read_note(title, reference)? else {
+            return Err("这一版是加密的：先解锁，再导出".to_string());
+        };
+        let document = crate::vault::export_html::wrap_document(title, &note.html);
+        crate::storage::workspace::write_bytes(target, document.as_bytes())
+    }
+
     /// 读某一版：`reference` 是地址里的 token，`None` = 最新版
     pub fn read_note(&self, title: &str, reference: Option<&str>) -> Result<Reading, String> {
         match reference {

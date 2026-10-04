@@ -21,3 +21,4 @@ pub mod s3;
 pub mod session;
 pub mod store;
 pub mod workspace;
+pub mod zip;

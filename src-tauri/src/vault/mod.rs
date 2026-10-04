@@ -19,6 +19,7 @@
 pub mod address;
 pub mod command;
 pub mod database;
+pub mod export_html;
 pub mod namespace;
 pub mod notes;
 pub mod resolve;

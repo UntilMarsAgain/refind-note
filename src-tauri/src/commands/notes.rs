@@ -21,7 +21,7 @@ use crate::storage::codec::Policy;
 use crate::storage::session;
 use crate::vault::address::{self, ParsedAddress};
 use crate::vault::notes::{Draft, Note, NoteSummary, Reading, RevisionSummary};
-use crate::vault::resolve::{self, ResolvedAddress};
+use crate::vault::resolve::{self, ExportFormat, ResolvedAddress};
 use tauri::AppHandle;
 
 /// 解析地址栏那一行（只做语法）。空输入不是地址，返回 `None`；
@@ -45,28 +45,91 @@ pub fn read_note(title: String, reference: Option<String>) -> Result<Reading, St
     database.read_note(&title, reference.as_deref())
 }
 
-/// 读一篇笔记（`reference` 是地址里的版本 token，`None` = 最新版）。
-/// 读不到不是错误：上了锁会明说。
-/// 导出某一版的 markdown 原文到用户选的位置（路径由系统保存对话框给出）
+/// 导出某一版到用户选的位置。
+///
+/// `format` 是 `markdown` / `html` / `pdf`（大小写宽松）；不给时按 `markdown` ——
+/// 那是这个命令原本唯一做的事，老界面不传也不该坏。
+///
+/// 路径由系统保存对话框给出（手机上没有那一步，落到下载目录，见
+/// `platform::saving::resolve`）。
 #[tauri::command]
 pub fn export_note(
     app: AppHandle,
     title: String,
     reference: Option<String>,
     target: Option<String>,
+    format: Option<String>,
 ) -> Result<String, String> {
     let (_, database) = open_database()?;
+    let format = match format.as_deref() {
+        None => ExportFormat::Markdown,
+        Some(text) => ExportFormat::parse(text)?,
+    };
+
+    // PDF 不在 Rust 里生成字节（理由见 `platform::print` 的抬头）：界面在一个隐藏
+    // iframe 里载入打印版 HTML、调浏览器自己的打印，那里才有"另存为 PDF"。
+    // 所以这一支**不需要路径**，也就不到 `saving::resolve` 那一步。
+    if format == ExportFormat::Pdf {
+        return print_note_html(&database, &title, reference.as_deref());
+    }
+
     // 没给路径（手机上）就落进下载目录；给的是 `content://…` 也当没给
-    let target = crate::platform::saving::resolve(&app, target, &note_file_name(&title))?;
-    database.export_note(&title, reference.as_deref(), &target)?;
+    let target = crate::platform::saving::resolve(
+        &app,
+        target,
+        &format.extensionless_name(&note_file_stem(&title)),
+    )?;
+
+    match format {
+        ExportFormat::Markdown => {
+            database.export_note(&title, reference.as_deref(), &target)?;
+        }
+        ExportFormat::Html => {
+            database.export_note_html(&title, reference.as_deref(), &target)?;
+        }
+        // 上面已经返回了
+        ExportFormat::Pdf => unreachable!("PDF 那一支在上面就走了"),
+    }
     Ok(target.to_string_lossy().to_string())
 }
 
-/// 导出时的默认文件名：标题里的斜杠（子页面）与文件系统不认的字符都换成 `-`。
+/// 为「导出 PDF」准备打印用的 HTML，交给界面去打印。
+///
+/// 单独一条命令而不是把三件事塞进 `export_note` 的返回值：这一支**没有路径**
+/// （路径由浏览器的保存对话框决定），所以它的返回值与"导出了某个文件"不是一回事。
+/// 让界面分两次调用，才不会把一段 HTML 当成"已保存的路径"显示出来。
+#[tauri::command]
+pub fn note_print_html(
+    title: String,
+    reference: Option<String>,
+) -> Result<String, String> {
+    let (_, database) = open_database()?;
+    print_note_html(&database, &title, reference.as_deref())
+}
+
+/// 渲染打印版 HTML（真身，测试与两个入口都走它）。
+///
+/// 用的是 `read_note` 里**已经渲染好**的那份 `note.html`，不自己再渲染一遍 ——
+/// 渲染只有一处（见 `vault::notes::read` 顶上那段），所以"打印出来的"
+/// 与"阅读页看到的"必然一致，而不会出现两条渲染路径悄悄分家。
+fn print_note_html(
+    database: &crate::vault::database::Database,
+    title: &str,
+    reference: Option<&str>,
+) -> Result<String, String> {
+    let crate::vault::notes::Reading::Ready { note } = database.read_note(title, reference)?
+    else {
+        return Err("这一版是加密的：先解锁，再导出".to_string());
+    };
+    Ok(crate::platform::print::wrap_for_print(&note.title, &note.html))
+}
+
+/// 导出时的默认文件名（**不含扩展名**）：标题里的斜杠（子页面）与文件系统不认的
+/// 字符都换成 `-`。扩展名由 [`ExportFormat`] 补。
 ///
 /// 与界面那边 `dom/file-save.ts::noteFileName` 是同一条规矩：桌面走系统对话框时
 /// 名字由界面给，手机上进下载目录时由这里给。
-fn note_file_name(title: &str) -> String {
+fn note_file_stem(title: &str) -> String {
     let safe: String = title
         .chars()
         .map(|ch| match ch {
@@ -75,7 +138,7 @@ fn note_file_name(title: &str) -> String {
         })
         .collect();
     let safe = safe.trim();
-    format!("{}.md", if safe.is_empty() { "笔记" } else { safe })
+    if safe.is_empty() { "笔记".to_string() } else { safe.to_string() }
 }
 
 #[tauri::command]
