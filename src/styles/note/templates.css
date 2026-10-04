@@ -353,6 +353,24 @@
   border-left-color: var(--accent);
 }
 
+/*
+ * 模板页上了锁（`::decrypt`）。
+ *
+ * 与 `template--problem` **同一套外观是刻意的**：两者都是"这一处要人处理一下"，
+ * 不是内容本身有问题 —— 用危险色会把人引到"写错了"那边去，而这里要做的事很简单
+ * （框里输个口令）。
+ *
+ * 里面那个 `.unlock-box` 自己有样式（见 media.css），那是它站在图片位置上那份。
+ * 这里这个是块级的：模板页上占一整行，输入框与按钮摆得下。
+ */
+.note-body .template--decrypt {
+  border-left-color: var(--accent);
+}
+
+.note-body .template--decrypt .unlock-box {
+  display: inline-flex;
+}
+
 .note-body .template__why {
   margin: 0 0 10px;
   color: var(--text);
