@@ -90,7 +90,9 @@ impl InlineRule for MathScanner {
         let tex = &body[..end];
 
         // 贴边有空白就不认：`价格 $5 到 $9` 里的那对 `$` 不能被当成公式
-        if tex.is_empty() || tex.starts_with(char::is_whitespace) || tex.ends_with(char::is_whitespace)
+        if tex.is_empty()
+            || tex.starts_with(char::is_whitespace)
+            || tex.ends_with(char::is_whitespace)
         {
             return None;
         }
@@ -135,7 +137,11 @@ mod tests {
     /// 钱的写法不能被吞掉 —— 这是最容易误伤的一类
     #[test]
     fn prices_stay_prose() {
-        for src in ["这本书 $5 到 $9。\n", "价格是 $ 5 元\n", "只有一个 $ 符号\n"] {
+        for src in [
+            "这本书 $5 到 $9。\n",
+            "价格是 $ 5 元\n",
+            "只有一个 $ 符号\n",
+        ] {
             let html = render(src);
             assert!(!html.contains("math--"), "{src:?} 不该被当成公式：{html}");
         }

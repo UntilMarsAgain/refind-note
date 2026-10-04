@@ -31,7 +31,11 @@ use tauri::Manager as _;
 /// 选定最终路径：给了就用给的，没给（手机上）就进下载目录。
 ///
 /// 返回的是**最终路径**而不是"要不要另存为"——调用方把内容写到它上面就是了。
-pub fn resolve(app: &tauri::AppHandle, chosen: Option<String>, suggested: &str) -> Result<PathBuf, String> {
+pub fn resolve(
+    app: &tauri::AppHandle,
+    chosen: Option<String>,
+    suggested: &str,
+) -> Result<PathBuf, String> {
     // `content://…` 不是路径（Android 的文件选择器给的就是这个）：当没给，
     // 照走下载目录 —— 宁可存到我们能写的地方，也不要在这儿失败
     if let Some(path) = chosen.filter(|path| !path.trim().is_empty() && !path.contains("://")) {
@@ -67,7 +71,9 @@ fn unique(directory: &Path, name: &str) -> PathBuf {
         .file_stem()
         .map(|stem| stem.to_string_lossy().to_string())
         .unwrap_or_else(|| "导出".to_string());
-    let extension = path.extension().map(|ext| ext.to_string_lossy().to_string());
+    let extension = path
+        .extension()
+        .map(|ext| ext.to_string_lossy().to_string());
 
     for index in 2..1000 {
         let numbered = match &extension {
@@ -91,7 +97,8 @@ mod tests {
     /// 重名往后编号；没重名就原样
     #[test]
     fn a_repeated_name_gets_a_number() {
-        let dir = std::env::temp_dir().join(format!("refind-note-save-test-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("refind-note-save-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 

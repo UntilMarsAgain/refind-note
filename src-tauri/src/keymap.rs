@@ -101,7 +101,10 @@ impl Keymap {
     pub fn defaults() -> Self {
         let mut bindings = std::collections::BTreeMap::new();
         for (action, keys) in DEFAULTS {
-            bindings.insert((*action).to_string(), keys.iter().map(|k| (*k).to_string()).collect());
+            bindings.insert(
+                (*action).to_string(),
+                keys.iter().map(|k| (*k).to_string()).collect(),
+            );
         }
         Self { bindings }
     }
@@ -185,7 +188,12 @@ fn sanitize_keys(keys: &[String]) -> Vec<String> {
     }
 
     // 修饰键按固定次序排（存盘后的文件看起来才是一套的）
-    modifiers.sort_by_key(|name| MODIFIERS.iter().position(|m| m == name).unwrap_or(usize::MAX));
+    modifiers.sort_by_key(|name| {
+        MODIFIERS
+            .iter()
+            .position(|m| m == name)
+            .unwrap_or(usize::MAX)
+    });
 
     if let Some(key) = plain {
         modifiers.push(key);
@@ -277,8 +285,14 @@ mod tests {
 
         let map = Keymap {
             bindings: [
-                ("find".to_string(), vec!["Ctrl".to_string(), "F".to_string()]),
-                ("new-tab".to_string(), vec!["Ctrl".to_string(), "T".to_string()]),
+                (
+                    "find".to_string(),
+                    vec!["Ctrl".to_string(), "F".to_string()],
+                ),
+                (
+                    "new-tab".to_string(),
+                    vec!["Ctrl".to_string(), "T".to_string()],
+                ),
             ]
             .into_iter()
             .collect(),
@@ -295,7 +309,10 @@ mod tests {
         // 顶层的键就是动作 id
         let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
         let object = parsed.as_object().expect("顶层该是对象");
-        assert!(object.contains_key("find") && object.contains_key("new-tab"), "{text}");
+        assert!(
+            object.contains_key("find") && object.contains_key("new-tab"),
+            "{text}"
+        );
         assert_eq!(object["find"][0], "Ctrl");
 
         cleanup(&workspace);
@@ -323,10 +340,7 @@ mod tests {
         // 不认识的动作：丢（它是哪来的只能是人手写错的）
         assert!(!map.bindings.contains_key("no-such-action"));
         // 空键位也丢：留着等于"什么都触发不了"，反而不如走出厂的
-        assert!(
-            !map.keys_of("close-tab").is_empty(),
-            "空键位该落回出厂的"
-        );
+        assert!(!map.keys_of("close-tab").is_empty(), "空键位该落回出厂的");
         // 合法的照旧
         assert_eq!(map.keys_of("find"), vec!["Ctrl", "F"]);
     }

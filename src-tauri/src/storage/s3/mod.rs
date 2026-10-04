@@ -59,7 +59,7 @@ use time::OffsetDateTime;
 mod tests;
 
 use listing::{clean_etag, header, parse_list};
-use signing::{Prepared, SigningInput, encode, encode_path, hex, host_of, sign};
+use signing::{encode, encode_path, hex, host_of, sign, Prepared, SigningInput};
 
 /// 一次请求最多等多久（同步跑在启动路径上，不能没完没了地等）
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -319,7 +319,11 @@ impl S3 {
     fn path_of(&self, key: &str) -> String {
         let bucket = self.config.bucket.trim();
         let first_label = host_of(&self.config.endpoint);
-        let first_label = first_label.split('.').next().unwrap_or_default().to_string();
+        let first_label = first_label
+            .split('.')
+            .next()
+            .unwrap_or_default()
+            .to_string();
 
         if !bucket.is_empty() && first_label == bucket {
             format!("/{}", encode_path(key))

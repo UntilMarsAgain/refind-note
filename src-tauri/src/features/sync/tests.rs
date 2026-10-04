@@ -223,13 +223,7 @@ fn a_missing_listing_never_means_the_cloud_deleted_it() {
     assert_eq!(decision, Decision::Upload, "{why}");
 
     // 云端连账都没有（第一次用、换了桶）→ 同样没有证据，同样不删
-    let (decision, _) = decide(
-        false,
-        Some(&here),
-        None,
-        Some(&stamp),
-        Evidence::none(),
-    );
+    let (decision, _) = decide(false, Some(&here), None, Some(&stamp), Evidence::none());
     assert_eq!(decision, Decision::Upload);
 }
 
@@ -268,12 +262,14 @@ fn a_cloud_file_is_restored_unless_the_deletion_left_a_trace() {
 /// 新写的传上去，云端多出来的拿回来
 #[test]
 fn a_first_sync_takes_the_union() {
-    let (decision, _) = decide(false, Some(&local("h1", 100)), None, None,
-        Evidence::none(),
-    );
+    let (decision, _) = decide(false, Some(&local("h1", 100)), None, None, Evidence::none());
     assert_eq!(decision, Decision::Upload);
 
-    let (decision, _) = decide(false, None, Some(&remote("aaa", 100)), None,
+    let (decision, _) = decide(
+        false,
+        None,
+        Some(&remote("aaa", 100)),
+        None,
         Evidence::none(),
     );
     assert_eq!(decision, Decision::Download);

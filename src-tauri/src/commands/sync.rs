@@ -114,7 +114,6 @@ pub fn sync_export_key(app: AppHandle, target: Option<String>) -> Result<String,
 /// 密钥导出时的默认文件名
 const KEY_FILE_NAME: &str = "refind-note-sync-key.txt";
 
-
 /// 把云端密钥**复制到剪贴板** —— 与 [`sync_export_key`] 同一条路的两个出口。
 ///
 /// 一样不经手界面：屏幕上看不到它，但你可以直接粘到另一台机器上。

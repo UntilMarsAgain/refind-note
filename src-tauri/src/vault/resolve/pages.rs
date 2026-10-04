@@ -12,7 +12,7 @@
 //!
 //! 正文读不读得动不在这里管：那是 [`crate::vault::notes`] 的事（见 [`Database::read_note`]）。
 
-use super::{MAX_HOPS, Outcome, ResolvedAddress, Via};
+use super::{Outcome, ResolvedAddress, Via, MAX_HOPS};
 use crate::vault::address::{self, Address, Mode, ParsedAddress};
 use crate::vault::command;
 use crate::vault::database::Database;

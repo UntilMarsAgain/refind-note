@@ -66,7 +66,6 @@ mod read;
 #[cfg(test)]
 mod tests;
 
-
 const DEFAULT_MIME: &str = "text/markdown";
 
 /// 笔记正文的自述：内容都是 markdown

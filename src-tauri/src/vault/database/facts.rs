@@ -31,7 +31,9 @@ pub(super) fn count_files(directory: &std::path::Path) -> (usize, u64) {
     let mut count = 0usize;
     let mut bytes = 0u64;
     for entry in entries.flatten() {
-        let Ok(kind) = entry.file_type() else { continue };
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
         if kind.is_dir() {
             let (inner, inner_bytes) = count_files(&entry.path());
             count += inner;

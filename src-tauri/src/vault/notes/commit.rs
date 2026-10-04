@@ -3,9 +3,7 @@
 //! 提交要决定**这一版的封装策略**，而策略是笔记的属性而不是每次调用的参数 —— 不给策略
 //! 时它从这篇当前最新的那一版继承，不会因为某次忘了传就偷偷降级。要改就显式给一次。
 
-
-use super::{next_id, Event, Note, NoteState,
-            DEFAULT_MIME};
+use super::{next_id, Event, Note, NoteState, DEFAULT_MIME};
 use crate::storage::codec::{Meta, Policy, Secrets};
 use crate::storage::session;
 use crate::storage::workspace::append_line;

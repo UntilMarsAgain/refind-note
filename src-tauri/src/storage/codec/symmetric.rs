@@ -81,7 +81,12 @@ pub(super) fn symmetric_open(
 }
 
 /// 用这一档算法封上。两档都是 AEAD，nonce 都是 12 字节。
-pub(super) fn seal_with(cipher_kind: Cipher, key: &[u8], nonce: &[u8], content: &[u8]) -> Result<Vec<u8>> {
+pub(super) fn seal_with(
+    cipher_kind: Cipher,
+    key: &[u8],
+    nonce: &[u8],
+    content: &[u8],
+) -> Result<Vec<u8>> {
     // SM4 的密钥是 128 位：从派生出来的 32 字节里取前 16 字节（不是"截短了强度"，
     // 这一档算法本来就用这么长的钥匙）
     let key = &key[..cipher_kind.key_bytes()];
@@ -101,7 +106,12 @@ pub(super) fn seal_with(cipher_kind: Cipher, key: &[u8], nonce: &[u8], content: 
 }
 
 /// 照头里那一档算法解开
-pub(super) fn open_with(cipher_kind: Cipher, key: &[u8], nonce: &[u8], payload: &[u8]) -> Result<Vec<u8>> {
+pub(super) fn open_with(
+    cipher_kind: Cipher,
+    key: &[u8],
+    nonce: &[u8],
+    payload: &[u8],
+) -> Result<Vec<u8>> {
     let key = &key[..cipher_kind.key_bytes()];
     let nonce = aes_gcm::Nonce::<aes_gcm::aead::consts::U12>::try_from(nonce)
         .map_err(|_| CodecError::Corrupt("nonce 长度不对".to_string()))?;

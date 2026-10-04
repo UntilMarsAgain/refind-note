@@ -219,7 +219,10 @@ mod tests {
 
         // 菜单那几页一个都不能少
         for menu in PAGES {
-            assert!(every.iter().any(|slug| slug == menu), "菜单里的 {menu} 少了");
+            assert!(
+                every.iter().any(|slug| slug == menu),
+                "菜单里的 {menu} 少了"
+            );
         }
 
         // 按文件名排（与 `all_sources` 一致，所以这一页的列表顺序是稳定的）

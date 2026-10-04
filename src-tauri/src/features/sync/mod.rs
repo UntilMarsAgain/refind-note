@@ -539,10 +539,7 @@ fn relative_of(s3: &S3, key: &str) -> Option<String> {
     let prefix = prefix_of(s3);
     let relative = key.strip_prefix(&prefix)?;
     // 锁与账本是云端自己的东西，不是仓库里的文件 —— 别把它们下载到工作目录里
-    if relative.is_empty()
-        || relative == LOCK_KEY
-        || relative == LATEST_KEY
-        || !is_synced(relative)
+    if relative.is_empty() || relative == LOCK_KEY || relative == LATEST_KEY || !is_synced(relative)
     {
         return None;
     }

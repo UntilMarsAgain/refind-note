@@ -93,14 +93,17 @@ fn problem_node(name: &str, why: &str) -> Node {
 
 #[cfg(test)]
 mod tests {
-    use crate::markdown::{TemplatePage, TemplatePages, render_with_pages};
+    use crate::markdown::{render_with_pages, TemplatePage, TemplatePages};
     use std::collections::HashMap;
     use std::sync::Arc;
 
     /// 模板页表里只有一页，且是**读不出来**的那种
     fn unreadable(name: &str) -> TemplatePages {
         let mut pages = HashMap::new();
-        pages.insert(name.to_string(), TemplatePage::Unreadable("需要口令".into()));
+        pages.insert(
+            name.to_string(),
+            TemplatePage::Unreadable("需要口令".into()),
+        );
         Arc::new(pages)
     }
 

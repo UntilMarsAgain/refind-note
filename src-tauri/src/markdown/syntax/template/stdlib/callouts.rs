@@ -93,9 +93,7 @@ fn render_one(template: &Template, node: &Node, fmt: &mut dyn Renderer, kind: &'
         class.push_str(" callout--custom");
     }
 
-    let title = template
-        .param("title")
-        .unwrap_or(kind.default_title);
+    let title = template.param("title").unwrap_or(kind.default_title);
 
     let mut attrs: Vec<(&str, String)> = vec![("class", class)];
     if !style.is_empty() {
