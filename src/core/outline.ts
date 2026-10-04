@@ -93,6 +93,33 @@ export function outlineOf(headings: readonly Heading[]): OutlineEntry[] {
     }));
 }
 
+/**
+ * 滚到哪儿了：眼下该亮着的是哪一条。
+ *
+ * @param tops 各条目在滚动容器里的上边距（像素），**与 `entries` 同序**
+ * @param threshold 视口上沿往下这么多像素算"读过了"（要给页头留出位置，
+ *                  否则刚滚过一个标题它就灭了）
+ * @returns 该亮着的条目标识；一个都没读过去时是空串
+ *
+ * 取的是**最后一个**越线的，而不是第一个没越的：后者在一屏里有两个标题时
+ * 会跳来跳去，而"我正在读的那一节"就是刚越过的最后那个。
+ *
+ * 纯计算，所以能单独测 —— 而"滚到中间那一节时亮的是哪一条"这种事，
+ * 靠在真文档上滚来滚去验是验不清的。
+ */
+export function activeOf(tops: readonly number[], threshold: number): number {
+    let active = -1;
+    for (let index = 0; index < tops.length; index += 1) {
+        if ((tops[index] ?? 0) <= threshold) {
+            active = index;
+        } else {
+            // 上下边距是排好序的（正文次序），后面只会更靠下
+            break;
+        }
+    }
+    return active;
+}
+
 /** 这一篇值不值得摆一个目录 */
 export function shouldShowOutline(entries: readonly OutlineEntry[]): boolean {
     return entries.length >= MIN_HEADINGS;

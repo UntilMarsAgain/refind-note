@@ -21,6 +21,7 @@ import { describe, it } from "node:test";
 
 import {
     MIN_HEADINGS,
+    activeOf,
     outlineOf,
     shouldShowOutline,
     type Heading,
@@ -140,5 +141,41 @@ describe("原样带下去的东西", () => {
         const entries = outlineOf([h("标题-一", 2, "甲")]);
         assert.equal(entries[0]?.id, "标题-一");
         assert.equal(entries[0]?.level, 2);
+    });
+});
+describe("滚到哪儿了，该亮着哪一条", () => {
+    it("一个都没读过去时不亮（视口上沿还没到第一个标题）", () => {
+        assert.equal(activeOf([200, 400, 600], 96), -1);
+    });
+
+    it("读过了第一个就亮第一个", () => {
+        assert.equal(activeOf([0, 400, 600], 96), 0);
+    });
+
+    it("一屏里有两个标题时取**刚越过的最后那个**，不跳", () => {
+        // 0 与 50 都已经越过视口上沿：亮第二个
+        assert.equal(activeOf([0, 50, 600], 96), 1);
+    });
+
+    it("停在标题上方一点点时还是上一条（刚够到不算读过）", () => {
+        assert.equal(activeOf([0, 97, 600], 96), 0);
+    });
+
+    it("滚到底部时亮最后一条（上边距已经全是负的 —— 都读过去了）", () => {
+        // 量的是相对滚动容器上沿的位置：往下滚，之前那些就成了负数
+        assert.equal(activeOf([0, -400, -900], 96), 2);
+    });
+
+    it("没有条目时是 -1（不是 0 —— 那会把第一条点亮）", () => {
+        assert.equal(activeOf([], 96), -1);
+    });
+
+    it("量不出来的（`Infinity`）不算读过，它在正文里已经不在了", () => {
+        assert.equal(activeOf([0, Number.POSITIVE_INFINITY], 96), 0);
+    });
+
+    it("空数组与阈值 0 也不出错", () => {
+        assert.equal(activeOf([], 0), -1);
+        assert.equal(activeOf([0], 0), 0);
     });
 });
